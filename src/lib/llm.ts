@@ -7,7 +7,8 @@ export class LLMError extends Error {
 
 /**
  * v0.0.1 薄 LLM 客户端 —— 只讲 OpenAI-compatible /chat/completions。
- * 刻意不做 Provider Registry / Router / Fallback（见 TASK §18）。
+ * 刻意不做 Provider Registry / Router / Fallback（TASK v0.1.0 §50：本版本不大改 LLM 层）。
+ * v0.1.0 新增：可选 system 消息（§51）。
  */
 export class LLMClient {
   constructor(
@@ -16,8 +17,18 @@ export class LLMClient {
     private readonly model: string,
   ) {}
 
-  async generate(prompt: string, temperature = 0.8): Promise<string> {
+  async generate(
+    prompt: string,
+    temperature = 0.8,
+    system?: string,
+  ): Promise<string> {
     const url = `${this.baseUrl.replace(/\/+$/, "")}/chat/completions`;
+    const messages: Array<{ role: string; content: string }> = [];
+    if (system && system.trim()) {
+      messages.push({ role: "system", content: system.trim() });
+    }
+    messages.push({ role: "user", content: prompt });
+
     let res: Response;
     try {
       res = await fetch(url, {
@@ -26,12 +37,8 @@ export class LLMClient {
           "Content-Type": "application/json",
           Authorization: `Bearer ${this.apiKey}`,
         },
-        body: JSON.stringify({
-          model: this.model,
-          messages: [{ role: "user", content: prompt }],
-          temperature,
-        }),
-        signal: AbortSignal.timeout(120_000),
+        body: JSON.stringify({ model: this.model, messages, temperature }),
+        signal: AbortSignal.timeout(180_000),
       });
     } catch (e) {
       const reason = e instanceof Error && e.name === "TimeoutError" ? "请求超时" : String(e);
@@ -56,7 +63,7 @@ export interface LLMOverrides {
   baseUrl?: string;
 }
 
-/** 从服务端 .env 构建客户端；前端只允许传非敏感的 model/baseUrl 覆盖（§24/§26）。 */
+/** 从服务端 .env 构建客户端；前端只允许传非敏感的 model/baseUrl 覆盖。 */
 export function clientFromEnv(overrides: LLMOverrides = {}): LLMClient {
   const baseUrl = overrides.baseUrl?.trim() || process.env.LLM_BASE_URL || "https://api.openai.com/v1";
   const apiKey = process.env.LLM_API_KEY || "";

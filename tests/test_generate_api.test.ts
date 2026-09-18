@@ -27,6 +27,7 @@ describe("generateStory", () => {
     const dir = withTmpDir();
     const r = await generateStory(
       { title: "消失的目击者", prompt: "写一篇都市悬疑短篇小说。" },
+      {},
       fakeLLM as never,
     );
     expect(r.title).toBe("消失的目击者");
