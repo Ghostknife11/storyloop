@@ -1,0 +1,29 @@
+# dependencies
+/node_modules
+
+# next.js
+/.next/
+/out/
+
+# env & secrets
+.env
+.env.*
+!.env.example
+
+# generated stories
+/outputs/
+
+# build
+/dist/
+/build/
+
+# python (reserved for future backend split)
+__pycache__/
+*.pyc
+.venv/
+
+# misc
+.DS_Store
+npm-debug.log*
+*.tsbuildinfo
+next-env.d.ts
