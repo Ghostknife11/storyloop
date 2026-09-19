@@ -8,7 +8,10 @@ export class PromptTemplateError extends Error {
   }
 }
 
-export const STORY_TEMPLATE_PATH = join(process.cwd(), "prompts", "story.txt");
+/** 模块加载时锁定项目根，避免测试 chdir 后模板路径漂移。 */
+const PROJECT_ROOT = process.cwd();
+
+export const STORY_TEMPLATE_PATH = join(PROJECT_ROOT, "prompts", "story.txt");
 
 /** §24 模板缺失/读取失败必须抛清晰错误，禁止静默回退到隐藏 Prompt。 */
 export async function loadPromptTemplate(path = STORY_TEMPLATE_PATH): Promise<string> {
