@@ -1,4 +1,4 @@
-import type { StoryRequest } from "@/types/story-request";
+import type { StoryConfig } from "@/types/story-config";
 
 export interface GenerateApiResult {
   title: string;
@@ -6,19 +6,20 @@ export interface GenerateApiResult {
   model: string;
   created_at: string;
   saved_to: string;
+  config_to: string;
   metadata_to: string;
   request: { genre: string; target_words: number };
 }
 
-/** §34 生成服务：generateStory(request: StoryRequest)。运行参数单独传递。 */
+/** §34 生成服务：generateStory(config: StoryConfig)。运行参数单独传递（§49 不入 Config）。 */
 export async function generateStory(
-  request: StoryRequest,
+  config: StoryConfig,
   runtime: { model?: string; baseUrl?: string; temperature?: number },
 ): Promise<GenerateApiResult> {
   const res = await fetch("/api/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...request, ...runtime }),
+    body: JSON.stringify({ ...config, ...runtime }),
   });
   const data = await res.json();
   if (!res.ok) {
@@ -28,11 +29,11 @@ export async function generateStory(
 }
 
 /** §29-30 Prompt Preview（开发功能）。 */
-export async function previewPrompt(request: StoryRequest): Promise<string> {
+export async function previewPrompt(config: StoryConfig): Promise<string> {
   const res = await fetch("/api/prompt/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request),
+    body: JSON.stringify(config),
   });
   const data = await res.json();
   if (!res.ok) {
