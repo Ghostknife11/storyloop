@@ -57,15 +57,16 @@ export function validateBeatPlan(raw: unknown): BeatPlan {
     return out;
   });
 
-  // id 唯一且从 1 连续
-  const ids = beats.map((b) => b.id).sort((a, b) => a - b);
-  for (let i = 0; i < ids.length; i++) {
-    if (ids[i] !== i + 1) {
-      throw new BeatPlanValidationError(`Beat id 必须从 1 开始连续（期望 ${i + 1}，实际 ${ids[i]}）`);
-    }
-  }
+  // id 唯一且从 1 连续：先查重复，让两条错误信息都能触达
+  const ids = beats.map((b) => b.id);
   if (new Set(ids).size !== ids.length) {
     throw new BeatPlanValidationError("Beat id 存在重复");
+  }
+  const sorted = [...ids].sort((a, b) => a - b);
+  for (let i = 0; i < sorted.length; i++) {
+    if (sorted[i] !== i + 1) {
+      throw new BeatPlanValidationError(`Beat id 必须从 1 开始连续（期望 ${i + 1}，实际 ${sorted[i]}）`);
+    }
   }
 
   const plan: BeatPlan = {
