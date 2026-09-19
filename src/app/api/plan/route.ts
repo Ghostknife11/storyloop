@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { previewPrompt } from "@/lib/generate-service";
+import { planStory } from "@/lib/generate-service";
 
-/**
- * §30 Prompt Preview（可选开发功能）：
- * config（+可选 beat_plan）→ 渲染后的最终 Prompt。
- * 只显示、不修改、不保存、不做 Prompt 历史管理（§29）。
- */
+/** §28 POST /api/plan：StoryConfig → BeatPlanner → BeatPlan。 */
 export async function POST(request: NextRequest) {
   let body: unknown;
   try {
@@ -13,6 +9,6 @@ export async function POST(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: "请求体不是合法 JSON" }, { status: 400 });
   }
-  const { status, json } = await previewPrompt(body);
+  const { status, json } = await planStory(body);
   return NextResponse.json(json, { status });
 }
