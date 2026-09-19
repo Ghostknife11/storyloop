@@ -4,12 +4,13 @@ import {
   parseStoryConfig,
   serializeStoryConfig,
 } from "@/lib/config-io";
-import { generateStory, previewPrompt } from "@/lib/api";
+import { generateStory, planStory, previewPrompt } from "@/lib/api";
 import {
   STORY_CONFIG_VERSION,
   validateStoryConfig,
   type StoryConfig,
 } from "@/types/story-config";
+import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
 
 /** v0.2.0 UI 层 StoryConfig 存取覆盖：Save/Load 处理器与生成请求走的是同一批函数。 */
 
@@ -26,6 +27,15 @@ const sample: StoryConfig = validateStoryConfig({
   target_words: 5000,
   style: "克制冷峻",
   extra_requirements: "不要超自然元素。",
+});
+
+/** v0.3.0 起生成请求必须携带 BeatPlan：这里用一份合法骨架做契约样本。 */
+const plan: BeatPlan = validateBeatPlan({
+  beat_plan_version: "1",
+  beats: [
+    { id: 1, purpose: "建立危机", event: "证人失踪。", characters: ["林砚"] },
+    { id: 2, purpose: "高潮", event: "对峙揭相。", characters: ["林砚"] },
+  ],
 });
 
 afterEach(() => {
@@ -84,23 +94,45 @@ describe("UI → API 契约：存取后的 StoryConfig 原样进入生成请求"
         created_at: "2026-09-19T14:54:00.000Z",
         saved_to: "outputs/x.md",
         config_to: "outputs/x.json",
+        beats_to: "outputs/x.beats.json",
         metadata_to: "outputs/x.meta.json",
-        request: { genre: loaded.genre, target_words: loaded.target_words },
+        request: { genre: loaded.genre, target_words: loaded.target_words, beat_count: 2 },
       }),
     }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const r = await generateStory(loaded, { model: "m", temperature: 0.5 });
+    const r = await generateStory(loaded, plan, { model: "m", temperature: 0.5 });
     expect(r.title).toBe("消失的目击者");
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("/api/generate");
     const body = JSON.parse(String(init.body)) as Record<string, unknown>;
-    expect(body.title).toBe(loaded.title);
-    expect(body.premise).toBe(loaded.premise);
-    expect(body.target_words).toBe(loaded.target_words);
+    const sent = body.config as Record<string, unknown>;
+    expect(sent.title).toBe(loaded.title);
+    expect(sent.premise).toBe(loaded.premise);
+    expect(sent.target_words).toBe(loaded.target_words);
+    expect(body.beat_plan).toEqual(plan);
     expect(body.model).toBe("m");
     expect(body.temperature).toBe(0.5);
-    expect(body).not.toHaveProperty("config_version", undefined);
+  });
+
+  it("planStory 把 StoryConfig 原样 POST /api/plan 并解析出 BeatPlan", async () => {
+    const loaded = parseStoryConfig(serializeStoryConfig(sample));
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({
+      ok: true,
+      status: 200,
+      json: async () => plan,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const r = await planStory(loaded, { temperature: 0.7 });
+    expect(r).toEqual(plan);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/plan");
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect(body.title).toBe(loaded.title);
+    expect(body.premise).toBe(loaded.premise);
+    expect(body.temperature).toBe(0.7);
+    expect(body).not.toHaveProperty("beat_plan");
   });
 
   it("previewPrompt 发送 Config，失败时抛出可读错误", async () => {
