@@ -4,13 +4,17 @@ import { useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
-import { BookOpen, Copy, Download, Eye, Loader2, Sparkles } from "lucide-react";
+import {
+  BookOpen, Copy, Download, Eye, FilePlus2, FolderOpen, Loader2,
+  Save, Sparkles,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { generateStory, previewPrompt, type GenerateApiResult } from "@/lib/api";
+import { configFilename, parseStoryConfig, serializeStoryConfig } from "@/lib/config-io";
 import { useSettings } from "@/lib/settings-store";
 import {
   GENRE_PRESETS, STYLE_PRESETS, STORY_CONFIG_VERSION, TARGET_WORDS_DEFAULT,
@@ -106,14 +110,71 @@ function validateForm(f: ConfigForm): string | null {
 export default function GeneratePage() {
   const [settings] = useSettings();
   const [form, setForm] = useState<ConfigForm>(EMPTY_FORM);
+  const [baseline, setBaseline] = useState<string>(serializeStoryConfig(formToConfig(EMPTY_FORM)));
   const [phase, setPhase] = useState<Phase>("idle");
   const [result, setResult] = useState<GenerateApiResult | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
   const [preview, setPreview] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
+  const [loadOpen, setLoadOpen] = useState(false);
+  const [loadText, setLoadText] = useState("");
   const busyRef = useRef(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const set = (p: Partial<ConfigForm>) => setForm(prev => ({ ...prev, ...p }));
+  const isDirty = serializeStoryConfig(formToConfig(form)) !== baseline;
+  const dirtyLabel = isDirty ? "Modified" : "Saved";
+
+  const applyConfig = (config: StoryConfig) => {
+    setForm(configToForm(config));
+    setBaseline(serializeStoryConfig(config));
+    setResult(null);
+    setPreview(null);
+    setPhase("idle");
+  };
+
+  // §29 Load：先完整解析 + 验证，全部成功才替换表单（§46 原子性）
+  const loadFromText = (text: string) => {
+    try {
+      const config = parseStoryConfig(text);
+      applyConfig(config);
+      setLoadOpen(false);
+      setLoadText("");
+      toast.success("Config 已加载");
+    } catch (e) {
+      // §27：失败时当前表单保持不变，给出具体原因
+      toast.error(`Config load failed：${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  const handleLoadFile = (file: File) => {
+    file.text().then(loadFromText).catch(() => toast.error("Config load failed：文件读取失败"));
+  };
+
+  // §28 Save：下载 sanitized_title.story.json
+  const handleSave = () => {
+    const err = validateForm(form);
+    if (err) { toast.error(err); return; }
+    const config = formToConfig(form);
+    const blob = new Blob([serializeStoryConfig(config)], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = configFilename(config.title);
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    setBaseline(serializeStoryConfig(config));
+    toast.success(`Config 已保存：${configFilename(config.title)}`);
+  };
+
+  // §30 New：恢复默认值（dirty 时二次确认 §44）
+  const handleNew = () => {
+    if (isDirty && !window.confirm("You have unsaved changes. 确定新建配置？")) return;
+    applyConfig(formToConfig(EMPTY_FORM));
+    setForm(EMPTY_FORM);
+    setBaseline(serializeStoryConfig(formToConfig(EMPTY_FORM)));
+    toast.success("已新建配置");
+  };
 
   async function handleGenerate() {
     if (busyRef.current) return;
@@ -173,6 +234,16 @@ export default function GeneratePage() {
     setTimeout(() => URL.revokeObjectURL(url), 1500);
   };
 
+  const handleDownloadConfig = () => {
+    const blob = new Blob([serializeStoryConfig(formToConfig(form))], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = configFilename(formToConfig(form).title);
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+  };
+
   const fieldCls = "h-9";
   const generating = phase === "generating";
 
@@ -181,9 +252,27 @@ export default function GeneratePage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 flex-1 min-h-0">
         {/* 配置区 */}
         <section className="flex flex-col rounded-3xl border border-white/10 bg-card/60 glass shadow-soft p-4 sm:p-5 gap-4 min-h-[320px]">
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-violet-500 shadow-glow" />
-            <h2 className="text-xs sm:text-[13px] font-semibold tracking-tight">Story Config</h2>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-violet-500 shadow-glow" />
+              <h2 className="text-xs sm:text-[13px] font-semibold tracking-tight">Story Config</h2>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${isDirty ? "text-amber-500 border-amber-500/30 bg-amber-500/10" : "text-emerald-500 border-emerald-500/30 bg-emerald-500/10"}`}>
+                {dirtyLabel}
+              </span>
+              <Button variant="outline" size="sm" className="h-8 rounded-full text-xs" onClick={handleNew} title="New Config">
+                <FilePlus2 className="h-3.5 w-3.5" /> New
+              </Button>
+              <Button variant="outline" size="sm" className="h-8 rounded-full text-xs" onClick={() => fileRef.current?.click()} title="Load Config（.json）">
+                <FolderOpen className="h-3.5 w-3.5" /> Load
+              </Button>
+              <Button variant="outline" size="sm" className="h-8 rounded-full text-xs" onClick={handleSave} title="Save Config">
+                <Save className="h-3.5 w-3.5" /> Save
+              </Button>
+              <input ref={fileRef} type="file" accept=".json,application/json" className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleLoadFile(f); e.target.value = ""; }} />
+            </div>
           </div>
 
           {/* §41 Basic */}
@@ -318,6 +407,9 @@ export default function GeneratePage() {
                 </Button>
                 <Button variant="outline" size="sm" className="h-8 rounded-full text-xs" onClick={handleDownload}>
                   <Download className="h-3.5 w-3.5" /> Markdown
+                </Button>
+                <Button variant="outline" size="sm" className="h-8 rounded-full text-xs" onClick={handleDownloadConfig}>
+                  <Download className="h-3.5 w-3.5" /> Config
                 </Button>
               </div>
             )}
