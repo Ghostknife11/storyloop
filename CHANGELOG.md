@@ -6,6 +6,33 @@ All notable changes to Storyloop.
 
 ---
 
+## [0.2.0] —— 2026-09-19
+
+### Added
+
+- Persistent StoryConfig model
+- Story setting configuration
+- Protagonist configuration
+- Conflict and stakes fields
+- Optional ending direction
+- JSON StoryConfig save/load
+- StoryConfig validation
+- Example StoryConfig
+- Config snapshot saved with generated stories
+- CLI generation from StoryConfig when CLI is available
+
+### Changed
+
+- PromptBuilder now consumes StoryConfig
+- Generate UI now edits reusable StoryConfig data
+- Generation API now accepts StoryConfig-compatible input
+
+### Removed
+
+- Deprecated StoryRequest model superseded by StoryConfig
+
+---
+
 ## [0.1.0] —— 2026-09-19
 
 ### Added
