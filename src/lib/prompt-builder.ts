@@ -1,17 +1,16 @@
 import { readFileSync } from "node:fs";
-import type { StoryRequest } from "@/lib/story-request";
+import type { CharacterConfig, StoryConfig } from "@/types/story-config";
 import { PromptTemplateError } from "@/lib/prompt-template";
 
 /**
- * v0.1.0 PromptBuilder（TASK §21/§22）。
+ * v0.2.0 PromptBuilder（TASK §37）：build(config: StoryConfig)。
  * 只做：load template → normalize fields → render → return final prompt。
- * 不负责：调用 LLM、保存故事、自动优化 Prompt、题材策略（§22）。
+ * v0.1.0 的 build(StoryRequest) 已随 StoryRequest 一并退役。
  */
 export class PromptBuilder {
   private template: string;
 
   constructor(templatePath: string) {
-    // §24 模板缺失/读取失败 → 清晰报错，禁止静默回退
     try {
       this.template = readFileSync(templatePath, "utf8");
     } catch (e) {
@@ -24,26 +23,40 @@ export class PromptBuilder {
     }
   }
 
-  /** §20 空可选字段归一化：输出「未指定」，绝不出现 None/undefined/null。 */
-  private normalize(value: string | undefined): string {
+  /** §39 空字段归一化：输出「未指定」，绝不出现 None/undefined/null。 */
+  private normalize(value: string | undefined, emptyText = "未指定"): string {
     const v = (value ?? "").trim();
-    return v || "未指定";
+    return v || emptyText;
   }
 
-  build(request: StoryRequest): string {
+  /** §40 protagonist 渲染辅助（不构成 Character Engine）。 */
+  private renderProtagonist(p: CharacterConfig | undefined): Record<string, string> {
+    return {
+      protagonist_name: this.normalize(p?.name),
+      protagonist_identity: this.normalize(p?.identity),
+      protagonist_goal: this.normalize(p?.goal),
+      protagonist_motivation: this.normalize(p?.motivation),
+    };
+  }
+
+  build(config: StoryConfig): string {
     const replacements: Record<string, string> = {
-      title: request.title,
-      genre: request.genre,
-      premise: request.premise,
-      target_words: String(request.target_words),
-      style: this.normalize(request.style),
-      extra_requirements: this.normalize(request.extra_requirements),
+      title: config.title,
+      genre: config.genre,
+      premise: config.premise,
+      setting: this.normalize(config.setting),
+      ...this.renderProtagonist(config.protagonist),
+      conflict: this.normalize(config.conflict),
+      stakes: this.normalize(config.stakes),
+      ending: this.normalize(config.ending, "未指定，由作者自行决定"),
+      target_words: String(config.target_words),
+      style: this.normalize(config.style),
+      extra_requirements: this.normalize(config.extra_requirements),
     };
     let out = this.template;
     for (const [key, value] of Object.entries(replacements)) {
       out = out.replaceAll(`{{${key}}}`, value);
     }
-    // 未被替换的占位符说明模板包含不支持的变量名 —— 视为模板错误而非静默输出
     if (/\{\{[a-z_]+\}\}/.test(out)) {
       const leftover = out.match(/\{\{[a-z_]+\}\}/g)?.join(", ") ?? "";
       throw new PromptTemplateError(`模板包含未支持的占位符：${leftover}`);

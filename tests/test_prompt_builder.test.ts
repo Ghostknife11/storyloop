@@ -1,74 +1,81 @@
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { PromptBuilder } from "@/lib/prompt-builder";
 import { PromptTemplateError } from "@/lib/prompt-template";
-import type { StoryRequest } from "@/lib/story-request";
+import { validateStoryConfig } from "@/types/story-config";
 
-const request: StoryRequest = {
+const baseConfig = validateStoryConfig({
+  config_version: "1",
   title: "消失的目击者",
   genre: "悬疑",
-  premise: "唯一证人在出庭前一天突然失踪。",
+  premise: "唯一证人在出庭前一天突然消失。",
+  setting: "现代一线城市，庭审前夜。",
+  protagonist: { name: "陈岚", identity: "刑警", goal: "找到证人", motivation: "履行保护责任" },
+  conflict: "证人失踪与嫌疑人有关。",
+  stakes: "证人缺席将导致案件失败。",
+  ending: "证人主动设计了失踪。",
   target_words: 5000,
   style: "冷峻、节奏紧凑",
   extra_requirements: "不要超自然元素。",
-};
-
-let tmp: string | null = null;
-afterEach(() => {
-  if (tmp) { rmSync(tmp, { recursive: true, force: true }); tmp = null; }
 });
 
-function writeTemplate(content: string): string {
-  tmp = mkdtempSync(join(tmpdir(), "storyloop-tpl-"));
-  const path = join(tmp, "story.txt");
-  writeFileSync(path, content, "utf8");
-  return path;
-}
+const builder = new PromptBuilder(join(process.cwd(), "prompts", "story.txt"));
 
-describe("PromptBuilder.build", () => {
-  it("title appears", () => {
-    const p = new PromptBuilder(writeTemplate("标题：{{title}}")).build(request);
-    expect(p).toContain("消失的目击者");
+describe("PromptBuilder.build（StoryConfig 新字段 §79）", () => {
+  it("setting appears", () => {
+    expect(builder.build(baseConfig)).toContain("现代一线城市，庭审前夜。");
   });
 
-  it("genre appears", () => {
-    const p = new PromptBuilder(writeTemplate("题材：{{genre}}")).build(request);
-    expect(p).toContain("悬疑");
+  it("protagonist appears（name/identity/goal/motivation）", () => {
+    const p = builder.build(baseConfig);
+    expect(p).toContain("陈岚");
+    expect(p).toContain("刑警");
+    expect(p).toContain("找到证人");
+    expect(p).toContain("履行保护责任");
   });
 
-  it("premise appears", () => {
-    const p = new PromptBuilder(writeTemplate("设定：{{premise}}")).build(request);
-    expect(p).toContain("唯一证人在出庭前一天突然失踪。");
+  it("conflict / stakes / ending appear", () => {
+    const p = builder.build(baseConfig);
+    expect(p).toContain("证人失踪与嫌疑人有关。");
+    expect(p).toContain("证人缺席将导致案件失败。");
+    expect(p).toContain("证人主动设计了失踪。");
   });
 
-  it("target_words appears", () => {
-    const p = new PromptBuilder(writeTemplate("长度：约 {{target_words}} 字")).build(request);
-    expect(p).toContain("约 5000 字");
-  });
-
-  it("style appears", () => {
-    const p = new PromptBuilder(writeTemplate("风格：{{style}}")).build(request);
-    expect(p).toContain("冷峻、节奏紧凑");
-  });
-
-  it("extra_requirements appears", () => {
-    const p = new PromptBuilder(writeTemplate("附加：{{extra_requirements}}")).build(request);
-    expect(p).toContain("不要超自然元素。");
-  });
-
-  it("§87 空可选字段不产生 None/undefined/null", () => {
-    const p = new PromptBuilder(writeTemplate("风格：{{style}}\n附加：{{extra_requirements}}")).build({
-      ...request,
-      style: undefined,
-      extra_requirements: "",
-    });
-    expect(p).toContain("未指定");
+  it("§88 空 ending / style / extra_requirements 渲染为归一化文案，不出现 None/null/undefined", () => {
+    const p = builder.build(validateStoryConfig({ ...baseConfig, ending: undefined, style: undefined, extra_requirements: undefined }));
+    expect(p).toContain("未指定，由作者自行决定");
     expect(p).not.toMatch(/None|undefined|null/);
   });
 
-  it("模板包含未支持的占位符 → 明确报错", () => {
-    expect(() => new PromptBuilder(writeTemplate("{{unknown_var}}")).build(request)).toThrow(PromptTemplateError);
+  it("§88 空 protagonist 字段同样归一化", () => {
+    const p = builder.build(validateStoryConfig({ ...baseConfig, protagonist: { name: "陈岚" } }));
+    expect(p).toContain("姓名：陈岚");
+    expect(p).toContain("身份：未指定");
+  });
+
+  it("v0.1.0 请求（无新字段）仍可生成", () => {
+    const legacy = validateStoryConfig({
+      config_version: "1",
+      title: "旧版配置",
+      genre: "悬疑",
+      premise: "旧版 premise。",
+      target_words: 3000,
+    });
+    const p = builder.build(legacy);
+    expect(p).toContain("旧版配置");
+    expect(p).toContain("未指定");
+  });
+});
+
+describe("PromptBuilder 模板错误", () => {
+  it("missing template fails clearly（Case F）", () => {
+    const tmp = mkdtempSync(join(tmpdir(), "storyloop-tpl-"));
+    try {
+      expect(() => new PromptBuilder(join(tmp, "missing.txt"))).toThrow(PromptTemplateError);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

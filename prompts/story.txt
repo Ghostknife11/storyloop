@@ -1,6 +1,6 @@
 你是一名专业短篇小说作者。
 
-请根据以下要求创作一篇完整短篇小说。
+请根据以下 StoryConfig 创作一篇完整短篇小说。
 
 【标题】
 {{title}}
@@ -10,6 +10,24 @@
 
 【核心设定】
 {{premise}}
+
+【故事背景】
+{{setting}}
+
+【主角】
+姓名：{{protagonist_name}}
+身份：{{protagonist_identity}}
+目标：{{protagonist_goal}}
+动机：{{protagonist_motivation}}
+
+【核心冲突】
+{{conflict}}
+
+【失败代价】
+{{stakes}}
+
+【期望结局】
+{{ending}}
 
 【目标长度】
 约 {{target_words}} 字
