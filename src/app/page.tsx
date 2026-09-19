@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
 import {
   BookOpen, Copy, Download, Eye, FilePlus2, FolderOpen, Loader2,
-  Save, Sparkles,
+  Plus, Save, Sparkles, Trash2, ArrowUp, ArrowDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +20,7 @@ import {
   GENRE_PRESETS, STYLE_PRESETS, STORY_CONFIG_VERSION, TARGET_WORDS_DEFAULT,
   validateStoryConfig, type StoryConfig,
 } from "@/types/story-config";
-import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
+import { validateBeatPlan, type BeatPlan, type StoryBeat } from "@/types/beat-plan";
 
 type Phase = "idle" | "generating" | "success" | "error";
 type PlanPhase = "idle" | "planning" | "success" | "error";
@@ -119,6 +119,16 @@ function planRelevantSnapshot(config: StoryConfig): string {
   return JSON.stringify(PLAN_RELEVANT_KEYS.map((k) => config[k] ?? null));
 }
 
+/** §19 增删/移动后重新编号：id 必须从 1 连续，否则 validateBeatPlan 拒绝。 */
+function renumberBeats(beats: StoryBeat[]): StoryBeat[] {
+  return beats.map((b, i) => ({ ...b, id: i + 1 }));
+}
+
+/** characters 输入用中文顿号/逗号分隔，落回字符串数组。 */
+function parseCharacters(text: string): string[] {
+  return text.split(/[、,，]/).map((s) => s.trim()).filter(Boolean);
+}
+
 export default function GeneratePage() {
   const [settings] = useSettings();
   const [form, setForm] = useState<ConfigForm>(EMPTY_FORM);
@@ -161,9 +171,38 @@ export default function GeneratePage() {
     setPhase("idle");
   };
 
+  // §19 BeatPlan 手动编辑：改字段 / 增删 / 移动。编辑的是 plan 本身，不是 StoryConfig，
+  // 因此 planOutdated 不变（§22 只由 StoryConfig 变化触发）。
+  const patchBeat = (id: number, patch: Partial<StoryBeat>) =>
+    setBeatPlan((prev) =>
+      prev ? { ...prev, beats: prev.beats.map((b) => (b.id === id ? { ...b, ...patch } : b)) } : prev,
+    );
+
+  const addBeat = () =>
+    setBeatPlan((prev) => {
+      if (!prev) return prev;
+      const nextId = prev.beats.reduce((max, b) => Math.max(max, b.id), 0) + 1;
+      return { ...prev, beats: [...prev.beats, { id: nextId, purpose: "", event: "", characters: [] }] };
+    });
+
+  const deleteBeat = (id: number) =>
+    setBeatPlan((prev) =>
+      prev ? { ...prev, beats: renumberBeats(prev.beats.filter((b) => b.id !== id)) } : prev,
+    );
+
+  const moveBeat = (index: number, delta: number) =>
+    setBeatPlan((prev) => {
+      if (!prev) return prev;
+      const to = index + delta;
+      if (to < 0 || to >= prev.beats.length) return prev;
+      const beats = [...prev.beats];
+      const [moved] = beats.splice(index, 1);
+      beats.splice(to, 0, moved);
+      return { ...prev, beats: renumberBeats(beats) };
+    });
+
   // §29 Load：先完整解析 + 验证，全部成功才替换表单（§46 原子性）
-  const loadFromText = (text: string) => {
-    try {
+  const loadFromText = (text: string) => {    try {
       const config = parseStoryConfig(text);
       applyConfig(config);
       setLoadOpen(false);
@@ -238,6 +277,13 @@ export default function GeneratePage() {
     const err = validateForm(form);
     if (err) { toast.error(err); return; }
     if (!beatPlan) { toast.error("Generate a beat plan first."); return; }
+    // §47 手动编辑可能留下空字段：先本地校验，避免无谓请求
+    try {
+      validateBeatPlan(beatPlan);
+    } catch (e) {
+      toast.error(`BeatPlan 不合法：${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
     if (planOutdated && !window.confirm(
       "StoryConfig changed after this plan was generated.\n确定使用现有 BeatPlan 生成？（Use Existing Plan Anyway）",
     )) return;
@@ -487,6 +533,10 @@ export default function GeneratePage() {
                 </h2>
                 {beatPlan && planOutdated && <span className="text-[10px] text-amber-500 font-mono">OUTDATED</span>}
               </div>
+              <Button variant="outline" size="sm" className="h-8 rounded-full text-xs" onClick={addBeat}
+                disabled={!beatPlan || busy} title={beatPlan ? "在末尾追加一个 Beat" : "Generate a beat plan first."}>
+                <Plus className="h-3.5 w-3.5" /> Add Beat
+              </Button>
             </div>
             <ScrollArea className="max-h-[340px]">
               <div className="p-3 sm:p-4 space-y-2">
@@ -501,20 +551,59 @@ export default function GeneratePage() {
                     <span className="text-xs font-mono">Planning beats...</span>
                   </div>
                 )}
-                {beatPlan?.summary && (
-                  <div className="text-[11px] text-muted-foreground px-1 pb-1">{beatPlan.summary}</div>
+                {beatPlan && (
+                  <div className="space-y-1.5">
+                    <Label className="text-[11px] text-muted-foreground">Summary（可选）</Label>
+                    <Input value={beatPlan.summary ?? ""} placeholder="故事整体规划摘要"
+                      onChange={(e) => setBeatPlan((prev) => (prev ? { ...prev, summary: e.target.value || undefined } : prev))}
+                      disabled={busy} className={fieldCls} />
+                  </div>
                 )}
-                {beatPlan?.beats.map((beat) => (
-                  <div key={beat.id} className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 space-y-1.5">
+                {beatPlan?.beats.map((beat, index) => (
+                  <div key={beat.id} className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 space-y-2">
                     <div className="flex items-center gap-2">
                       <span className="text-[11px] font-mono font-bold text-violet-300">Beat {beat.id}</span>
-                      <span className="text-xs font-medium">{beat.purpose}</span>
+                      <div className="ml-auto flex items-center gap-1">
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 rounded-full" title="上移"
+                          disabled={busy || index === 0} onClick={() => moveBeat(index, -1)}>
+                          <ArrowUp className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 rounded-full" title="下移"
+                          disabled={busy || index === beatPlan.beats.length - 1} onClick={() => moveBeat(index, 1)}>
+                          <ArrowDown className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 rounded-full text-red-400 hover:text-red-300" title="删除这个 Beat"
+                          disabled={busy || beatPlan.beats.length <= 1} onClick={() => deleteBeat(beat.id)}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </div>
-                    <p className="text-[13px] leading-5 text-zinc-300">{beat.event}</p>
-                    <div className="text-[11px] text-muted-foreground">
-                      Characters: {beat.characters.join("、") || "未指定"}
-                      {beat.conflict ? ` · Conflict: ${beat.conflict}` : ""}
-                      {beat.expected_outcome ? ` · Outcome: ${beat.expected_outcome}` : ""}
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px] text-muted-foreground">Purpose</Label>
+                      <Input value={beat.purpose} placeholder="这一拍的结构作用，如：建立危机"
+                        onChange={(e) => patchBeat(beat.id, { purpose: e.target.value })} disabled={busy} className={fieldCls} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px] text-muted-foreground">Event</Label>
+                      <Textarea value={beat.event} placeholder="这一拍实际发生的事件"
+                        onChange={(e) => patchBeat(beat.id, { event: e.target.value })} disabled={busy} className="min-h-[56px] resize-none" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label className="text-[11px] text-muted-foreground">Characters（顿号分隔）</Label>
+                        <Input value={beat.characters.join("、")} placeholder="陈岚、周衡"
+                          onChange={(e) => patchBeat(beat.id, { characters: parseCharacters(e.target.value) })} disabled={busy} className={fieldCls} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-[11px] text-muted-foreground">Conflict（可选）</Label>
+                        <Input value={beat.conflict ?? ""} placeholder="本拍局部冲突"
+                          onChange={(e) => patchBeat(beat.id, { conflict: e.target.value || undefined })} disabled={busy} className={fieldCls} />
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-[11px] text-muted-foreground">Expected Outcome（可选）</Label>
+                      <Input value={beat.expected_outcome ?? ""} placeholder="本拍结束后故事状态的变化"
+                        onChange={(e) => patchBeat(beat.id, { expected_outcome: e.target.value || undefined })} disabled={busy} className={fieldCls} />
                     </div>
                   </div>
                 ))}
