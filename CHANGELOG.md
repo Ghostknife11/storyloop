@@ -6,6 +6,34 @@ All notable changes to Storyloop.
 
 ---
 
+## [0.3.0] —— 2026-09-19
+
+### Added
+
+- Two-stage generation: StoryConfig → BeatPlanner → BeatPlan → StoryGenerator → Story
+- BeatPlan model with schema validation (`types/beat-plan.ts`)
+- External beat planning prompt template (`prompts/beat_planner.txt`)
+- BeatPlan parser with markdown code-fence tolerance
+- `POST /api/plan` API (stage one)
+- Beat Plan panel in the UI with manual editing (add / delete / reorder)
+- Outdated marker when StoryConfig changes after a plan was generated
+- Prompt preview now includes the Beat Plan when one is available
+- CLI `plan` and `generate` subcommands
+- BeatPlan snapshot (`*.beats.json`) saved with story, config and metadata
+- Beat count recorded in generation metadata and API response
+
+### Changed
+
+- `POST /api/generate` now requires `beat_plan` (400 when missing)
+- Story prompt template now renders the Beat Plan section
+- CLI is now two subcommands instead of a single `--config` run
+
+### Compatibility
+
+- Legacy `{title, prompt}` requests are still normalized to StoryConfig, but generation now requires a beat plan from `POST /api/plan`.
+
+---
+
 ## [0.2.0] —— 2026-09-19
 
 ### Added
