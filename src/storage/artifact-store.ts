@@ -11,8 +11,9 @@ import type { BeatPlan } from "@/types/beat-plan";
 export class ArtifactStore {
   private runsRoot: string;
 
-  constructor(baseDir?: string) {
-    this.runsRoot = resolve(baseDir || join(process.cwd(), "runs"));
+  /** runsRoot：Run 目录的根。缺省为 <cwd>/runs（§15）。 */
+  constructor(runsRoot?: string) {
+    this.runsRoot = resolve(runsRoot || join(process.cwd(), "runs"));
   }
 
   /** §50 Path Traversal 防护：run_id 由系统生成，但仍做 containment check。 */
