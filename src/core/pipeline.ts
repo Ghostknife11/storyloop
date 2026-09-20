@@ -31,6 +31,16 @@ export interface GenerationResult {
 }
 
 /**
+ * §27/§28/§67 安全错误信息：node:fs 的异常文本带服务器绝对路径，
+ * 进用户可见的 message / metadata 前先抹掉；原始异常只进服务端技术日志。
+ */
+const ABSOLUTE_PATH = /(?:[A-Za-z]:)?[\\/][^\s'"]*[\\/][^\s'"]*/g;
+
+function safeDetail(raw: string): string {
+  return raw.replace(ABSOLUTE_PATH, "<path>");
+}
+
+/**
  * §3/§25 GenerationPipeline：把 v0.3.0 的两个独立步骤组织成一个 Run。
  * 固定顺序 Config → Planning → Generation → Persistence（§7），
  * 只暴露 run() 与 runWithPlan()（§30），不做 Stage Registry / DAG / Plugin。
@@ -96,13 +106,15 @@ export class GenerationPipeline {
       };
     } catch (e) {
       // §18/§19/§20：失败阶段可识别，已产出的文件不删除
-      failRun(ctx, ctx.current_stage ?? "unknown", e instanceof Error ? e.message : String(e));
+      const detail = safeDetail(e instanceof Error ? e.message : String(e));
+      // §28：原始异常只进服务端技术日志
+      console.error(`[pipeline] run ${rid} failed at ${ctx.current_stage ?? "unknown"}:`, e);
+      failRun(ctx, ctx.current_stage ?? "unknown", detail);
       try {
         this.artifactStore.putMetadata(rid, this.metaFor(ctx, runtime));
       } catch {
         /* metadata 保存失败时保留原始错误 */
       }
-      const detail = e instanceof Error ? e.message : String(e);
       throw new PipelineError(
         ["Run", rid, "failed at", ctx.current_stage ?? "unknown", ":", detail].join(" "),
         rid,
