@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
-import { generateStory, planStory, previewPrompt, type GenerateApiResult } from "@/lib/api";
+import { generateFromPlan, planStory, previewPrompt, RunApiError, type RunApiResult } from "@/lib/api";
 import { configFilename, parseStoryConfig, serializeStoryConfig } from "@/lib/config-io";
 import { useSettings } from "@/lib/settings-store";
 import {
@@ -24,6 +24,17 @@ import { validateBeatPlan, type BeatPlan, type StoryBeat } from "@/types/beat-pl
 
 type Phase = "idle" | "generating" | "success" | "error";
 type PlanPhase = "idle" | "planning" | "success" | "error";
+
+/** §40 固定阶段（§7）：UI 只能按这个顺序展示，不自行发明阶段。 */
+const RUN_STAGES = [
+  { key: "config", label: "Config" },
+  { key: "planning", label: "Planning" },
+  { key: "generating", label: "Generation" },
+  { key: "saving", label: "Persistence" },
+] as const;
+
+type RunStageKey = (typeof RUN_STAGES)[number]["key"];
+type RunStage = "idle" | RunStageKey | "completed";
 
 interface ConfigForm {
   title: string;
@@ -138,7 +149,12 @@ export default function GeneratePage() {
   const [planPhase, setPlanPhase] = useState<PlanPhase>("idle");
   const [planError, setPlanError] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
-  const [result, setResult] = useState<GenerateApiResult | null>(null);
+  const [result, setResult] = useState<RunApiResult | null>(null);
+  const [runTitle, setRunTitle] = useState("");
+  const [runStage, setRunStage] = useState<RunStage>("idle");
+  const [runFailed, setRunFailed] = useState(false);
+  const [failedStage, setFailedStage] = useState<string | null>(null);
+  const [failedRunId, setFailedRunId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
   const [preview, setPreview] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
@@ -146,6 +162,7 @@ export default function GeneratePage() {
   const [loadText, setLoadText] = useState("");
   const busyRef = useRef(false);
   const planBusyRef = useRef(false);
+  const stepperTimers = useRef<number[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const set = (p: Partial<ConfigForm>) => setForm(prev => ({ ...prev, ...p }));
@@ -158,6 +175,22 @@ export default function GeneratePage() {
     planBaseline !== null &&
     planRelevantSnapshot(formToConfig(form)) !== planBaseline;
 
+  // §40 乐观阶段推进：服务端不推送进度，客户端只按固定顺序展示，
+  // 最终状态一律以服务端返回为准（completed，或 failed + stage）。
+  const clearStepperTimers = () => {
+    stepperTimers.current.forEach((t) => window.clearTimeout(t));
+    stepperTimers.current = [];
+  };
+
+  const beginStepper = () => {
+    clearStepperTimers();
+    setRunStage("config");
+    // Manual Run 跳过 Planning（§29：beat_plan 由用户提供，Pipeline 不再调 Planner）
+    (["generating", "saving"] as RunStageKey[]).forEach((stage, i) => {
+      stepperTimers.current.push(window.setTimeout(() => setRunStage(stage), (i + 1) * 700));
+    });
+  };
+
   const applyConfig = (config: StoryConfig) => {
     setForm(configToForm(config));
     setBaseline(serializeStoryConfig(config));
@@ -167,8 +200,14 @@ export default function GeneratePage() {
     setPlanPhase("idle");
     setPlanError("");
     setResult(null);
+    setRunTitle("");
+    setRunStage("idle");
+    setRunFailed(false);
+    setFailedStage(null);
+    setFailedRunId(null);
     setPreview(null);
     setPhase("idle");
+    clearStepperTimers();
   };
 
   // §19 BeatPlan 手动编辑：改字段 / 增删 / 移动。编辑的是 plan 本身，不是 StoryConfig，
@@ -288,22 +327,36 @@ export default function GeneratePage() {
       "StoryConfig changed after this plan was generated.\n确定使用现有 BeatPlan 生成？（Use Existing Plan Anyway）",
     )) return;
     busyRef.current = true;
+    const title = formToConfig(form).title;
     setPhase("generating");
     setErrorMsg("");
     setPreview(null);
+    setFailedStage(null);
+    setFailedRunId(null);
+    setRunFailed(false);
+    beginStepper();
     try {
       const config = formToConfig(form);
-      const data = await generateStory(config, beatPlan, {
+      const data = await generateFromPlan(config, beatPlan, {
         model: settings.model || undefined,
         baseUrl: settings.baseUrl || undefined,
         temperature: settings.temperature,
       });
+      clearStepperTimers();
       setResult(data);
+      setRunTitle(title);
+      setRunStage("completed");
       setPhase("success");
-      toast.success("生成完成，已保存 Markdown + Config + Beats 快照");
+      toast.success(`Run 完成：${data.run_id}`);
     } catch (e) {
+      clearStepperTimers();
       const msg = e instanceof Error ? e.message : "未知错误";
+      if (e instanceof RunApiError) {
+        setFailedStage(e.stage ?? null);
+        setFailedRunId(e.runId ?? null);
+      }
       setErrorMsg(msg);
+      setRunFailed(true);
       setPhase("error");
       toast.error(msg);
     } finally {
@@ -327,16 +380,16 @@ export default function GeneratePage() {
 
   const handleCopy = () => {
     if (!result) return;
-    navigator.clipboard.writeText(`# ${result.title}\n\n${result.content}`).then(() => toast.success("Copied"));
+    navigator.clipboard.writeText(`# ${runTitle}\n\n${result.story}`).then(() => toast.success("Copied"));
   };
 
   const handleDownload = () => {
     if (!result) return;
-    const blob = new Blob([`# ${result.title}\n\n${result.content}`], { type: "text/markdown;charset=utf-8" });
+    const blob = new Blob([`# ${runTitle}\n\n${result.story}`], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${result.title.replace(/[\\/:*?"<>|]/g, "_")}.md`;
+    a.download = `${runTitle.replace(/[\\/:*?"<>|]/g, "_")}.md`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1500);
   };
@@ -369,6 +422,40 @@ export default function GeneratePage() {
           </span>
         )}
       </div>
+
+      {/* §40 Run 进度：固定四阶段（§7），Planning 在手动模式下跳过（§29）。
+          服务端不推送进度，这里的推进是乐观的；终态一律以服务端返回为准。 */}
+      {runStage !== "idle" && (
+        <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono">
+          {RUN_STAGES.map((s, i) => {
+            const isPlanning = s.key === "planning";
+            const currentIndex = RUN_STAGES.findIndex((x) => x.key === runStage);
+            const failed = runFailed && (s.key === failedStage || (!failedStage && currentIndex === i));
+            const active = !failed && !isPlanning && !runFailed && runStage !== "completed" && currentIndex === i;
+            const done = !failed && !isPlanning && (runStage === "completed" || (currentIndex >= 0 && i < currentIndex));
+            const skipped = !failed && !active && !done && isPlanning;
+            const tone = failed
+              ? "text-red-500 border-red-500/30 bg-red-500/10"
+              : done
+                ? "text-emerald-500 border-emerald-500/30 bg-emerald-500/10"
+                : active
+                  ? "text-violet-300 border-violet-500/40 bg-violet-500/10"
+                  : skipped
+                    ? "text-muted-foreground/60 border-white/10"
+                    : "text-muted-foreground border-white/10";
+            return (
+              <span key={s.key} className={`flex items-center gap-1 rounded-full border px-2 py-0.5 ${tone}`}>
+                {failed ? "✕" : done ? "✓" : active ? <Loader2 className="h-3 w-3 animate-spin" /> : skipped ? "–" : "·"}
+                {s.label}
+                {skipped && <span className="opacity-70">skipped</span>}
+              </span>
+            );
+          })}
+          {runStage === "completed" && result && (
+            <span className="ml-auto text-emerald-500">Run {result.run_id} · {result.status}</span>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 flex-1 min-h-0">
         {/* 配置区 */}
@@ -635,7 +722,13 @@ export default function GeneratePage() {
 
             {phase === "error" && (
               <div className="m-4 rounded-2xl border border-red-500/20 bg-red-500/5 p-4 text-sm">
-                <div className="font-medium text-red-500">Generation failed.</div>
+                <div className="font-medium text-red-500">Run failed.</div>
+                {(failedRunId || failedStage) && (
+                  <div className="text-[11px] font-mono text-muted-foreground mt-1">
+                    {failedRunId ? `Run ${failedRunId}` : "Run"}
+                    {failedStage ? ` · stage: ${failedStage}` : ""}
+                  </div>
+                )}
                 <div className="text-muted-foreground mt-1 text-xs break-all">{errorMsg}</div>
                 <div className="text-[11px] text-muted-foreground mt-1">BeatPlan 已保留，可直接再次点击 Generate Story。</div>
               </div>
@@ -657,12 +750,22 @@ export default function GeneratePage() {
               ) : phase === "success" && result ? (
                 <ScrollArea className="h-full">
                   <div className="p-4 sm:p-6">
-                    <h1 className="text-2xl font-bold tracking-tight mb-1">{result.title}</h1>
+                    <h1 className="text-2xl font-bold tracking-tight mb-1">{runTitle}</h1>
                     <div className="text-[11px] text-muted-foreground font-mono mb-4">
-                      {result.request.genre} · 约 {result.request.target_words} 字 · {result.request.beat_count} beats · model: {result.model} · {new Date(result.created_at).toLocaleString()}
+                      Run {result.run_id} · {result.status} · {result.beat_plan.beats.length} beats
+                    </div>
+                    {/* §42 产物清单：只展示文件名，不展示服务端绝对路径（§67） */}
+                    <div className="mb-4 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+                      <div className="text-[10px] font-mono tracking-widest uppercase text-muted-foreground mb-1.5">Artifacts</div>
+                      <div className="text-[11px] font-mono text-zinc-300">runs/{result.run_id}/</div>
+                      <ul className="mt-1 space-y-0.5">
+                        {Object.entries(result.artifacts).map(([key, file]) => (
+                          <li key={key} className="text-[11px] font-mono text-muted-foreground">{key} → {file}</li>
+                        ))}
+                      </ul>
                     </div>
                     <div className="prose prose-invert max-w-none prose-p:text-[15px] prose-p:leading-[26px]">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.content}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.story}</ReactMarkdown>
                     </div>
                   </div>
                 </ScrollArea>

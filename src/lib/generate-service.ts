@@ -92,7 +92,13 @@ export interface RunOk {
   artifacts: Record<string, string>;
 }
 
-export type RunResult = { status: number; json: RunOk | { error: string } };
+export interface RunError {
+  error: string;
+  run_id?: string;
+  stage?: string;
+}
+
+export type RunResult = { status: number; json: RunOk | RunError };
 
 /** §5 依赖注入：测试用 Mock LLM / 假 Planner，绝不打真实付费 API。 */
 export interface RunDeps {
@@ -130,10 +136,10 @@ function runOkOf(result: GenerationResult): RunOk {
   };
 }
 
-/** §28 错误映射：阶段来自 PipelineError，用户拿得到失败阶段。 */
+/** §28 错误映射：阶段来自 PipelineError，用户拿得到失败阶段与 run_id。 */
 function runFail(e: unknown): RunResult {
   if (e instanceof PipelineError) {
-    return { status: 502, json: { error: e.message } };
+    return { status: 502, json: { error: e.message, run_id: e.runId, stage: e.stage } };
   }
   if (e instanceof Error && (
     e.name === "ConfigValidationError" ||

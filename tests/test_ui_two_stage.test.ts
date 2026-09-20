@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { generateStory, planStory, previewPrompt } from "@/lib/api";
+import { generateFromPlan, planStory, previewPrompt, RunApiError } from "@/lib/api";
 import {
   STORY_CONFIG_VERSION,
   validateStoryConfig,
@@ -8,9 +8,9 @@ import {
 import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
 
 /**
- * v0.3.0 UI 两阶段契约（§27~§30）：
- * Step 1 Generate Plan → Step 2 Generate Story，中间 BeatPlan 原样传递。
- * 浏览器逻辑（过期标记、手动编辑）跑在 DOM 里，这里覆盖它依赖的同一批 API 客户端函数。
+ * v0.4.0 UI 两阶段契约（§27~§30/§32/§33）：
+ * Step 1 Generate Plan → Step 2 Generate Story（Manual Run），中间 BeatPlan 原样传递。
+ * 浏览器逻辑（过期标记、手动编辑、Run 进度）跑在 DOM 里，这里覆盖它依赖的同一批 API 客户端函数。
  */
 
 const config: StoryConfig = validateStoryConfig({
@@ -55,25 +55,23 @@ describe("Step 1：planStory（Generate Plan）", () => {
   });
 });
 
-describe("Step 2：generateStory（Generate Story）", () => {
+describe("Step 2：generateFromPlan（Generate Story → Manual Run）", () => {
   it("§29 beat_plan 必须随请求发送，且原样进入请求体", async () => {
     const fetchMock = stubJson({
-      title: config.title,
-      content: "正文",
-      model: "gpt-4o-mini",
-      created_at: "2026-09-19T15:00:00.000Z",
-      saved_to: "outputs/a.md",
-      config_to: "outputs/a.json",
-      beats_to: "outputs/a.beats.json",
-      metadata_to: "outputs/a.meta.json",
-      request: { genre: config.genre, target_words: config.target_words, beat_count: 2 },
+      run_id: "20260920_101500_ab12cd",
+      status: "completed",
+      story: "正文",
+      beat_plan: plan,
+      artifacts: { config: "config.json", beat_plan: "beats.json", story: "story.md", metadata: "metadata.json" },
     });
 
-    const r = await generateStory(config, plan, { model: "m", temperature: 0.8 });
-    expect(r.beats_to).toBe("outputs/a.beats.json");
-    expect(r.request.beat_count).toBe(2);
+    const r = await generateFromPlan(config, plan, { model: "m", temperature: 0.8 });
+    expect(r.run_id).toBe("20260920_101500_ab12cd");
+    expect(r.status).toBe("completed");
+    expect(r.story).toBe("正文");
 
-    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/runs/from-plan");
     const body = JSON.parse(String(init.body)) as Record<string, unknown>;
     expect(body.beat_plan).toEqual(plan);
     expect(body.config).toMatchObject({ title: config.title, premise: config.premise });
@@ -83,13 +81,17 @@ describe("Step 2：generateStory（Generate Story）", () => {
   it("§29 缺 beat_plan 时服务端 400，错误信息指引先规划", async () => {
     stubJson({ error: "beat_plan is required——先生成剧情骨架（Generate Plan），再生成正文" }, false, 400);
     await expect(
-      generateStory(config, plan, {}).catch((e: Error) => { throw e; }),
+      generateFromPlan(config, plan, {}).catch((e: Error) => { throw e; }),
     ).rejects.toThrow(/beat_plan is required/);
   });
 
-  it("生成失败（502）→ 抛出可读错误，UI 可原样重试（§26 BeatPlan 保留）", async () => {
-    stubJson({ error: "Generation failed. 原因：LLM API 返回 401" }, false, 502);
-    await expect(generateStory(config, plan, {})).rejects.toThrow(/401/);
+  it("生成失败（502）→ 抛出可读错误，并带上 run_id 与 stage（§28）", async () => {
+    stubJson({ error: "Run 20260920_101500_ab12cd failed at generating : LLM API 返回 401", run_id: "20260920_101500_ab12cd", stage: "generating" }, false, 502);
+    const err = await generateFromPlan(config, plan, {}).catch((e: Error) => e);
+    expect(err).toBeInstanceOf(RunApiError);
+    expect((err as RunApiError).message).toMatch(/401/);
+    expect((err as RunApiError).runId).toBe("20260920_101500_ab12cd");
+    expect((err as RunApiError).stage).toBe("generating");
   });
 });
 

@@ -4,7 +4,7 @@ import {
   parseStoryConfig,
   serializeStoryConfig,
 } from "@/lib/config-io";
-import { generateStory, planStory, previewPrompt } from "@/lib/api";
+import { generateFromPlan, planStory, previewPrompt } from "@/lib/api";
 import {
   STORY_CONFIG_VERSION,
   validateStoryConfig,
@@ -82,29 +82,26 @@ describe("Load：JSON 文本 → StoryConfig（原子，失败即整体拒绝）
 });
 
 describe("UI → API 契约：存取后的 StoryConfig 原样进入生成请求", () => {
-  it("generateStory 把序列化后的 Config 原样 POST（运行参数单独传递）", async () => {
+  it("generateFromPlan 把序列化后的 Config 原样 POST /api/runs/from-plan（运行参数单独传递）", async () => {
     const loaded = parseStoryConfig(serializeStoryConfig(sample));
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({
       ok: true,
       status: 200,
       json: async () => ({
-        title: loaded.title,
-        content: "正文",
-        model: "gpt-4o-mini",
-        created_at: "2026-09-19T14:54:00.000Z",
-        saved_to: "outputs/x.md",
-        config_to: "outputs/x.json",
-        beats_to: "outputs/x.beats.json",
-        metadata_to: "outputs/x.meta.json",
-        request: { genre: loaded.genre, target_words: loaded.target_words, beat_count: 2 },
+        run_id: "20260920_101500_ab12cd",
+        status: "completed",
+        story: "正文",
+        beat_plan: plan,
+        artifacts: { config: "config.json", beat_plan: "beats.json", story: "story.md", metadata: "metadata.json" },
       }),
     }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const r = await generateStory(loaded, plan, { model: "m", temperature: 0.5 });
-    expect(r.title).toBe("消失的目击者");
+    const r = await generateFromPlan(loaded, plan, { model: "m", temperature: 0.5 });
+    expect(r.run_id).toBe("20260920_101500_ab12cd");
+    expect(r.story).toBe("正文");
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe("/api/generate");
+    expect(url).toBe("/api/runs/from-plan");
     const body = JSON.parse(String(init.body)) as Record<string, unknown>;
     const sent = body.config as Record<string, unknown>;
     expect(sent.title).toBe(loaded.title);
