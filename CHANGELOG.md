@@ -13,6 +13,15 @@ All notable changes to Storyloop.
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- About 页版本说明仍写作「初始公开原型」并声称规划尚未包含，与 v0.3.0 起已具备的 Beat 规划不符；改为按当前版本实际能力描述（规划已具备，评审 / 校验 / 修复 / 重试 / 实验 / 基准 / 自适应尚未包含）
+- About 页副标题与页面 metadata 的「生成原型」统一为「生成器」，与 README 一致
+
+---
+
 ## [0.4.0] —— 2026-09-20
 
 ### Added

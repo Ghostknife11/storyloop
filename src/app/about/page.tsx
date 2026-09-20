@@ -25,7 +25,7 @@ export default function AboutPage() {
       <div className="mx-auto max-w-2xl space-y-6">
         <div>
           <h1 className="text-lg font-bold tracking-tight">About</h1>
-          <p className="text-xs text-muted-foreground mt-1">一个带现代 Web UI 的 AI 短篇小说生成原型</p>
+          <p className="text-xs text-muted-foreground mt-1">一个带现代 Web UI 的 AI 短篇小说生成器</p>
         </div>
 
         <div className="rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur overflow-hidden">
@@ -38,7 +38,7 @@ export default function AboutPage() {
         </div>
 
         <div className="rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur p-4 sm:p-5 text-xs text-muted-foreground leading-5">
-          这是项目的初始公开原型（initial public prototype）。规划、评审、校验、实验与基准体系尚未包含在本版本中，将在后续版本逐步引入。
+          本项目按版本逐步公开演进。当前版本已包含提示词工程、StoryConfig 复用、两阶段生成（规划 + 写作）与基于 Run 的生成流水线；内容评审、质量校验、自动修复、质量重试、实验、基准与自适应生成尚未包含在本版本中，将在后续版本逐步引入。
         </div>
 
         <div className="flex gap-2">
