@@ -15,6 +15,14 @@ All notable changes to Storyloop.
 
 ## [Unreleased]
 
+### Changed
+
+- 版本 tag 由 `v0.x.x` 改为 `0.x.x`（`0.0.1` ~ `0.4.0`）。GitHub Releases 页按 release 创建时间倒序排列，
+  而创建时间取自 annotated tag 的 tagger 时间且无法通过接口修改；原 `v0.0.1` / `v0.2.0` 两个 tag 的
+  tagger 时间晚于 `v0.4.0`，导致页面版本顺序错乱。改用新 tag 名并将各 tag 的 tagger 时间对齐到其
+  commit 时间后，Releases 页顺序与版本号一致。Release 标题仍带 `v` 前缀（如 `v0.4.0 — Generation Pipeline`）。
+  Release URL 相应变为 `…/releases/tag/0.4.0`
+
 ### Fixed
 
 - About 页版本说明仍写作「初始公开原型」并声称规划尚未包含，与 v0.3.0 起已具备的 Beat 规划不符；改为按当前版本实际能力描述（规划已具备，评审 / 校验 / 修复 / 重试 / 实验 / 基准 / 自适应尚未包含）
