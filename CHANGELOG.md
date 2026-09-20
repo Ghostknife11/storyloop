@@ -6,6 +6,37 @@ All notable changes to Storyloop.
 
 ---
 
+## [0.4.0] —— 2026-09-20
+
+### Added
+
+- `GenerationPipeline`：一次完整故事生成 = 一个 Run，固定顺序 Config → Planning → Generation → Persistence
+- `RunContext` + Run ID（本地时间戳 + 6 位随机字符），记录 status / current_stage / error
+- `ArtifactStore`：产物统一写入 `runs/<run_id>/`（`config.json` / `beats.json` / `story.md` / `metadata.json`），原子写入
+- `POST /api/runs`（自动模式）与 `POST /api/runs/from-plan`（手动模式）
+- UI 四阶段进度指示、Run ID / 产物清单展示与失败阶段提示
+- CLI `run` 子命令，与 UI / API 共用同一条 Pipeline
+- Tests：generation-pipeline / run-context / artifact-store / run-api
+
+### Changed
+
+- `POST /api/generate` 改为兼容入口，等价于 `POST /api/runs/from-plan`
+- 生成响应改为 `{run_id, status, story, beat_plan, artifacts}`，不再返回服务器文件绝对路径
+- CLI 由 `plan` / `generate` 两阶段命令改为 `run`（`--beats` 可选）与 `plan`
+- 产物目录由 `outputs/` 改为 `runs/<run_id>/`，并加入 `.gitignore`
+- 失败时 metadata 记录失败阶段与安全错误信息（不含服务器绝对路径），已产出的文件不删除
+
+### Removed
+
+- `outputs/` 产物目录与 `src/lib/output.ts`（由 `ArtifactStore` 取代）
+
+### Compatibility
+
+- 旧版扁平 `{title, prompt}` 请求仍会归一化为 StoryConfig；`POST /api/generate` 仍可携带 `{config, beat_plan}` 直接生成。
+- 生成失败不会自动重试或自动改写，重试由你手动触发。
+
+---
+
 ## [0.3.0] —— 2026-09-19
 
 ### Added

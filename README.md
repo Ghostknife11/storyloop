@@ -3,49 +3,52 @@
 > 一个支持保存、加载和复用 StoryConfig 的 AI 短篇小说生成器。
 > A configurable AI short-story generator with reusable StoryConfig files and a modern web interface.
 
-## 功能（当前版本 v0.3.0 真实具备）
+## 功能（当前版本 v0.4.0 真实具备）
 
 - 现代 Web UI（暗色玻璃风格 · 响应式 · 深浅主题）
 - **可复用 StoryConfig**：保存 / 加载 / 新建，JSON 文件即配置
 - 结构化主角配置（姓名 / 身份 / 目标 / 动机）
 - 故事背景、核心冲突、失败代价、期望结局
-- 生成时自动保存 StoryConfig 快照（与正文、BeatPlan、元数据同目录）
 - **两阶段生成**：先生成剧情骨架（BeatPlan），再据此写正文
 - **BeatPlan 手动编辑**：增删 Beat、上下移动排序，生成前可反复调整
 - StoryConfig 在规划后发生变化时，BeatPlan 标记为 Outdated
 - **可编辑的外部 Prompt 模板**（`prompts/beat_planner.txt`、`prompts/story.txt`）
+- **GenerationPipeline**：一次完整生成 = 一个 Run，固定顺序 Config → Planning → Generation → Persistence
+- **RunContext + Run ID**：每次运行有唯一 `run_id`（时间戳 + 短随机）与状态 / 阶段记录
+- **ArtifactStore**：产物统一落在 `runs/<run_id>/`（`config.json` / `beats.json` / `story.md` / `metadata.json`），原子写入
+- **Run 进度与结果 UI**：四阶段进度指示 + Run ID / 产物清单 / 失败阶段
 - OpenAI-compatible LLM 支持（OpenAI / DeepSeek / 硅基流动 / 任意兼容端点）
 - Markdown 输出 + 生成元数据 JSON
-- CLI 两阶段生成（`scripts/generate-cli.ts plan` / `generate`）
+- CLI 统一走同一条 Pipeline（`scripts/generate-cli.ts run` / `plan`）
 - 本地配置（模型 / Base URL / 温度）
 
-> 内容评审（Review）、质量校验（Quality Validation）、自动修复（Repair）、质量重试、
+> 内容评审（Review）、质量校验（Quality Validation）、自动修复（Repair）、质量重试（Retry Policy）、
 > 实验（Experiment）、基准（Benchmark）、自适应生成（Adaptive Generation）尚未包含在本版本中。
+> 本版本也没有工作流引擎 / DAG / Stage Registry：阶段顺序固定，不能任意跳段。
 
 ## 架构
 
 ```
 ┌──────────────────────┐
-│  Modern Web UI       │  StoryConfig 表单 + Save / Load / New
+│  UI ／ CLI           │  StoryConfig 表单 + Save / Load / New · generate-cli run
 └──────────┬───────────┘
            ▼
 ┌──────────────────────┐
-│   Plan API           │  POST /api/plan（StoryConfig）
+│   Run API            │  POST /api/runs · POST /api/runs/from-plan
 └──────────┬───────────┘
            ▼
 ┌──────────────────────┐
-│    BeatPlanner       │  prompts/beat_planner.txt → LLM → BeatPlan
+│  GenerationPipeline  │  固定顺序：Config → Planning → Generation → Persistence
+│  · run()             │  StoryConfig → BeatPlan → Story
+│  · runWithPlan()     │  用户编辑后的 BeatPlan 直接进入生成
 └──────────┬───────────┘
            ▼
 ┌──────────────────────┐
-│  BeatPlan（可编辑）   │  UI 增删 / 排序，或 CLI --beats 文件
+│   RunContext         │  run_id + status + current_stage + error
 └──────────┬───────────┘
            ▼
 ┌──────────────────────┐
-│   Generate API       │  POST /api/generate（{config, beat_plan}）
-└──────────┬───────────┘
-           ▼
-┌──────────────────────┐
+│  BeatPlanner         │  prompts/beat_planner.txt → LLM → BeatPlan（可手动编辑）
 │  StoryGenerator      │  prompts/story.txt 渲染（含 Beat Plan）
 └──────────┬───────────┘
            ▼
@@ -54,9 +57,32 @@
 └──────────┬───────────┘
            ▼
 ┌──────────────────────┐
-│    Story Output      │  → UI + outputs/*.md + *.story.json + *.beats.json + *.meta.json
+│    ArtifactStore     │  原子写入 runs/<run_id>/ 下四个产物
 └──────────────────────┘
 ```
+
+## Run 与产物
+
+一次完整生成就是一个 **Run**。Run ID 形如 `20260920_101530_k3f9aq`（本地时间戳 + 6 位随机字符），
+由服务端生成，不依赖用户输入，可安全用作目录名。
+
+`runs/` 目录已加入 `.gitignore`，产物只落在本地：
+
+```
+runs/
+└── 20260920_101530_k3f9aq/
+    ├── config.json      # 本次运行使用的 StoryConfig
+    ├── beats.json       # 实际采用的 BeatPlan
+    ├── story.md         # 生成的正文
+    └── metadata.json    # run_id / project_version / status / 阶段 / 时间 / 模型
+```
+
+`metadata.json` 的字段：`run_id`、`project_version`、`status`（`created` / `planning` /
+`generating` / `saving` / `completed` / `failed`）、`current_stage`、`started_at`、`finished_at`、
+`error`、`model`、`artifacts`。失败时 `status` 为 `failed`，`error` 为安全错误信息（不含服务器绝对路径），
+且已经写出的产物不会被删除。
+
+失败阶段可识别：`config` / `planning` / `generating` / `persistence`。
 
 ## 快速开始
 
@@ -66,14 +92,15 @@ cp .env.example .env    # 配置 LLM_BASE_URL / LLM_API_KEY / LLM_MODEL
 npm run dev             # http://localhost:3000
 ```
 
-命令行生成（两阶段，与 UI 共用同一套 StoryConfig / BeatPlan / Prompt 模型）：
+命令行生成（与 UI / API 共用同一条 GenerationPipeline）：
 
 ```bash
-# 阶段一：StoryConfig → BeatPlan（beats.json）
-npx tsx scripts/generate-cli.ts plan --config configs/example_story.json --out beats.json
+# 一次完整 Run：StoryConfig → Plan → Generate → Persist
+npx tsx scripts/generate-cli.ts run --config configs/example_story.json
 
-# 阶段二：StoryConfig + BeatPlan → 正文
-npx tsx scripts/generate-cli.ts generate --config configs/example_story.json --beats beats.json
+# 手动模式：先单独规划，人工编辑 beats.json 后再生成
+npx tsx scripts/generate-cli.ts plan --config configs/example_story.json --out beats.json
+npx tsx scripts/generate-cli.ts run --config configs/example_story.json --beats beats.json
 ```
 
 ## StoryConfig
@@ -159,29 +186,42 @@ npx tsx scripts/generate-cli.ts generate --config configs/example_story.json --b
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/plan` | StoryConfig → BeatPlan（阶段一） |
-| POST | `/api/generate` | `{config, beat_plan}` → `{title, content, model, created_at, saved_to, config_to, beats_to, metadata_to, request}` |
+| POST | `/api/runs` | `{config}` → 自动模式完整 Run，返回 `{run_id, status, story, beat_plan, artifacts}` |
+| POST | `/api/runs/from-plan` | `{config, beat_plan}` → 手动模式 Run（跳过规划） |
+| POST | `/api/plan` | StoryConfig → BeatPlan（只规划，不生成正文） |
+| POST | `/api/generate` | 兼容入口，等价于 `/api/runs/from-plan` |
 | POST | `/api/prompt/preview` | `config`（+可选 `beat_plan`）→ 渲染后的最终 Prompt（开发预览） |
 | GET | `/api/health` | `{status: "ok"}` |
-| GET | `/api/version` | `{version: "0.3.0"}` |
+| GET | `/api/version` | `{version: "0.4.0"}` |
+
+`artifacts` 是产物文件名映射，例如
+`{"config":"config.json","beat_plan":"beats.json","story":"story.md","metadata":"metadata.json"}`；
+这些文件位于服务器的 `runs/<run_id>/` 下，响应中不会返回服务器绝对路径。
+
+失败响应形如 `{error: "安全错误信息", run_id?: "...", stage?: "planning"}`，HTTP 状态码：
+`400` 请求体 / 配置 / BeatPlan 非法，`502` LLM 或规划 / 生成失败，`500` 其他内部错误。
 
 ### curl 示例
 
 ```bash
-# 阶段一：生成剧情骨架
+# 自动模式：一次完整 Run
+curl -X POST http://localhost:3000/api/runs \
+  -H "Content-Type: application/json" \
+  -d @configs/example_story.json -o run.json
+
+# 手动模式：先规划，人工编辑 beats.json 后再生成
 curl -X POST http://localhost:3000/api/plan \
   -H "Content-Type: application/json" \
   -d @configs/example_story.json -o beats.json
 
-# 阶段二：config + beats 一起提交，生成正文
-curl -X POST http://localhost:3000/api/generate \
+curl -X POST http://localhost:3000/api/runs/from-plan \
   -H "Content-Type: application/json" \
   -d '{"config": '"$(cat configs/example_story.json)"', "beat_plan": '"$(cat beats.json)"'}'
 ```
 
 > 说明：`target_words` 是目标字数，实际输出长度会受模型能力和上下文窗口影响。
-> `POST /api/generate` 自 v0.3.0 起必须携带 `beat_plan`（缺失返回 400）。旧版 `{title, prompt}` 请求仍会归一化为 StoryConfig，
-> 但同样需要先经过 `/api/plan` 获得剧情骨架。
+> `/api/runs` 与 `/api/runs/from-plan` 需要 `config` 字段（缺失或非法返回 400）；
+> 旧版扁平 `{title, prompt}` 请求仍会归一化为 StoryConfig。
 
 ## Prompt Template
 
@@ -216,8 +256,12 @@ curl -X POST http://localhost:3000/api/generate \
 ## 测试
 
 ```bash
-npm test    # beat-plan / beat-parser / beat-planner / story-generator / plan-api / story-config / config-loader / ui-story-config / ui-two-stage / prompt-builder / template-loading / llm / generate-api / version
+npm test    # artifact-store / beat-parser / beat-plan / beat-planner / config-loader / generate-api /
+            # generation-pipeline / llm / plan-api / prompt-builder / run-api / run-context /
+            # story-config / story-generator / template-loading / ui-story-config / ui-two-stage / version
 ```
+
+所有测试都不调用真实 LLM：LLM 由注入的桩对象或 `fetch` 桩替代。
 
 ## 技术栈
 
