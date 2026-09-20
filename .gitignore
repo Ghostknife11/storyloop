@@ -13,6 +13,9 @@
 # generated stories
 /outputs/
 
+# run artifacts (§15: runs/<run_id>/ 由 ArtifactStore 生成，不入库)
+/runs/
+
 # build
 /dist/
 /build/
