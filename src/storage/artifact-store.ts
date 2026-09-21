@@ -1,14 +1,19 @@
-import { mkdirSync, writeFileSync, renameSync, existsSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync, renameSync, existsSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import type { StoryConfig } from "@/types/story-config";
 import type { BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
+import { validateAttemptNumber } from "@/core/generation-attempt";
 
 /**
  * §13/§22 ArtifactStore：只负责创建目录、保存 JSON / Markdown / Metadata、返回路径。
  * 不得调用 LLM、分析内容、决定 Pipeline 流程。§22 File System Only。
+ * v0.7.0 新增 Attempt 级产物（§23）与 promote（§28）：不改变既有方法的语义。
  */
+
+/** §23/§60 attempt 根目录名；§28 Windows 不可靠目录层级命名，这里固定 ASCII。 */
+const ATTEMPTS_DIR = "attempts";
 
 export class ArtifactStore {
   private runsRoot: string;
@@ -68,6 +73,57 @@ export class ArtifactStore {
     return existsSync(this.runDir(runId));
   }
 
+  // ---------------------------------------------------------------------------
+  // §23 Attempt 级产物
+  // ---------------------------------------------------------------------------
+
+  /** §60 createAttemptDirectory：runs/<run_id>/attempts/NN（NN = 01 起，§6）。 */
+  createAttemptDirectory(runId: string, attemptNumber: number): string {
+    return this.attemptDir(runId, attemptNumber);
+  }
+
+  attemptExists(runId: string, attemptNumber: number): boolean {
+    return existsSync(this.attemptDir(runId, attemptNumber));
+  }
+
+  putAttemptStory(runId: string, attemptNumber: number, title: string, story: string): string {
+    return this.putText(runId, this.attemptFile(attemptNumber, "story.md"), `# ${title}\n\n${story}\n`);
+  }
+
+  putAttemptValidation(runId: string, attemptNumber: number, validation: ValidationResult): string {
+    return this.putJson(runId, this.attemptFile(attemptNumber, "validation.json"), validation);
+  }
+
+  putAttemptReview(runId: string, attemptNumber: number, review: ReviewResult): string {
+    return this.putJson(runId, this.attemptFile(attemptNumber, "review.json"), review);
+  }
+
+  /** §24 Attempt metadata：编号 / 是否被接受 / 重试原因 / 分数 / 校验结论。 */
+  putAttemptMetadata(runId: string, attemptNumber: number, metadata: Record<string, unknown>): string {
+    return this.putJson(runId, this.attemptFile(attemptNumber, "metadata.json"), metadata);
+  }
+
+  // ---------------------------------------------------------------------------
+  // 内部：路径解析与原子写入
+  // ---------------------------------------------------------------------------
+
+  private attemptDir(runId: string, attemptNumber: number): string {
+    const n = validateAttemptNumber(attemptNumber);
+    const runRoot = this.runDir(runId);
+    const dir = resolve(runRoot, ATTEMPTS_DIR, String(n).padStart(2, "0"));
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  private attemptFile(attemptNumber: number, filename: string): string {
+    const n = validateAttemptNumber(attemptNumber);
+    return `${ATTEMPTS_DIR}/${String(n).padStart(2, "0")}/${filename}`;
+  }
+
+  private rootFile(runId: string, filename: string): string {
+    return join(this.runDir(runId), filename);
+  }
+
   private putJson(runId: string, filename: string, data: unknown): string {
     return this.putText(runId, filename, JSON.stringify(data, null, 2));
   }
@@ -75,10 +131,37 @@ export class ArtifactStore {
   /** §21 原子写入：临时文件 → rename，避免进程中断留下半个 JSON / Markdown。 */
   private putText(runId: string, filename: string, content: string): string {
     const dir = this.runDir(runId);
-    const finalPath = join(dir, filename);
-    const tmpPath = join(dir, `.${filename}.tmp`);
+    const finalPath = this.resolveInRun(dir, filename);
+    const tmpPath = join(dir, `.${filename.split("/").join("_")}.tmp`);
     writeFileSync(tmpPath, content, "utf8");
     renameSync(tmpPath, finalPath);
     return finalPath;
+  }
+
+  private readJson(runId: string, filename: string): Record<string, unknown> | null {
+    const raw = this.readText(runId, filename);
+    if (raw === null) return null;
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private readText(runId: string, filename: string): string | null {
+    const dir = this.runDir(runId);
+    const path = this.resolveInRun(dir, filename);
+    if (!existsSync(path)) return null;
+    return readFileSync(path, "utf8");
+  }
+
+  /** 路径拼接后必须仍落在该 Run 目录内（§50）。 */
+  private resolveInRun(dir: string, filename: string): string {
+    const path = resolve(dir, filename);
+    if (path !== dir && !path.startsWith(dir + sep)) {
+      throw new Error("Run 目录越界");
+    }
+    return path;
   }
 }
