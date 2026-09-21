@@ -238,6 +238,97 @@ describe("ArtifactStore（§13/§14/§63）", () => {
   });
 });
 
+/** §50/§23/§27/§28 Attempt 级产物：目录、归档、promote、UTF-8、Windows 安全路径。 */
+describe("ArtifactStore — attempt artifacts（§50/§23/§27/§28）", () => {
+  it("attempt directories created：attempts/01 两位零填充", () => {
+    const { store, root } = withStore();
+    const dir = store.createAttemptDirectory(RUN_ID, 1);
+    expect(dir).toBe(join(runDir(root, RUN_ID), "attempts", "01"));
+    expect(store.attemptExists(RUN_ID, 1)).toBe(true);
+    expect(store.attemptExists(RUN_ID, 2)).toBe(false);
+    expect(store.createAttemptDirectory(RUN_ID, 12)).toBe(join(runDir(root, RUN_ID), "attempts", "12"));
+  });
+
+  it("attempt artifacts separated：两次 attempt 的正文与校验互不覆盖", () => {
+    const { store, root } = withStore();
+    store.putAttemptStory(RUN_ID, 1, config.title, "第一次正文");
+    store.putAttemptValidation(RUN_ID, 1, failed);
+    store.putAttemptReview(RUN_ID, 1, review);
+    store.putAttemptMetadata(RUN_ID, 1, { attempt_number: 1, accepted: false, retry_reason: "validation_failed" });
+    store.putAttemptStory(RUN_ID, 2, config.title, "第二次正文");
+    store.putAttemptValidation(RUN_ID, 2, passed);
+    store.putAttemptMetadata(RUN_ID, 2, { attempt_number: 2, accepted: true, retry_reason: null });
+
+    expect(store.readAttemptStory(RUN_ID, 1)).toBe(`# ${config.title}\n\n第一次正文\n`);
+    expect(store.readAttemptStory(RUN_ID, 2)).toBe(`# ${config.title}\n\n第二次正文\n`);
+    expect(store.readAttemptValidation(RUN_ID, 1)).toEqual(failed);
+    expect(store.readAttemptValidation(RUN_ID, 2)).toEqual(passed);
+    expect(store.readAttemptReview(RUN_ID, 1)).toEqual(review);
+    // Attempt 2 没有 Review：读不到就是 null，不返回 attempt 1 的结果
+    expect(store.readAttemptReview(RUN_ID, 2)).toBeNull();
+    expect(store.readAttemptMetadata(RUN_ID, 1)).toMatchObject({ accepted: false });
+    expect(store.listAttemptNumbers(RUN_ID)).toEqual([1, 2]);
+  });
+
+  it("selected attempt promoted：promote 后根目录产物 = 被选中的那次 attempt", () => {
+    const { store, root } = withStore();
+    store.putAttemptStory(RUN_ID, 1, config.title, "第一次正文");
+    store.putAttemptValidation(RUN_ID, 1, failed);
+    store.putAttemptStory(RUN_ID, 2, config.title, "第二次正文");
+    store.putAttemptValidation(RUN_ID, 2, passed);
+    store.putAttemptReview(RUN_ID, 2, review);
+
+    const promoted = store.promoteAttempt(RUN_ID, 2);
+    expect(Object.keys(promoted).sort()).toEqual(["review.json", "story.md", "validation.json"]);
+    expect(readFileSync(join(runDir(root, RUN_ID), "story.md"), "utf8")).toBe(`# ${config.title}\n\n第二次正文\n`);
+    expect(JSON.parse(readFileSync(join(runDir(root, RUN_ID), "validation.json"), "utf8"))).toEqual(passed);
+    expect(JSON.parse(readFileSync(join(runDir(root, RUN_ID), "review.json"), "utf8"))).toEqual(review);
+    // promote 是复制而不是引用：重写 attempt 目录不会改变已 promote 的根目录产物
+    store.putAttemptStory(RUN_ID, 2, config.title, "被改写");
+    expect(readFileSync(join(runDir(root, RUN_ID), "story.md"), "utf8")).toBe(`# ${config.title}\n\n第二次正文\n`);
+  });
+
+  it("promote 不存在的 attempt 直接报错，不会留下空的根目录产物", () => {
+    const { store, root } = withStore();
+    expect(() => store.promoteAttempt(RUN_ID, 3)).toThrow();
+    expect(existsSync(join(runDir(root, RUN_ID), "story.md"))).toBe(false);
+  });
+
+  it("§28 Windows 兼容：promote 用复制实现，目录里没有符号链接 / junction", () => {
+    const { store, root } = withStore();
+    store.putAttemptStory(RUN_ID, 1, config.title, "正文");
+    store.promoteAttempt(RUN_ID, 1);
+    const entries = readdirSync(join(runDir(root, RUN_ID), "attempts", "01"), { withFileTypes: true });
+    expect(entries.every((e) => !e.isSymbolicLink())).toBe(true);
+    const rootEntries = readdirSync(runDir(root, RUN_ID), { withFileTypes: true });
+    expect(rootEntries.every((e) => !e.isSymbolicLink())).toBe(true);
+  });
+
+  it("UTF-8 works：中文标题 / 正文不出现乱码或丢失", () => {
+    const { store } = withStore();
+    const story = "陈岚推开派出所的玻璃门，雨水顺着屋檐砸在台阶上。";
+    store.putAttemptStory(RUN_ID, 1, "消失的目击者", story);
+    expect(store.readAttemptStory(RUN_ID, 1)).toBe(`# 消失的目击者\n\n${story}\n`);
+    store.putAttemptReview(RUN_ID, 1, { ...review, summary: "故事整体完整，主线清楚。" });
+    expect(store.readAttemptReview(RUN_ID, 1)?.summary).toBe("故事整体完整，主线清楚。");
+  });
+
+  it("Windows-safe paths：attempt 编号非法或越界一律拒绝", () => {
+    const { store } = withStore();
+    for (const bad of [0, -1, 1.5, "1", null, undefined]) {
+      expect(() => store.putAttemptStory(RUN_ID, bad as never, config.title, "正文")).toThrow();
+    }
+    expect(() => store.createAttemptDirectory(RUN_ID, 100)).toThrow();
+  });
+
+  it("run 尚未创建时读取返回 null，不抛异常", () => {
+    const { store } = withStore();
+    expect(store.readFinalStory(RUN_ID)).toBeNull();
+    expect(store.readRunMetadata(RUN_ID)).toBeNull();
+    expect(store.listAttemptNumbers(RUN_ID)).toEqual([]);
+  });
+});
+
 describe("ArtifactStore — path traversal（§50）", () => {
   it("run_id 含 .. 无法越出 runs 根目录", () => {
     const { store } = withStore();

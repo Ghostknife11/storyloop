@@ -10,6 +10,7 @@ import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
+import type { AttemptSummaryApi } from "@/lib/api";
 
 /**
  * §31~§33/§46 HTTP 路由层：只验证「JSON 解析 → 委托 service → 响应形状」，
@@ -111,7 +112,7 @@ describe("POST /api/runs（§32/§46）", () => {
 
     const runDir = join(dir, "runs", String(body.run_id));
     expect(readdirSync(runDir).sort()).toEqual([
-      "beats.json", "config.json", "metadata.json", "review.json", "story.md", "validation.json",
+      "attempts", "beats.json", "config.json", "metadata.json", "review.json", "story.md", "validation.json",
     ]);
     expect(JSON.parse(readFileSync(join(runDir, "validation.json"), "utf8"))).toEqual({ passed: true, issues: [] });
     // §16/§17/§24 metadata 与响应一致
@@ -197,22 +198,32 @@ describe("POST /api/runs — validation failed（§26/§42/§44）", () => {
     }
   });
 
-  it("§44D 主角缺失：MISSING_PROTAGONIST，且不因此重新生成", async () => {
+  it("§44D 主角缺失：MISSING_PROTAGONIST，按默认策略重试一次后 exhausted", async () => {
     const dir = withTmpDir();
     const fetchMock = stubLLM(undefined, `${"林述安走在长长的走廊里。".repeat(90)}`);
     const res = await postRuns(post("/api/runs", { config }));
+    expect(res.status).toBe(200);
     const body = await readJson(res);
     const validation = body.validation as ValidationResult;
     expect(validation.issues.map((i) => i.code)).toContain("MISSING_PROTAGONIST");
     expect(validation.passed).toBe(false);
-    // §58：Generator 只被调用一次，绝不自动重试
+    // §14/§47：Validation Failed + 默认策略 → 再生成一次；默认 max_attempts=2
     const genCalls = fetchMock.mock.calls.filter(([, init]) => {
       const b = JSON.parse(String((init as RequestInit | undefined)?.body)) as { messages?: Array<{ content: string }> };
       const system = (b.messages ?? []).map((m) => m.content).join("\n");
       return !system.includes("剧情策划") && !system.includes("审阅");
     });
-    expect(genCalls).toHaveLength(1);
+    expect(genCalls).toHaveLength(2);
+    expect(body.attempt_count).toBe(2);
+    expect(body.selected_attempt).toBe(2);
+    expect(body.quality_status).toBe("exhausted");
+    expect((body.attempts as AttemptSummaryApi[]).map((a) => a.retry_reason)).toEqual([
+      "validation_failed",
+      "validation_failed",
+    ]);
+    // §17：正文仍然落盘，selected attempt 已 promote
     expect(existsSync(join(dir, "runs", String(body.run_id), "story.md"))).toBe(true);
+    expect(existsSync(join(dir, "runs", String(body.run_id), "attempts", "02", "story.md"))).toBe(true);
   });
 });
 
@@ -237,7 +248,7 @@ describe("POST /api/runs — review failure（§28/§34/§46）", () => {
     expect(existsSync(join(runDir, "validation.json"))).toBe(true);
     expect(existsSync(join(runDir, "review.json"))).toBe(false);
     expect(readdirSync(runDir).sort()).toEqual([
-      "beats.json", "config.json", "metadata.json", "story.md", "validation.json",
+      "attempts", "beats.json", "config.json", "metadata.json", "story.md", "validation.json",
     ]);
     const meta = JSON.parse(readFileSync(join(runDir, "metadata.json"), "utf8"));
     expect(meta.status).toBe("completed");
