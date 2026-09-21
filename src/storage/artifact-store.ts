@@ -3,6 +3,7 @@ import { join, resolve, sep } from "node:path";
 import type { StoryConfig } from "@/types/story-config";
 import type { BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
+import type { ValidationResult } from "@/types/validation-result";
 
 /**
  * §13/§22 ArtifactStore：只负责创建目录、保存 JSON / Markdown / Metadata、返回路径。
@@ -52,6 +53,11 @@ export class ArtifactStore {
   /** §21/§22 Review 产物：与其它产物同一套原子写入，重复审阅时覆盖（§30）。 */
   putReview(runId: string, review: ReviewResult): string {
     return this.putJson(runId, "review.json", review);
+  }
+
+  /** §21/§22 Validation 产物：同一套原子写入；§27 手动 Revalidate 时覆盖，不建历史。 */
+  putValidation(runId: string, validation: ValidationResult): string {
+    return this.putJson(runId, "validation.json", validation);
   }
 
   putMetadata(runId: string, metadata: Record<string, unknown>): string {
