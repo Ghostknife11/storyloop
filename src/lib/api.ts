@@ -1,13 +1,18 @@
 import type { StoryConfig } from "@/types/story-config";
 import type { BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
+import type { ValidationResult } from "@/types/validation-result";
 
-/** §32 Run 响应：run_id / 状态 / 正文 / 实际使用的 BeatPlan / 产物文件名。 */
+/** §32 Run 响应：run_id / 状态 / 正文 / 实际使用的 BeatPlan / 校验结果 / 评价 / 产物文件名。 */
 export interface RunApiResult {
   run_id: string;
   status: string;
   story: string;
   beat_plan: BeatPlan;
+  /** §26：硬性有效性检查结果；Validator 自身异常时为 null。 */
+  validation: ValidationResult | null;
+  validation_status: string;
+  validation_error?: string;
   /** §27/§28：Review 失败时为 null，story 仍然返回。 */
   review: ReviewResult | null;
   review_status: string;
@@ -102,4 +107,23 @@ export async function reviewStory(
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error || `审阅失败（HTTP ${res.status}）`);
   return data as ReviewResult;
+}
+
+/**
+ * §27 手动校验（Validate Again）：只重新跑硬性规则，不重新生成 Story，也不调用 Reviewer。
+ * 带 runId 时服务端覆盖该 Run 的 validation.json（§27）。
+ */
+export async function validateStory(
+  config: StoryConfig,
+  story: string,
+  runId?: string,
+): Promise<ValidationResult> {
+  const res = await fetch("/api/validate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ config, story, ...(runId ? { run_id: runId } : {}) }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || `校验失败（HTTP ${res.status}）`);
+  return data as ValidationResult;
 }
