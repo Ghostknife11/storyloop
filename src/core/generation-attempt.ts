@@ -3,10 +3,14 @@
  * §7：从 v0.7.0 起一个 Run 可以包含多个 Attempt。
  * §6：attempt_number 从 1 开始连续递增。
  * 与 network retry（§29）无关——这是 Pipeline 级别的故事生成尝试。
+ * v0.8.0 新增 repairs（§17）：同一次 Attempt 内部做过的定点修订，按发生顺序排列。
+ * Repair 不新增 Attempt，所以记录挂在 Attempt 上，而不是多一个 attempt_number。
  */
 
 import type { ValidationResult } from "@/types/validation-result";
 import type { ReviewResult } from "@/types/review-result";
+import type { RepairRecord, RepairSummary } from "@/types/repair";
+import { repairSummary, validateRepairRecord } from "@/types/repair";
 import { RETRY_REASONS, type RetryReason } from "@/core/retry-policy";
 
 export interface GenerationAttempt {
@@ -23,6 +27,8 @@ export interface GenerationAttempt {
   retry_reason: RetryReason | null;
   /** §24 本次尝试自身的错误（生成 / 校验 / 审阅异常的安全摘要）。 */
   error: string | null;
+  /** §17 本次 Attempt 内发生过的 Repair；一次都没修时是空数组。 */
+  repairs: RepairRecord[];
 }
 
 /** §51 Attempt 编号 / reason 必须合法，否则 attempt metadata 不可信。 */
@@ -40,6 +46,10 @@ export interface AttemptSummary {
   retry_reason: RetryReason | null;
   review_score: number | null;
   validation_passed: boolean | null;
+  /** §40 本次 Attempt 内发生过的 Repair 次数。 */
+  repair_count: number;
+  /** §40 只含编号 / 类型 / 成败，不带修订正文与完整结论。 */
+  repairs: RepairSummary[];
 }
 
 export function validateAttemptNumber(attemptNumber: unknown): number {
@@ -110,6 +120,20 @@ export function validateGenerationAttempt(raw: unknown): GenerationAttempt {
     r.validation === null || r.validation === undefined ? null : (r.validation as ValidationResult);
   const review =
     r.review === null || r.review === undefined ? null : (r.review as ReviewResult);
+  // §17：repairs 缺省视为空数组——没有修订的 Attempt 与 v0.7.0 产物保持同构。
+  const rawRepairs = r.repairs === null || r.repairs === undefined ? [] : r.repairs;
+  if (!Array.isArray(rawRepairs)) {
+    throw new GenerationAttemptError(`attempts[${attemptNumber}].repairs 必须是数组`);
+  }
+  const repairs = rawRepairs.map((item) => {
+    try {
+      return validateRepairRecord(item);
+    } catch (e) {
+      throw new GenerationAttemptError(
+        e instanceof Error ? e.message : `attempts[${attemptNumber}].repairs[?] 非法`,
+      );
+    }
+  });
 
   return {
     attempt_number: attemptNumber,
@@ -119,6 +143,7 @@ export function validateGenerationAttempt(raw: unknown): GenerationAttempt {
     accepted,
     retry_reason: retryReason,
     error,
+    repairs,
   };
 }
 
@@ -130,5 +155,7 @@ export function attemptSummary(attempt: GenerationAttempt): AttemptSummary {
     retry_reason: attempt.retry_reason,
     review_score: attempt.review ? attempt.review.score : null,
     validation_passed: attempt.validation ? attempt.validation.passed : null,
+    repair_count: attempt.repairs.length,
+    repairs: attempt.repairs.map(repairSummary),
   };
 }

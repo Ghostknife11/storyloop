@@ -7,6 +7,10 @@
  *   4. 否则 Accept
  * §12 Reviewer / Validator 自身异常不代表 Story 有问题，不能触发 Story Retry。
  * §21 只用已有结果做简单规则判断：没有 LLM Retry Decider，没有自适应策略。
+ *
+ * v0.8.0 扩展（§18）：策略对象同时携带 Repair 开关与每个 Attempt 的 Repair 上限。
+ * Repair 与 Retry 共用同一份策略，但 Repair 次数按 Attempt 单独计数（§17：Repair 不新增
+ * Attempt）。§21 最终 Accept 仍只由这里的判定产生，Repair 不建立第二套 Acceptance System。
  */
 
 import type { ValidationResult } from "@/types/validation-result";
@@ -17,17 +21,26 @@ export interface RetryPolicy {
   max_attempts: number;
   min_review_score: number;
   retry_on_validation_failure: boolean;
+  /** §18 是否允许在整篇重试之前先做定点修订。 */
+  enable_repair: boolean;
+  /** §18/§19 单个 Attempt 内最多修订几次；0 表示退回 v0.7.0 行为。 */
+  max_repairs_per_attempt: number;
 }
 
-/** §4 默认策略：初次生成 + 最多 1 次自动重试。 */
+/** §4 默认策略：初次生成 + 最多 1 次自动重试 + 每个 Attempt 最多 1 次定点修订。 */
 export const DEFAULT_RETRY_POLICY: RetryPolicy = {
   max_attempts: 2,
   min_review_score: 70,
   retry_on_validation_failure: true,
+  enable_repair: true,
+  max_repairs_per_attempt: 1,
 };
 
 /** §31 Settings Validation：上限避免误操作造成大量 API 消耗。 */
 export const MAX_ATTEMPTS_LIMIT = { min: 1, max: 5 } as const;
+
+/** §34 Settings Validation：Repair 上限 0 ~ 3；0 = 关闭 Repair。 */
+export const MAX_REPAIRS_LIMIT = { min: 0, max: 3 } as const;
 
 /** §22 稳定 reason：UI / CLI / metadata 都只用这三个字符串。 */
 export type RetryReason =
@@ -103,10 +116,38 @@ export function validateRetryPolicy(raw: unknown): RetryPolicy {
     );
   }
 
+  const enableRepair =
+    r.enable_repair === undefined || r.enable_repair === null
+      ? DEFAULT_RETRY_POLICY.enable_repair
+      : r.enable_repair;
+  if (typeof enableRepair !== "boolean") {
+    throw new RetryPolicyError(
+      `retry_policy.enable_repair 必须是布尔值（实际 ${String(enableRepair)}）`,
+    );
+  }
+
+  // §34：上限 0 ~ 3。0 是合法值（关闭 Repair），不能当成「没传」补默认值。
+  const maxRepairs =
+    r.max_repairs_per_attempt === undefined || r.max_repairs_per_attempt === null
+      ? DEFAULT_RETRY_POLICY.max_repairs_per_attempt
+      : r.max_repairs_per_attempt;
+  if (
+    typeof maxRepairs !== "number" ||
+    !Number.isInteger(maxRepairs) ||
+    maxRepairs < MAX_REPAIRS_LIMIT.min ||
+    maxRepairs > MAX_REPAIRS_LIMIT.max
+  ) {
+    throw new RetryPolicyError(
+      `retry_policy.max_repairs_per_attempt 必须是 ${MAX_REPAIRS_LIMIT.min} ~ ${MAX_REPAIRS_LIMIT.max} 之间的整数（实际 ${String(maxRepairs)}）`,
+    );
+  }
+
   return {
     max_attempts: maxAttempts,
     min_review_score: score,
     retry_on_validation_failure: onValidation,
+    enable_repair: enableRepair,
+    max_repairs_per_attempt: maxRepairs,
   };
 }
 

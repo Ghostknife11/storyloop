@@ -3,6 +3,8 @@
  * 状态只用于表示当前 Run 运行到了哪里（§11），不是 Observability。
  * v0.5.0 新增 reviewing（§18）：Story 落盘之后的审阅阶段。
  * v0.6.0 新增 validating（§17）：Story 落盘之后、审阅之前的硬性有效性检查阶段。
+ * v0.8.0 新增 repairing / revalidating / rereviewing（§35）：同一次 Attempt 内部的
+ * 定点修订阶段。Repair 不新增 Attempt，所以这三个阶段都挂在同一个 attempt_number 下。
  */
 
 import { randomBytes } from "node:crypto";
@@ -14,6 +16,9 @@ export type RunStatus =
   | "saving"
   | "validating"
   | "reviewing"
+  | "repairing"
+  | "revalidating"
+  | "rereviewing"
   | "completed"
   | "failed";
 
