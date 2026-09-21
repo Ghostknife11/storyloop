@@ -329,6 +329,147 @@ describe("ArtifactStore — attempt artifacts（§50/§23/§27/§28）", () => {
   });
 });
 
+/** §49 Repair 级产物：attempts/NN/repairs/NN/，纯追加，不改 Attempt 级已有文件。 */
+describe("ArtifactStore — repair artifacts（§49）", () => {
+  it("§30 initial_story.md：修订前的初始正文单独落一份，不覆盖 attempt 的 story.md", () => {
+    const { store, root } = withStore();
+    store.putAttemptStory(RUN_ID, 1, config.title, "第一次生成的正文");
+    store.putAttemptInitialStory(RUN_ID, 1, config.title, "第一次生成的正文");
+
+    const file = readFileSync(join(runDir(root, RUN_ID), "attempts", "01", "initial_story.md"), "utf8");
+    expect(file).toBe(`# ${config.title}\n\n第一次生成的正文\n`);
+    expect(store.readAttemptInitialStory(RUN_ID, 1)).toBe(`# ${config.title}\n\n第一次生成的正文\n`);
+    // 正文与初始版本是两份文件，各自独立
+    expect(store.readAttemptStory(RUN_ID, 1)).toBe(`# ${config.title}\n\n第一次生成的正文\n`);
+    expect(readdirSync(join(runDir(root, RUN_ID), "attempts", "01")).sort()).toEqual([
+      "initial_story.md", "story.md",
+    ]);
+  });
+
+  it("§30 修订后正文写进 repairs/01/story.md，attempt 根目录 story.md 由调用方更新", () => {
+    const { store, root } = withStore();
+    store.putRepairStory(RUN_ID, 1, 1, config.title, "修订后的正文");
+    expect(store.readAttemptStory(RUN_ID, 1)).toBeNull(); // 还没写 attempt 级的
+    expect(readFileSync(
+      join(runDir(root, RUN_ID), "attempts", "01", "repairs", "01", "story.md"),
+      "utf8",
+    )).toBe(`# ${config.title}\n\n修订后的正文\n`);
+
+    // §30：attempt 根目录的 story.md 代表这个 Attempt 的最终版本
+    store.putAttemptStory(RUN_ID, 1, config.title, "修订后的正文");
+    expect(store.readAttemptStory(RUN_ID, 1)).toBe(`# ${config.title}\n\n修订后的正文\n`);
+  });
+
+  it("§29/§31 repairs/ 挂在 attempt 目录内：不新增 attempt 目录", () => {
+    const { store, root } = withStore();
+    store.putAttemptStory(RUN_ID, 1, config.title, "第一次正文");
+    store.putRepairRequest(RUN_ID, 1, { repair_number: 1, issue_type: "ending", issue_message: "故事缺少明确结局。" });
+
+    expect(store.listAttemptNumbers(RUN_ID)).toEqual([1]);
+    expect(store.listRepairNumbers(RUN_ID, 1)).toEqual([1]);
+    const saved = JSON.parse(readFileSync(
+      join(runDir(root, RUN_ID), "attempts", "01", "repairs", "01", "request.json"),
+      "utf8",
+    )) as Record<string, unknown>;
+    // §31：正好三个字段——编号 / 类型 / 问题说明
+    expect(saved).toEqual({ repair_number: 1, issue_type: "ending", issue_message: "故事缺少明确结局。" });
+    // attempt 目录里只有 repairs/ 与 attempt 级文件，没有别的修订元数据
+    expect(readdirSync(join(runDir(root, RUN_ID), "attempts", "01")).sort()).toEqual([
+      "repairs", "story.md",
+    ]);
+  });
+
+  it("§15/§16 修订后的重新校验与重新审阅单独落盘，不覆盖 attempt 级 validation / review", () => {
+    const { store, root } = withStore();
+    store.putAttemptValidation(RUN_ID, 1, failed);
+    store.putAttemptReview(RUN_ID, 1, { ...review, score: 61 });
+    store.putRepairValidation(RUN_ID, 1, 1, passed);
+    store.putRepairReview(RUN_ID, 1, 1, { ...review, score: 80 });
+
+    const repairDir = join(runDir(root, RUN_ID), "attempts", "01", "repairs", "01");
+    expect(JSON.parse(readFileSync(join(repairDir, "validation.json"), "utf8"))).toEqual(passed);
+    expect(JSON.parse(readFileSync(join(repairDir, "review.json"), "utf8"))).toEqual({ ...review, score: 80 });
+    // attempt 级的旧结论原样保留
+    expect(store.readAttemptValidation(RUN_ID, 1)).toEqual(failed);
+    expect(store.readAttemptReview(RUN_ID, 1)?.score).toBe(61);
+  });
+
+  it("§32 Repair metadata 只记录前后对比，不含 §5 禁止的归因字段", () => {
+    const { store, root } = withStore();
+    store.putRepairMetadata(RUN_ID, 1, 1, {
+      repair_number: 1,
+      issue_type: "length",
+      success: true,
+      before_review_score: 61,
+      after_review_score: 80,
+      before_validation_passed: false,
+      after_validation_passed: true,
+    });
+    const saved = JSON.parse(readFileSync(
+      join(runDir(root, RUN_ID), "attempts", "01", "repairs", "01", "metadata.json"),
+      "utf8",
+    )) as Record<string, unknown>;
+    expect(saved).toEqual({
+      repair_number: 1,
+      issue_type: "length",
+      success: true,
+      before_review_score: 61,
+      after_review_score: 80,
+      before_validation_passed: false,
+      after_validation_passed: true,
+    });
+    for (const forbidden of ["root_cause", "causal_diagnosis", "strategy_score", "policy_id", "confidence"]) {
+      expect(saved[forbidden]).toBeUndefined();
+    }
+  });
+
+  it("§29 同一次 Attempt 可以修订多次：repairs/01、repairs/02 互不覆盖", () => {
+    const { store, root } = withStore();
+    store.putRepairStory(RUN_ID, 1, 1, config.title, "第一次修订");
+    store.putRepairStory(RUN_ID, 1, 2, config.title, "第二次修订");
+    store.putRepairRequest(RUN_ID, 2, { repair_number: 1, issue_type: "structure", issue_message: "结尾动作缺少铺垫。" });
+
+    expect(store.listRepairNumbers(RUN_ID, 1)).toEqual([1, 2]);
+    expect(store.listRepairNumbers(RUN_ID, 2)).toEqual([1]);
+    expect(readFileSync(
+      join(runDir(root, RUN_ID), "attempts", "01", "repairs", "01", "story.md"), "utf8",
+    )).toBe(`# ${config.title}\n\n第一次修订\n`);
+    expect(readFileSync(
+      join(runDir(root, RUN_ID), "attempts", "01", "repairs", "02", "story.md"), "utf8",
+    )).toBe(`# ${config.title}\n\n第二次修订\n`);
+  });
+
+  it("§28 修订编号非法一律拒绝，目录里不会出现 1 位 / 3 位数字", () => {
+    const { store, root } = withStore();
+    for (const bad of [0, -1, 1.5, "1", null, undefined, 100]) {
+      expect(() => store.putRepairStory(RUN_ID, 1, bad as never, config.title, "正文")).toThrow();
+      expect(() => store.putRepairRequest(RUN_ID, 1, { repair_number: bad as never, issue_type: "length", issue_message: "太短。" })).toThrow();
+    }
+    expect(existsSync(join(runDir(root, RUN_ID), "attempts", "01", "repairs"))).toBe(false);
+  });
+
+  it("§28 越界防护：repair / attempt / run 三层编号都被挡住", () => {
+    const { store, root } = withStore();
+    expect(() => store.putRepairStory("../escape", 1, 1, "t", "s")).toThrow(/越界/);
+    expect(() => store.putRepairRequest("../escape", 1, { repair_number: 1, issue_type: "length", issue_message: "太短。" })).toThrow(/越界/);
+    expect(() => store.putRepairValidation("../escape", 1, 1, passed)).toThrow(/越界/);
+    expect(() => store.putRepairReview("../escape", 1, 1, review)).toThrow(/越界/);
+    expect(() => store.putRepairMetadata("../escape", 1, 1, {
+      repair_number: 1, issue_type: "length", success: false,
+      before_review_score: null, after_review_score: null,
+      before_validation_passed: null, after_validation_passed: null,
+    })).toThrow(/越界/);
+    expect(existsSync(join(root, "..", "escape"))).toBe(false);
+  });
+
+  it("没有修订时读回 null，不抛异常", () => {
+    const { store } = withStore();
+    store.putAttemptStory(RUN_ID, 1, config.title, "正文");
+    expect(store.readAttemptInitialStory(RUN_ID, 1)).toBeNull();
+    expect(store.listRepairNumbers(RUN_ID, 1)).toEqual([]);
+  });
+});
+
 describe("ArtifactStore — path traversal（§50）", () => {
   it("run_id 含 .. 无法越出 runs 根目录", () => {
     const { store } = withStore();
