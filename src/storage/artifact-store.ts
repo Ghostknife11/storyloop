@@ -4,7 +4,7 @@ import type { StoryConfig } from "@/types/story-config";
 import type { BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
-import { validateAttemptNumber } from "@/core/generation-attempt";
+import { attemptDirectoryName } from "@/core/generation-attempt";
 
 /**
  * §13/§22 ArtifactStore：只负责创建目录、保存 JSON / Markdown / Metadata、返回路径。
@@ -82,8 +82,9 @@ export class ArtifactStore {
     return this.attemptDir(runId, attemptNumber);
   }
 
+  /** 只判断存在性：不顺手创建目录，否则「不存在的 attempt」永远查不到。 */
   attemptExists(runId: string, attemptNumber: number): boolean {
-    return existsSync(this.attemptDir(runId, attemptNumber));
+    return existsSync(this.attemptDirPath(runId, attemptNumber));
   }
 
   putAttemptStory(runId: string, attemptNumber: number, title: string, story: string): string {
@@ -157,7 +158,7 @@ export class ArtifactStore {
 
   promoteAttempt(runId: string, attemptNumber: number): Record<string, string> {
     const promoted: Record<string, string> = {};
-    const dir = this.attemptDir(runId, attemptNumber);
+    const dir = this.attemptDirPath(runId, attemptNumber);
     if (!existsSync(dir)) throw new Error(`Attempt ${attemptNumber} 不存在：${dir}`);
 
     const storyPath = join(dir, "story.md");
@@ -182,17 +183,20 @@ export class ArtifactStore {
   // 内部：路径解析与原子写入
   // ---------------------------------------------------------------------------
 
+  /** 解析（不创建）attempt 目录路径。 */
+  private attemptDirPath(runId: string, attemptNumber: number): string {
+    const n = attemptDirectoryName(attemptNumber);
+    return resolve(this.runDir(runId), ATTEMPTS_DIR, n);
+  }
+
   private attemptDir(runId: string, attemptNumber: number): string {
-    const n = validateAttemptNumber(attemptNumber);
-    const runRoot = this.runDir(runId);
-    const dir = resolve(runRoot, ATTEMPTS_DIR, String(n).padStart(2, "0"));
+    const dir = this.attemptDirPath(runId, attemptNumber);
     mkdirSync(dir, { recursive: true });
     return dir;
   }
 
   private attemptFile(attemptNumber: number, filename: string): string {
-    const n = validateAttemptNumber(attemptNumber);
-    return `${ATTEMPTS_DIR}/${String(n).padStart(2, "0")}/${filename}`;
+    return `${ATTEMPTS_DIR}/${attemptDirectoryName(attemptNumber)}/${filename}`;
   }
 
   private rootFile(runId: string, filename: string): string {
@@ -208,6 +212,8 @@ export class ArtifactStore {
     const dir = this.runDir(runId);
     const finalPath = this.resolveInRun(dir, filename);
     const tmpPath = join(dir, `.${filename.split("/").join("_")}.tmp`);
+    // §23：attempts/NN 由首次写入惰性创建
+    mkdirSync(join(finalPath, ".."), { recursive: true });
     writeFileSync(tmpPath, content, "utf8");
     renameSync(tmpPath, finalPath);
     return finalPath;
