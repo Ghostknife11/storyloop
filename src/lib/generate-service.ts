@@ -4,13 +4,17 @@ import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
 import { BeatPlanner } from "@/lib/beat-planner";
 import { StoryGenerator } from "@/lib/story-generator";
+import { BasicReviewer } from "@/lib/basic-reviewer";
 import { GenerationPipeline, PipelineError, type GenerationResult } from "@/core/pipeline";
 import { ArtifactStore } from "@/storage/artifact-store";
+import type { ReviewResult } from "@/types/review-result";
 
 export { ConfigValidationError, UnsupportedConfigVersionError } from "@/types/story-config";
 export { LLMError } from "@/lib/llm";
 export { BeatParseError } from "@/lib/beat-parser";
 export { BeatPlanValidationError } from "@/types/beat-plan";
+export { ReviewValidationError } from "@/types/review-result";
+export { ReviewParseError } from "@/lib/review-parser";
 
 /** 模块加载时锁定项目根，避免测试 chdir 后模板路径漂移。 */
 const PROJECT_ROOT = process.cwd();
@@ -83,12 +87,16 @@ export async function planStory(
   }
 }
 
-/** §32 v0.4.0 Run 响应：只回 run_id / 状态 / 产物文件名，不返回本地绝对路径（§67）。 */
+/** §32 v0.5.0 Run 响应：run_id / 状态 / 正文 / 评价 / 产物文件名，不返回本地绝对路径（§67）。 */
 export interface RunOk {
   run_id: string;
   status: string;
   story: string;
   beat_plan: BeatPlan;
+  /** §28：Review 失败时为 null，但 story 仍然返回。 */
+  review: ReviewResult | null;
+  review_status: string;
+  review_error?: string;
   artifacts: Record<string, string>;
 }
 
@@ -100,17 +108,19 @@ export interface RunError {
 
 export type RunResult = { status: number; json: RunOk | RunError };
 
-/** §5 依赖注入：测试用 Mock LLM / 假 Planner，绝不打真实付费 API。 */
+/** §5 依赖注入：测试用 Mock LLM / 假 Planner / 假 Reviewer，绝不打真实付费 API。 */
 export interface RunDeps {
   llm?: LLMClient;
   planner?: BeatPlanner;
   generator?: StoryGenerator;
+  reviewer?: BasicReviewer;
   artifactStore?: ArtifactStore;
 }
 
 /**
  * §23 组装 GenerationPipeline。runs/ 根在调用时解析（而非模块加载时），
  * 让测试可以在临时目录里跑完整 Run。
+ * §25 Writer 与 Reviewer 使用同一个 LLMClient——不引入 Reviewer Model / Model Router。
  */
 export function buildPipeline(runtime: GenerateRuntime, deps: RunDeps = {}): GenerationPipeline {
   const llm = deps.llm ?? clientFromEnv(runtime);
@@ -122,18 +132,26 @@ export function buildPipeline(runtime: GenerateRuntime, deps: RunDeps = {}): Gen
     llm,
     join(PROJECT_ROOT, "prompts", "story.txt"),
   );
+  const reviewer = deps.reviewer ?? new BasicReviewer(
+    llm,
+    join(PROJECT_ROOT, "prompts", "reviewer.txt"),
+  );
   const artifactStore = deps.artifactStore ?? new ArtifactStore();
-  return new GenerationPipeline(planner, generator, artifactStore);
+  return new GenerationPipeline(planner, generator, reviewer, artifactStore);
 }
 
 function runOkOf(result: GenerationResult): RunOk {
-  return {
+  const ok: RunOk = {
     run_id: result.run_id,
     status: result.status,
     story: result.story,
     beat_plan: result.beat_plan,
+    review: result.review,
+    review_status: result.review_status,
     artifacts: result.artifacts,
   };
+  if (result.review_error) ok.review_error = result.review_error;
+  return ok;
 }
 
 /** §28 错误映射：阶段来自 PipelineError，用户拿得到失败阶段与 run_id。 */
@@ -145,11 +163,15 @@ function runFail(e: unknown): RunResult {
     e.name === "ConfigValidationError" ||
     e.name === "RequestValidationError" ||
     e.name === "UnsupportedConfigVersionError" ||
-    e.name === "BeatPlanValidationError"
+    e.name === "BeatPlanValidationError" ||
+    e.name === "ReviewValidationError"
   )) {
     return { status: 400, json: { error: e.message } };
   }
-  if (e instanceof LLMError || (e instanceof Error && e.name === "BeatParseError")) {
+  if (
+    e instanceof LLMError ||
+    (e instanceof Error && (e.name === "BeatParseError" || e.name === "ReviewParseError"))
+  ) {
     return { status: 502, json: { error: `Generation failed. 原因：${e.message}` } };
   }
   console.error("[runs] unexpected error:", e);
@@ -233,5 +255,73 @@ export async function previewPrompt(
       return { status: 400, json: { error: e.message } };
     }
     return { status: 500, json: { error: "服务器内部错误" } };
+  }
+}
+
+/** §29/§30 手动审阅结果：成功回 ReviewResult；失败回安全错误信息。 */
+export type ReviewOutcome =
+  | { status: number; json: ReviewResult }
+  | { status: number; json: { error: string } };
+
+/**
+ * §29 POST /api/review 的服务层：{config, story}（可选 run_id）→ BasicReviewer → ReviewResult。
+ * §30 带上 run_id 时覆盖该 Run 的 review.json——不建立 review_v1 / review_history。
+ * §3/§4 只审阅，不据此重新生成或改写正文。
+ */
+export async function reviewStory(body: unknown, deps: RunDeps = {}): Promise<ReviewOutcome> {
+  try {
+    const raw = (body ?? {}) as Record<string, unknown>;
+    const config = validateStoryConfig(raw.config ?? normalizeLegacy(raw));
+
+    const story = typeof raw.story === "string" ? raw.story.trim() : "";
+    if (!story) {
+      return { status: 400, json: { error: "story is required——提供需要审阅的小说正文" } };
+    }
+
+    const runtime = runtimeOf(raw);
+    const reviewer = deps.reviewer ?? new BasicReviewer(
+      deps.llm ?? clientFromEnv(runtime),
+      join(PROJECT_ROOT, "prompts", "reviewer.txt"),
+    );
+    const review = await reviewer.review(config, story);
+
+    // §30：re-review 覆盖当前 review.json（run_id 越界由 ArtifactStore 拦截）
+    const runId = typeof raw.run_id === "string" ? raw.run_id.trim() : "";
+    if (runId) {
+      const store = deps.artifactStore ?? new ArtifactStore();
+      let exists: boolean;
+      try {
+        exists = store.runExists(runId);
+      } catch {
+        return { status: 400, json: { error: `run_id 非法：${runId}` } };
+      }
+      if (!exists) {
+        return {
+          status: 400,
+          json: { error: `run_id 不存在：${runId}（只能覆盖已存在 Run 的 review.json）` },
+        };
+      }
+      store.putReview(runId, review);
+    }
+
+    return { status: 200, json: review };
+  } catch (e) {
+    if (e instanceof Error && (
+      e.name === "ConfigValidationError" ||
+      e.name === "RequestValidationError" ||
+      e.name === "UnsupportedConfigVersionError" ||
+      e.name === "ReviewValidationError"
+    )) {
+      return { status: 400, json: { error: e.message } };
+    }
+    if (
+      e instanceof LLMError ||
+      (e instanceof Error && (e.name === "BeatParseError" || e.name === "ReviewParseError"))
+    ) {
+      // §15：明确错误，用户手动 Review Again，禁止业务层自动重试
+      return { status: 502, json: { error: `Review failed. 原因：${e.message}` } };
+    }
+    console.error("[review] unexpected error:", e);
+    return { status: 500, json: { error: "Review failed. 原因：服务器内部错误" } };
   }
 }
