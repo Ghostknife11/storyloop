@@ -10,6 +10,21 @@ import { GenerationPipeline, PipelineError, type GenerationResult } from "@/core
 import { ArtifactStore } from "@/storage/artifact-store";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
+import {
+  DEFAULT_RETRY_POLICY,
+  RETRY_REASONS,
+  RetryPolicyError,
+  validateRetryPolicy,
+  type RetryPolicy,
+  type RetryReason,
+} from "@/core/retry-policy";
+import {
+  attemptSummary,
+  validateAttemptNumber,
+  type AttemptSummary,
+  type GenerationAttempt,
+} from "@/core/generation-attempt";
+import type { QualityStatus } from "@/core/pipeline";
 
 export { ConfigValidationError, UnsupportedConfigVersionError } from "@/types/story-config";
 export { LLMError } from "@/lib/llm";
@@ -91,7 +106,8 @@ export async function planStory(
 }
 
 /** §32 v0.5.0 Run 响应：run_id / 状态 / 正文 / 评价 / 产物文件名，不返回本地绝对路径（§67）。
- *  v0.6.0 增加 validation / validation_status / validation_error（§26）。 */
+ *  v0.6.0 增加 validation / validation_status / validation_error（§26）。
+ *  v0.7.0 增加 attempt_count / selected_attempt / quality_status / attempts（§38）。 */
 export interface RunOk {
   run_id: string;
   status: string;
@@ -106,6 +122,14 @@ export interface RunOk {
   review_status: string;
   review_error?: string;
   artifacts: Record<string, string>;
+  /** §16/§38：accepted = 某次 Attempt 满足策略；exhausted = 次数用尽仍未满足。 */
+  quality_status: "accepted" | "exhausted";
+  /** §7/§38：本次 Run 实际跑过的 Attempt 数量。 */
+  attempt_count: number;
+  /** §17/§38：最终采用的 Attempt 编号（exhausted 时为最后一次）。 */
+  selected_attempt: number;
+  /** §38：只含摘要，不带完整正文。 */
+  attempts: AttemptSummary[];
 }
 
 export interface RunError {
@@ -162,16 +186,29 @@ function runOkOf(result: GenerationResult): RunOk {
     review: result.review,
     review_status: result.review_status,
     artifacts: result.artifacts,
+    quality_status: result.quality_status,
+    attempt_count: result.attempt_count,
+    selected_attempt: result.selected_attempt,
+    attempts: result.attempts.map(attemptSummary),
   };
   if (result.validation_error) ok.validation_error = result.validation_error;
   if (result.review_error) ok.review_error = result.review_error;
   return ok;
 }
 
+/** §37 retry_policy 在请求体里，不属于 StoryConfig；缺省用默认策略，越界一律 400。 */
+function retryPolicyOf(raw: Record<string, unknown>): RetryPolicy {
+  return validateRetryPolicy(raw.retry_policy ?? DEFAULT_RETRY_POLICY);
+}
+
 /** §28 错误映射：阶段来自 PipelineError，用户拿得到失败阶段与 run_id。 */
 function runFail(e: unknown): RunResult {
   if (e instanceof PipelineError) {
     return { status: 502, json: { error: e.message, run_id: e.runId, stage: e.stage } };
+  }
+  if (e instanceof RetryPolicyError) {
+    // §31：策略越界是调用方错误，不是服务器故障
+    return { status: 400, json: { error: e.message } };
   }
   if (e instanceof Error && (
     e.name === "ConfigValidationError" ||
@@ -198,7 +235,8 @@ export async function startRun(body: unknown, deps: RunDeps = {}): Promise<RunRe
     const raw = (body ?? {}) as Record<string, unknown>;
     const config = validateStoryConfig(raw.config ?? normalizeLegacy(raw));
     const runtime = runtimeOf(raw);
-    const result = await buildPipeline(runtime, deps).run(config, runtime);
+    const policy = retryPolicyOf(raw);
+    const result = await buildPipeline(runtime, deps).run(config, runtime, policy);
     return { status: 200, json: runOkOf(result) };
   } catch (e) {
     return runFail(e);
@@ -217,7 +255,8 @@ export async function startRunFromPlan(body: unknown, deps: RunDeps = {}): Promi
     const plan = validateBeatPlan(raw.beat_plan);
 
     const runtime = runtimeOf(raw);
-    const result = await buildPipeline(runtime, deps).runWithPlan(config, plan, runtime);
+    const policy = retryPolicyOf(raw);
+    const result = await buildPipeline(runtime, deps).runWithPlan(config, plan, runtime, policy);
     return { status: 200, json: runOkOf(result) };
   } catch (e) {
     return runFail(e);
@@ -401,4 +440,199 @@ export async function validateStory(body: unknown, deps: RunDeps = {}): Promise<
     console.error("[validate] unexpected error:", e);
     return { status: 500, json: { error: "Validation failed. 原因：服务器内部错误" } };
   }
+}
+
+// ---------------------------------------------------------------------------
+// §39 GET /api/runs/{run_id} 与 /api/runs/{run_id}/attempts/{attempt_number}
+// 只读已存在的产物。不提供 GET /api/runs 全局历史列表（§40）。
+// ---------------------------------------------------------------------------
+
+/** §38/§39 Run 详情：与 RunOk 同源，只是从磁盘读回，不带绝对路径（§67）。 */
+export interface RunDetail {
+  run_id: string;
+  status: string;
+  quality_status: QualityStatus | null;
+  attempt_count: number;
+  selected_attempt: number;
+  max_attempts: number | null;
+  min_review_score: number | null;
+  story: string;
+  validation: ValidationResult | null;
+  validation_status: string;
+  review: ReviewResult | null;
+  review_status: string;
+  attempts: AttemptSummary[];
+}
+
+/** §35/§39 单个 Attempt 详情：正文 + 独立 Validation / Review + 采纳结论。 */
+export interface AttemptDetail {
+  run_id: string;
+  attempt_number: number;
+  accepted: boolean | null;
+  retry_reason: RetryReason | null;
+  selected: boolean;
+  story: string;
+  validation: ValidationResult | null;
+  review: ReviewResult | null;
+}
+
+export type RunLookupResult =
+  | { status: 200; json: RunDetail }
+  | { status: 400; json: RunError }
+  | { status: 404; json: RunError };
+
+export type AttemptLookupResult =
+  | { status: 200; json: AttemptDetail }
+  | { status: 400; json: RunError }
+  | { status: 404; json: RunError };
+
+/** §50 run_id 只允许单层目录名：先挡掉路径穿越，再由 ArtifactStore 做 containment check。 */
+function runIdOf(raw: unknown): string | null {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  const id = raw.trim();
+  if (id === "." || id === ".." || id.includes("/") || id.includes("\\")) return null;
+  return id;
+}
+
+function intOf(raw: unknown): number | null {
+  if (typeof raw === "number" && Number.isInteger(raw)) return raw;
+  if (typeof raw === "string" && /^-?\d+$/.test(raw.trim())) return Number(raw.trim());
+  return null;
+}
+
+function strOf(raw: unknown): string | null {
+  return typeof raw === "string" ? raw : null;
+}
+
+/** 磁盘上的 retry_reason 可能是被手改坏的，只认白名单值。 */
+function reasonOf(raw: unknown): RetryReason | null {
+  return typeof raw === "string" && RETRY_REASONS.includes(raw as RetryReason)
+    ? (raw as RetryReason)
+    : null;
+}
+
+function attemptSummaryFromDisk(
+  runId: string,
+  n: number,
+  meta: Record<string, unknown> | null,
+  store: ArtifactStore,
+): AttemptSummary {
+  const review = store.readAttemptReview(runId, n);
+  const validation = store.readAttemptValidation(runId, n);
+  return {
+    attempt_number: n,
+    accepted: typeof meta?.accepted === "boolean" ? meta.accepted : false,
+    retry_reason: reasonOf(meta?.retry_reason),
+    review_score: review ? review.score : intOf(meta?.review_score),
+    validation_passed: validation ? validation.passed : null,
+  };
+}
+
+/**
+ * §39 GET /api/runs/{run_id}：从 attempts/ 与 metadata.json 还原这次 Run。
+ * §40 没有 history 浏览器，一次请求只看一个 Run。
+ */
+export async function getRun(
+  runIdRaw: unknown,
+  store: ArtifactStore = new ArtifactStore(),
+): Promise<RunLookupResult> {
+  const runId = runIdOf(runIdRaw);
+  if (runId === null) {
+    return { status: 400, json: { error: "run_id 非法：必须是单个目录名" } };
+  }
+  let exists: boolean;
+  try {
+    exists = store.runExists(runId);
+  } catch {
+    return { status: 400, json: { error: `run_id 非法：${runId}` } };
+  }
+  if (!exists) {
+    return { status: 404, json: { error: `run_id 不存在：${runId}` } };
+  }
+
+  const meta = store.readRunMetadata(runId);
+  const numbers = store.listAttemptNumbers(runId);
+  const attempts = numbers.map((n) =>
+    attemptSummaryFromDisk(runId, n, store.readAttemptMetadata(runId, n), store),
+  );
+
+  return {
+    status: 200,
+    json: {
+      run_id: runId,
+      status: strOf(meta?.status) ?? "unknown",
+      quality_status: (strOf(meta?.quality_status) as QualityStatus | null) ?? null,
+      attempt_count: intOf(meta?.attempt_count) ?? numbers.length,
+      selected_attempt: intOf(meta?.selected_attempt) ?? (numbers.length > 0 ? numbers[numbers.length - 1] : 0),
+      max_attempts: intOf(meta?.max_attempts),
+      min_review_score: intOf(meta?.min_review_score),
+      story: store.readFinalStory(runId) ?? "",
+      validation: store.readFinalValidation(runId),
+      validation_status: strOf(meta?.validation_status) ?? "not_started",
+      review: store.readFinalReview(runId),
+      review_status: strOf(meta?.review_status) ?? "not_started",
+      attempts,
+    },
+  };
+}
+
+/**
+ * §39 GET /api/runs/{run_id}/attempts/{attempt_number}。
+ * §35：只返回这一次 Attempt 的实体，不做横向比较 / 排名 / Score Delta。
+ */
+export async function getRunAttempt(
+  runIdRaw: unknown,
+  attemptNumberRaw: unknown,
+  store: ArtifactStore = new ArtifactStore(),
+): Promise<AttemptLookupResult> {
+  const runId = runIdOf(runIdRaw);
+  if (runId === null) {
+    return { status: 400, json: { error: "run_id 非法：必须是单个目录名" } };
+  }
+  let attemptNumber: number;
+  try {
+    attemptNumber = validateAttemptNumber(intOf(attemptNumberRaw) ?? 0);
+  } catch {
+    return { status: 400, json: { error: "attempt_number 必须是大于 0 的整数" } };
+  }
+  if (attemptNumber > 99) {
+    return { status: 400, json: { error: "attempt_number 不能超过 99" } };
+  }
+
+  let exists: boolean;
+  try {
+    exists = store.runExists(runId);
+  } catch {
+    return { status: 400, json: { error: `run_id 非法：${runId}` } };
+  }
+  if (!exists) {
+    return { status: 404, json: { error: `run_id 不存在：${runId}` } };
+  }
+  let attemptExists: boolean;
+  try {
+    attemptExists = store.attemptExists(runId, attemptNumber);
+  } catch {
+    return { status: 400, json: { error: `attempt_number 非法：${attemptNumber}` } };
+  }
+  if (!attemptExists) {
+    return { status: 404, json: { error: `Attempt ${attemptNumber} 不存在于 Run ${runId}` } };
+  }
+
+  const meta = store.readRunMetadata(runId);
+  const attemptMeta = store.readAttemptMetadata(runId, attemptNumber);
+  const accepted = attemptMeta && typeof attemptMeta.accepted === "boolean" ? attemptMeta.accepted : null;
+
+  return {
+    status: 200,
+    json: {
+      run_id: runId,
+      attempt_number: attemptNumber,
+      accepted,
+      retry_reason: accepted ? null : reasonOf(attemptMeta?.retry_reason),
+      selected: intOf(meta?.selected_attempt) === attemptNumber,
+      story: store.readAttemptStory(runId, attemptNumber) ?? "",
+      validation: store.readAttemptValidation(runId, attemptNumber),
+      review: store.readAttemptReview(runId, attemptNumber),
+    },
+  };
 }
