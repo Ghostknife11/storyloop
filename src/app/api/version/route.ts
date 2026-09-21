@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { NextResponse } from "next/server";
 
 export async function GET() {
-  let version = "0.6.0";
+  let version = "0.7.0";
   try {
     version = readFileSync(join(process.cwd(), "VERSION"), "utf8").trim() || version;
   } catch {

@@ -10,7 +10,7 @@ import { ExternalLink, ScrollText } from "lucide-react";
 export default function AboutPage() {
   const [version, setVersion] = useState("…");
   useEffect(() => {
-    fetch("/api/version").then(r => r.json()).then(d => { if (d?.version) setVersion(d.version); }).catch(() => setVersion("0.6.0"));
+    fetch("/api/version").then(r => r.json()).then(d => { if (d?.version) setVersion(d.version); }).catch(() => setVersion("0.7.0"));
   }, []);
 
   const rows = [
@@ -38,7 +38,7 @@ export default function AboutPage() {
         </div>
 
         <div className="rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur p-4 sm:p-5 text-xs text-muted-foreground leading-5">
-          本项目按版本逐步公开演进。当前版本已包含提示词工程、StoryConfig 复用、剧情规划、正文生成、基于 Run 的生成流水线、正文的基础有效性检查（硬性规则，回答「基本可用吗」）与基础自动审阅（单一总分 / 摘要 / 优点 / 问题，回答「写得好吗」）。校验与审阅都只报告结论，不会自动重新生成、修复或改写正文。多维评审、故事改写、质量重试、PASS / FAIL 质量门禁、实验、基准与自适应生成尚未包含在本版本中，将在后续版本逐步引入。
+          本项目按版本逐步公开演进。当前版本已包含提示词工程、StoryConfig 复用、剧情规划、正文生成、基于 Run 的生成流水线、正文的基础有效性检查（硬性规则，回答「基本可用吗」）、基础自动审阅（单一总分 / 摘要 / 优点 / 问题，回答「写得好吗」）与基于确定性策略的自动重试：校验不通过或总分低于阈值时整篇重新生成，直到满足策略或达到尝试次数上限，每次尝试都会单独归档。重试只重新生成整篇正文，不针对具体问题改写句子，也不修改 Ending / Character。多维评审、局部修复、故事改写、PASS / FAIL 质量门禁、实验、基准与自适应生成尚未包含在本版本中，将在后续版本逐步引入。
         </div>
 
         <div className="flex gap-2">

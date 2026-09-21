@@ -30,6 +30,63 @@ All notable changes to Storyloop.
 
 ---
 
+## [0.7.0] —— 2026-09-22
+
+### Added
+
+- `RetryPolicy`（`src/core/retry-policy.ts`）：`{max_attempts: 2, min_review_score: 70, retry_on_validation_failure: true}`，
+  三项都可配，全部有默认值；`max_attempts` 含第一次生成（2 = 初次生成 + 最多 1 次自动重试）
+- `RetryDecision`：`{should_retry, reason}`，reason 取值只有 `generation_error` /
+  `validation_failed` / `review_score_below_threshold` 三种稳定值
+- Retry 判定顺序固定：生成失败且还有次数 → 校验不通过且策略允许 → 审阅成功但总分低于阈值 → 接受。
+  纯函数、无随机、无模型参与，同样的输入得到同样的重试次数
+- `GenerationAttempt` 模型（`src/core/generation-attempt.ts`）：`attempt_number` / `story` / `validation` /
+  `review` / `accepted` / `retry_reason` / `error`，正好七个字段；编号从 1 开始
+- Pipeline 重试循环：一次 Run 可包含多次 Attempt，StoryConfig 与 BeatPlan 全部尝试共用一份，不重新规划
+- Attempt 级产物：`runs/<run_id>/attempts/NN/{story.md, validation.json, review.json, metadata.json}`
+- 选中 Attempt 的产物提升到 Run 根目录（复制而非符号链接，Windows 下同样可用）：
+  根目录 `story.md` / `validation.json` / `review.json` 始终对应 `selected_attempt`
+- Run metadata 新增 `attempt_count` / `selected_attempt` / `quality_status` / `max_attempts` /
+  `min_review_score`；`quality_status` 只有 `accepted` / `exhausted` 两种取值
+- Settings UI 四个自动重试字段：自动重试开关、最多尝试次数（1 ~ 5）、最低审阅分数（0 ~ 100）、
+  校验失败也重试开关；关闭自动重试时 `max_attempts` 退化为 1，而不是造假阈值
+- Attempt 面板：按编号罗列每次尝试的结论（Attempt 1: review 63 → retry 这样的单行），
+  以及 `exhausted` 状态提示；没有比较表 / Score Delta / 排名
+- `POST /api/runs` 与 `/api/runs/from-plan` 请求体支持可选 `retry_policy`（不属于 StoryConfig，
+  不写进 `config.json`）；非法值返回 400，Run 不会开始
+- Run 响应新增 `quality_status` / `attempt_count` / `selected_attempt` / `attempts[]`（只含摘要，不含正文）
+- `GET /api/runs/<run_id>` 与 `GET /api/runs/<run_id>/attempts/<n>`：读回一次 Run 和一次 Attempt
+- CLI `run` 子命令新增 `--max-attempts` / `--min-score` / `--no-retry-on-validation-failure`，
+  结束时逐行打印每次 Attempt 的结论与 Quality Status / Selected Attempt
+- Tests：retry-policy / generation-attempt / retry-pipeline / retry-api / ui-retry，
+  以及 artifact-store 的 Attempt 产物覆盖
+
+### Changed
+
+- `GenerationPipeline.run()` 返回增加 `quality_status` / `attempt_count` / `selected_attempt` / `attempts`
+- 固定阶段顺序改为 Config → Planning →〔Attempt n: Generate → Save Story → Validate → Review → RetryDecision〕→ Finalize；
+  UI 仍是六阶段进度指示，另加 Attempt 计数
+- `POST /api/runs` 系列响应新增四个重试字段；CLI `run` 的非零退出仍然只留给参数错误与真正的生成失败
+- README 定位改为「具备剧情规划、正文生成、基础有效性检查、自动审阅与自动重试能力」，
+  新增 `RetryPolicy` / `GenerationAttempt` 章节与 `attempts/NN/` 产物树
+
+### Fixed
+
+- Reviewer 调用失败 / 输出非法不再被当作重试理由：该次尝试因拿到审阅结论而被接受，
+  与 v0.6.0「Review 失败不拖垮 Run」的语义一致
+- Validator 自身异常只作废「校验不通过」这一格判据，不会把正文判成失败，也不会触发重试
+- 生成失败在还有剩余次数时也按策略重试；只有最后一允许的 Attempt 仍拿不到正文才让整个 Run 以
+  `generating` 阶段失败结束，已产出的 Attempt 产物不会被删除
+- Attempt 存在性判断与产物提升不再有「顺手创建目录」的副作用，尝试编号上限固定为 99 以内
+
+### Not Included
+
+- 局部修复 / 针对问题定点改写 / 自动修 Ending 或 Character：本版本的重试只会带着同一份 BeatPlan
+  重新生成整篇正文
+- 多维评审阈值、Best-of-N 择优、重试统计与失败归因、PASS / FAIL 质量门禁、自适应生成
+
+---
+
 ## [0.6.0] —— 2026-09-21
 
 ### Added
