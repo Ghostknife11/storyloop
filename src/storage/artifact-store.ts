@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync, renameSync, existsSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import type { StoryConfig } from "@/types/story-config";
 import type { BeatPlan } from "@/types/beat-plan";
+import type { ReviewResult } from "@/types/review-result";
 
 /**
  * §13/§22 ArtifactStore：只负责创建目录、保存 JSON / Markdown / Metadata、返回路径。
@@ -46,6 +47,11 @@ export class ArtifactStore {
 
   putStory(runId: string, title: string, story: string): string {
     return this.putText(runId, "story.md", `# ${title}\n\n${story}\n`);
+  }
+
+  /** §21/§22 Review 产物：与其它产物同一套原子写入，重复审阅时覆盖（§30）。 */
+  putReview(runId: string, review: ReviewResult): string {
+    return this.putJson(runId, "review.json", review);
   }
 
   putMetadata(runId: string, metadata: Record<string, unknown>): string {
