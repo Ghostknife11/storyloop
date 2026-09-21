@@ -14,7 +14,11 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { ReviewPanel } from "@/components/review-panel";
-import { generateFromPlan, planStory, previewPrompt, reviewStory, RunApiError, type RunApiResult } from "@/lib/api";
+import { ValidationPanel } from "@/components/validation-panel";
+import {
+  generateFromPlan, planStory, previewPrompt, reviewStory, validateStory,
+  RunApiError, type RunApiResult,
+} from "@/lib/api";
 import { configFilename, parseStoryConfig, serializeStoryConfig } from "@/lib/config-io";
 import { useSettings } from "@/lib/settings-store";
 import {
@@ -23,17 +27,20 @@ import {
 } from "@/types/story-config";
 import { validateBeatPlan, type BeatPlan, type StoryBeat } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
+import type { ValidationResult } from "@/types/validation-result";
 
 type Phase = "idle" | "generating" | "success" | "error";
 type PlanPhase = "idle" | "planning" | "success" | "error";
 
 /** §40 固定阶段（§7/§18）：UI 只能按这个顺序展示，不自行发明阶段。
- *  v0.5.0 增加 Reviewing：Story 落盘之后的审阅阶段（§35）。 */
+ *  v0.5.0 增加 Reviewing：Story 落盘之后的审阅阶段（§35）。
+ *  v0.6.0 增加 Validating：Story 落盘之后、审阅之前的硬性检查阶段（§17）。 */
 const RUN_STAGES = [
   { key: "config", label: "Preparing" },
   { key: "planning", label: "Planning" },
   { key: "generating", label: "Writing" },
   { key: "saving", label: "Saving" },
+  { key: "validating", label: "Validating" },
   { key: "reviewing", label: "Reviewing" },
 ] as const;
 
@@ -167,6 +174,8 @@ export default function GeneratePage() {
   // §34：Review Again 只重新审阅当前正文，不重新生成 Story
   const [reReviewing, setReReviewing] = useState(false);
   const [reviewOverride, setReviewOverride] = useState<ReviewResult | null>(null);
+  const [revalidating, setRevalidating] = useState(false);
+  const [validationOverride, setValidationOverride] = useState<ValidationResult | null>(null);
   const busyRef = useRef(false);
   const planBusyRef = useRef(false);
   const stepperTimers = useRef<number[]>([]);
@@ -193,7 +202,7 @@ export default function GeneratePage() {
     clearStepperTimers();
     setRunStage("config");
     // Manual Run 跳过 Planning（§29：beat_plan 由用户提供，Pipeline 不再调 Planner）
-    (["generating", "saving", "reviewing"] as RunStageKey[]).forEach((stage, i) => {
+    (["generating", "saving", "validating", "reviewing"] as RunStageKey[]).forEach((stage, i) => {
       stepperTimers.current.push(window.setTimeout(() => setRunStage(stage), (i + 1) * 700));
     });
   };
@@ -216,6 +225,8 @@ export default function GeneratePage() {
     setPhase("idle");
     setReReviewing(false);
     setReviewOverride(null);
+    setRevalidating(false);
+    setValidationOverride(null);
     clearStepperTimers();
   };
 
@@ -345,6 +356,8 @@ export default function GeneratePage() {
     setRunFailed(false);
     setReReviewing(false);
     setReviewOverride(null);
+    setRevalidating(false);
+    setValidationOverride(null);
     beginStepper();
     try {
       const config = formToConfig(form);
@@ -411,6 +424,22 @@ export default function GeneratePage() {
       toast.error(e instanceof Error ? e.message : "审阅失败");
     } finally {
       setReReviewing(false);
+    }
+  }
+
+  // §27 Validate Again：只对当前正文重新跑硬性规则，绝不重新生成 Story，也不调用 Reviewer。
+  async function handleValidateAgain() {
+    if (revalidating || !result) return;
+    setRevalidating(true);
+    try {
+      const validation = await validateStory(formToConfig(form), result.story, result.run_id);
+      // §27：服务端已覆盖该 Run 的 validation.json，前端同步展示最新校验结果
+      setValidationOverride(validation);
+      toast.success(validation.passed ? "Validation：Passed" : "Validation：Failed");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "校验失败");
+    } finally {
+      setRevalidating(false);
     }
   }
 
@@ -790,6 +819,15 @@ export default function GeneratePage() {
                     <div className="text-[11px] text-muted-foreground font-mono mb-4">
                       Run {result.run_id} · {result.status} · {result.beat_plan.beats.length} beats
                     </div>
+                    {/* §28 Validation 区域：Passed / Failed + Issues（Code / Severity / Message）。
+                        §29 与 Review 分开：这里只有硬性检查，没有分数。 */}
+                    <ValidationPanel
+                      validation={validationOverride ?? result.validation}
+                      validationStatus={validationOverride ? "completed" : result.validation_status}
+                      validationError={result.validation_error}
+                      revalidating={revalidating}
+                      onValidateAgain={handleValidateAgain}
+                    />
                     {/* §31 Review 区域：Score / Summary / Strengths / Problems。
                         §34 Review 失败时正文继续显示，只把本面板切成失败态。 */}
                     <ReviewPanel
