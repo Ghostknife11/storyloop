@@ -270,6 +270,28 @@ describe("§45 Pipeline Test — Repair Success", () => {
     expect(result.quality_status).toBe("accepted");
     expect(gen.calls).toEqual([STORY]);
   });
+
+  it("§66 修订不改写 StoryConfig 与 BeatPlan：config.json / beats.json 与输入逐字一致", async () => {
+    const dir = withTmpDir();
+    const gen = scriptedGenerator([STORY, RETRIED]);
+    const rep = scriptedRepairer([REPAIRED]);
+    const result = await pipeline(
+      gen,
+      scriptedValidator([MISSING_ENDING, PASSED]),
+      scriptedReviewer([review(63), review(74)]),
+      rep,
+    ).run(config);
+
+    // 修订请求带的是同一份对象（§65），落盘的产物也没有被修订过程写回任何字段
+    expect(rep.requests[0].config).toBe(config);
+    expect(rep.requests[0].beat_plan).toBe(plan);
+    expect(JSON.parse(readArtifact(dir, result.run_id, "config.json"))).toEqual(
+      JSON.parse(JSON.stringify(config)),
+    );
+    expect(JSON.parse(readArtifact(dir, result.run_id, "beats.json"))).toEqual(
+      JSON.parse(JSON.stringify(plan)),
+    );
+  });
 });
 
 describe("§46 Pipeline Test — Repair Fails Then Retry", () => {
