@@ -104,25 +104,25 @@ export async function generateFromPlan(
   });
 }
 
-/**
- * §39 GET /api/runs/<run_id>：读回一次 Run 的 Attempt 摘要。
- * §40 没有全局 Run 历史接口，前端也不做历史列表。
- */
-export async function fetchRun(runId: string): Promise<RunApiResult> {
-  const res = await fetch(`/api/runs/${encodeURIComponent(runId)}`);
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || `读取 Run 失败（HTTP ${res.status}）`);
-  return data as RunApiResult;
+/** §39 读回的一次 Run：与 POST 响应同源的结论字段 + 各 Attempt 摘要。 */
+export interface RunDetailApi {
+  run_id: string;
+  status: string;
+  quality_status: "accepted" | "exhausted" | null;
+  attempt_count: number;
+  selected_attempt: number;
+  max_attempts: number | null;
+  min_review_score: number | null;
+  story: string;
+  validation: ValidationResult | null;
+  validation_status: string;
+  review: ReviewResult | null;
+  review_status: string;
+  attempts: AttemptSummaryApi[];
 }
 
-/**
- * §39 GET /api/runs/<run_id>/attempts/<n>：读回某一次 Attempt。
- * §35 只做查看，前端不生成比较表 / Score Delta / 排名。
- */
-export async function fetchRunAttempt(
-  runId: string,
-  attemptNumber: number,
-): Promise<{
+/** §35/§38 Attempt 详情：正文 + 这一次独立的校验 / 审阅结论。 */
+export interface AttemptDetailApi {
   run_id: string;
   attempt_number: number;
   accepted: boolean | null;
@@ -131,11 +131,28 @@ export async function fetchRunAttempt(
   story: string;
   validation: ValidationResult | null;
   review: ReviewResult | null;
-}> {
+}
+
+/**
+ * §39 GET /api/runs/<run_id>：读回一次 Run 的 Attempt 摘要。
+ * §40 没有全局 Run 历史接口，前端也不做历史列表。
+ */
+export async function fetchRun(runId: string): Promise<RunDetailApi> {
+  const res = await fetch(`/api/runs/${encodeURIComponent(runId)}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || `读取 Run 失败（HTTP ${res.status}）`);
+  return data as RunDetailApi;
+}
+
+/**
+ * §39 GET /api/runs/<run_id>/attempts/<n>：读回某一次 Attempt。
+ * §35 只做查看，前端不生成比较表 / Score Delta / 排名。
+ */
+export async function fetchRunAttempt(runId: string, attemptNumber: number): Promise<AttemptDetailApi> {
   const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/attempts/${attemptNumber}`);
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error || `读取 Attempt 失败（HTTP ${res.status}）`);
-  return data as never;
+  return data as AttemptDetailApi;
 }
 
 /** §30 Prompt Preview（config 必填，beat_plan 可选）。 */

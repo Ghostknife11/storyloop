@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { clientFromEnv, LLMClient, LLMError } from "@/lib/llm";
-import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
+import { validateStoryConfig } from "@/types/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
 import { BeatPlanner } from "@/lib/beat-planner";
 import { StoryGenerator } from "@/lib/story-generator";
@@ -22,7 +22,6 @@ import {
   attemptSummary,
   validateAttemptNumber,
   type AttemptSummary,
-  type GenerationAttempt,
 } from "@/core/generation-attempt";
 import type { QualityStatus } from "@/core/pipeline";
 
