@@ -1,27 +1,30 @@
 /**
- * v0.4.0 CLI（TASK §53/§54）：生成命令统一走 GenerationPipeline。
- *   run  —— StoryConfig → Config → Planning → Generation → Persistence（一个 Run）
+ * v0.5.0 CLI（TASK §53/§54/§37）：生成命令统一走 GenerationPipeline。
+ *   run  —— StoryConfig → Config → Planning → Generation → Save Story → Review → Save Review
  *   run --beats <beats.json> —— 手动模式：用户编辑后的 BeatPlan 直接进入生成
  *   plan —— 只产出 BeatPlan，供后续 run --beats 使用
+ *   review —— 对已有正文单独审阅（与 Pipeline 使用同一个 BasicReviewer，§37）
  * 与 UI/API 使用同一套 Pipeline（§55）：CLI 不再自己编排流程。
  *
  * 用法：
  *   npx tsx scripts/generate-cli.ts run --config configs/example_story.json
  *   npx tsx scripts/generate-cli.ts run --config configs/example_story.json --beats plan_20260920.beats.json
  *   npx tsx scripts/generate-cli.ts plan --config configs/example_story.json [--out <beats.json>]
+ *   npx tsx scripts/generate-cli.ts review --config configs/example_story.json --story story.md [--run-id <run_id>]
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { parseStoryConfig } from "@/lib/config-io";
 import { parseBeatPlan } from "@/lib/beat-parser";
 import { BeatPlanner } from "@/lib/beat-planner";
 import { clientFromEnv, LLMError } from "@/lib/llm";
-import { startRun, startRunFromPlan, type RunOk } from "@/lib/generate-service";
+import { startRun, startRunFromPlan, reviewStory, type RunOk } from "@/lib/generate-service";
 import { PipelineError } from "@/core/pipeline";
 import { validateStoryConfig } from "@/types/story-config";
+import type { ReviewResult } from "@/types/review-result";
 import "dotenv/config";
 
-type Command = "run" | "plan";
+type Command = "run" | "plan" | "review";
 
 function argValue(flag: string): string | undefined {
   const i = process.argv.indexOf(flag);
@@ -32,6 +35,7 @@ const USAGE = [
   "用法：",
   "  npx tsx scripts/generate-cli.ts run --config <story.json> [--beats <beats.json>] [--model M] [--temperature T]",
   "  npx tsx scripts/generate-cli.ts plan --config <story.json> [--out <beats.json>]",
+  "  npx tsx scripts/generate-cli.ts review --config <story.json> --story <story.md> [--run-id <run_id>]",
 ].join("\n");
 
 function runtimeOf() {
@@ -50,10 +54,31 @@ function readConfig(configPath: string) {
   return config;
 }
 
+/** §37 CLI 输出 Review：分数 / 总结 / 优点 / 问题，只展示，不据此做任何动作。 */
+function reportReview(review: ReviewResult | null, reviewError?: string) {
+  if (!review) {
+    console.log(`Review: failed${reviewError ? `（${reviewError}）` : ""}（正文已保留，可重新审阅）`);
+    return;
+  }
+  const score = Number.isInteger(review.score) ? String(review.score) : review.score.toFixed(1);
+  console.log(`Review Score: ${score} / 100`);
+  console.log(`Review Summary: ${review.summary}`);
+  if (review.strengths.length) {
+    console.log("Strengths:");
+    review.strengths.forEach((s) => console.log(`  ✓ ${s}`));
+  }
+  if (review.problems.length) {
+    console.log("Problems:");
+    review.problems.forEach((p) => console.log(`  • ${p}`));
+  }
+}
+
 function reportRun(result: RunOk, started: number) {
   console.log(`Run ID: ${result.run_id}`);
   console.log(`Status: ${result.status}`);
   console.log(`Beats: ${result.beat_plan.beats.length}`);
+  console.log(`Story: runs/${result.run_id}/story.md`);
+  reportReview(result.review, result.review_error);
   console.log(`Artifacts: runs/${result.run_id}/`);
   console.log(`[cli] 完成（${((Date.now() - started) / 1000).toFixed(1)}s，${result.story.replace(/\s/g, "").length} 字）`);
 }
@@ -61,7 +86,7 @@ function reportRun(result: RunOk, started: number) {
 async function main() {
   const command = process.argv[2] as Command | undefined;
   const configPath = argValue("--config");
-  if ((command !== "run" && command !== "plan") || !configPath) {
+  if ((command !== "run" && command !== "plan" && command !== "review") || !configPath) {
     console.error(USAGE);
     process.exit(1);
   }
@@ -73,6 +98,30 @@ async function main() {
   console.log(`[cli] 读取配置：${configPath}`);
   const config = readConfig(configPath);
   const runtime = runtimeOf();
+
+  if (command === "review") {
+    // §37 review 子命令：与 Pipeline 使用同一个 BasicReviewer，只审阅不生成
+    const storyPath = argValue("--story");
+    if (!storyPath) {
+      console.error("review 需要 --story <story.md>（要审阅的正文文件）");
+      process.exit(1);
+    }
+    const markdown = readFileSync(storyPath, "utf8");
+    // story.md 由 putStory 写成「# 标题\n\n正文」：审阅时去掉 H1 标题行
+    const story = markdown.replace(/^#\s+.*\n+/, "").trim();
+    if (!story) {
+      console.error(`未从 ${storyPath} 读取到正文`);
+      process.exit(1);
+    }
+    console.log("[cli] 审阅正文……");
+    const { status, json } = await reviewStory({ config, story, ...runtime });
+    if (status !== 200) {
+      console.error(`失败：${(json as { error: string }).error}`);
+      process.exit(1);
+    }
+    reportReview(json as ReviewResult);
+    return;
+  }
 
   if (command === "plan") {
     const planner = new BeatPlanner(clientFromEnv(runtime));

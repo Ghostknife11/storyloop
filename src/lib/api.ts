@@ -1,5 +1,6 @@
 import type { StoryConfig } from "@/types/story-config";
 import type { BeatPlan } from "@/types/beat-plan";
+import type { ReviewResult } from "@/types/review-result";
 
 /** §32 Run 响应：run_id / 状态 / 正文 / 实际使用的 BeatPlan / 产物文件名。 */
 export interface RunApiResult {
@@ -7,6 +8,10 @@ export interface RunApiResult {
   status: string;
   story: string;
   beat_plan: BeatPlan;
+  /** §27/§28：Review 失败时为 null，story 仍然返回。 */
+  review: ReviewResult | null;
+  review_status: string;
+  review_error?: string;
   artifacts: Record<string, string>;
 }
 
@@ -77,4 +82,24 @@ export async function previewPrompt(
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error || `预览失败（HTTP ${res.status}）`);
   return data.prompt as string;
+}
+
+/**
+ * §29 手动审阅（Review Again）：只重新 Review，不重新生成 Story（§50）。
+ * 带 runId 时服务端覆盖该 Run 的 review.json（§30）。
+ */
+export async function reviewStory(
+  config: StoryConfig,
+  story: string,
+  runtime: { model?: string; baseUrl?: string; temperature?: number } = {},
+  runId?: string,
+): Promise<ReviewResult> {
+  const res = await fetch("/api/review", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ config, story, ...runtime, ...(runId ? { run_id: runId } : {}) }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || `审阅失败（HTTP ${res.status}）`);
+  return data as ReviewResult;
 }
