@@ -101,6 +101,22 @@ export interface RepairSummary {
   success: boolean;
 }
 
+/**
+ * §36 单个 Attempt 详情里的修订视图：比 Summary 多出「为什么修」与前后对比，
+ * 供 Repair 结果面板展示 Type / Reason / Before Score / After Score / Validation 变化。
+ * 仍然不带正文全文，也不带 §5 禁止的归因字段。
+ */
+export interface RepairDetail {
+  repair_number: number;
+  issue_type: RepairIssueType;
+  issue_message: string;
+  success: boolean;
+  before_review_score: number | null;
+  after_review_score: number | null;
+  before_validation_passed: boolean | null;
+  after_validation_passed: boolean | null;
+}
+
 export class RepairValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -201,5 +217,19 @@ export function repairSummary(record: RepairRecord): RepairSummary {
     repair_number: record.repair_number,
     issue_type: record.issue_type,
     success: record.success,
+  };
+}
+
+/** §36 RepairRecord → RepairDetail：Attempt 详情用，带问题说明与前后对比。 */
+export function repairDetail(record: RepairRecord): RepairDetail {
+  return {
+    repair_number: record.repair_number,
+    issue_type: record.issue_type,
+    issue_message: record.issue_message,
+    success: record.success,
+    before_review_score: record.before_review_score,
+    after_review_score: record.after_review_score,
+    before_validation_passed: record.before_validation ? record.before_validation.passed : null,
+    after_validation_passed: record.after_validation ? record.after_validation.passed : null,
   };
 }

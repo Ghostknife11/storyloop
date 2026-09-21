@@ -6,10 +6,21 @@ import { BeatPlanner } from "@/lib/beat-planner";
 import { StoryGenerator } from "@/lib/story-generator";
 import { StoryValidator } from "@/lib/story-validator";
 import { BasicReviewer } from "@/lib/basic-reviewer";
+import { StoryRepairer } from "@/lib/story-repairer";
+import { RepairStrategy } from "@/core/repair-strategy";
 import { GenerationPipeline, PipelineError, type GenerationResult } from "@/core/pipeline";
 import { ArtifactStore } from "@/storage/artifact-store";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
+import type { RepairDetail, RepairIssueType, RepairResult, RepairSummary } from "@/types/repair";
+import {
+  repairDetail,
+  repairRequestOf,
+  repairSummary,
+  validateRepairIssueType,
+  validateRepairRecord,
+  RepairValidationError,
+} from "@/types/repair";
 import {
   DEFAULT_RETRY_POLICY,
   RETRY_REASONS,
@@ -32,6 +43,7 @@ export { BeatPlanValidationError } from "@/types/beat-plan";
 export { ReviewValidationError } from "@/types/review-result";
 export { ReviewParseError } from "@/lib/review-parser";
 export { ValidationValidationError } from "@/types/validation-result";
+export { RepairValidationError } from "@/types/repair";
 
 /** 模块加载时锁定项目根，避免测试 chdir 后模板路径漂移。 */
 const PROJECT_ROOT = process.cwd();
@@ -106,7 +118,8 @@ export async function planStory(
 
 /** §32 v0.5.0 Run 响应：run_id / 状态 / 正文 / 评价 / 产物文件名，不返回本地绝对路径（§67）。
  *  v0.6.0 增加 validation / validation_status / validation_error（§26）。
- *  v0.7.0 增加 attempt_count / selected_attempt / quality_status / attempts（§38）。 */
+ *  v0.7.0 增加 attempt_count / selected_attempt / quality_status / attempts（§38）。
+ *  v0.8.0 增加 repair_count 与 attempts[].repairs 摘要（§40）。 */
 export interface RunOk {
   run_id: string;
   status: string;
@@ -127,6 +140,8 @@ export interface RunOk {
   attempt_count: number;
   /** §17/§38：最终采用的 Attempt 编号（exhausted 时为最后一次）。 */
   selected_attempt: number;
+  /** §40：本次 Run 发生的定点修订总次数（Repair 不新增 Attempt）。 */
+  repair_count: number;
   /** §38：只含摘要，不带完整正文。 */
   attempts: AttemptSummary[];
 }
@@ -146,6 +161,8 @@ export interface RunDeps {
   generator?: StoryGenerator;
   validator?: StoryValidator;
   reviewer?: BasicReviewer;
+  repairer?: StoryRepairer;
+  repairStrategy?: RepairStrategy;
   artifactStore?: ArtifactStore;
 }
 
@@ -154,6 +171,7 @@ export interface RunDeps {
  * 让测试可以在临时目录里跑完整 Run。
  * §25 Writer 与 Reviewer 使用同一个 LLMClient——不引入 Reviewer Model / Model Router。
  * §3 Validator 是纯规则，不需要 LLM。
+ * §9 Repairer 用同一个 LLMClient；不注入 Repairer 时 Pipeline 完全不修（§51-E）。
  */
 export function buildPipeline(runtime: GenerateRuntime, deps: RunDeps = {}): GenerationPipeline {
   const llm = deps.llm ?? clientFromEnv(runtime);
@@ -171,7 +189,15 @@ export function buildPipeline(runtime: GenerateRuntime, deps: RunDeps = {}): Gen
     join(PROJECT_ROOT, "prompts", "reviewer.txt"),
   );
   const artifactStore = deps.artifactStore ?? new ArtifactStore();
-  return new GenerationPipeline(planner, generator, validator, reviewer, artifactStore);
+  const repairer = deps.repairer ?? new StoryRepairer(
+    llm,
+    join(PROJECT_ROOT, "prompts", "repair.txt"),
+  );
+  const repairStrategy = deps.repairStrategy ?? new RepairStrategy();
+  return new GenerationPipeline(
+    planner, generator, validator, reviewer, artifactStore, DEFAULT_RETRY_POLICY,
+    repairer, repairStrategy,
+  );
 }
 
 function runOkOf(result: GenerationResult): RunOk {
@@ -188,6 +214,8 @@ function runOkOf(result: GenerationResult): RunOk {
     quality_status: result.quality_status,
     attempt_count: result.attempt_count,
     selected_attempt: result.selected_attempt,
+    // §40：Run 级 repair_count 由各 Attempt 的修订次数累加，不另建统计口径。
+    repair_count: result.attempts.reduce((sum, a) => sum + a.repairs.length, 0),
     attempts: result.attempts.map(attemptSummary),
   };
   if (result.validation_error) ok.validation_error = result.validation_error;
@@ -442,6 +470,70 @@ export async function validateStory(body: unknown, deps: RunDeps = {}): Promise<
 }
 
 // ---------------------------------------------------------------------------
+// §38 Manual Repair API：POST /api/repair
+// 手动触发一次定点修订——和 Pipeline 内部的 Repair-before-Retry 复用同一个
+// StoryRepairer + RepairStrategy，不引入第二套修订实现（§62 只新增不重写）。
+// ---------------------------------------------------------------------------
+
+/** §38 RepairOutcome：成功回 repaired_story + issue_type + success。 */
+export type RepairOutcome =
+  | { status: 200; json: RepairResult }
+  | { status: 400; json: { error: string } }
+  | { status: 500; json: { error: string } }
+  | { status: 502; json: { error: string } };
+
+/**
+ * §38 POST /api/repair 的服务层：
+ * {config, beat_plan, story, issue_type, issue_message} → {repaired_story, issue_type, success}。
+ * §9/§65：只修订正文，不改 StoryConfig / BeatPlan / 模型 / 温度，也不决定是否重试。
+ * §10/§11：走独立 repair.txt 提示词，返回完整修订后正文（不是 diff / patch）。
+ */
+export async function repairStory(body: unknown, deps: RunDeps = {}): Promise<RepairOutcome> {
+  try {
+    const raw = (body ?? {}) as Record<string, unknown>;
+    const config = validateStoryConfig(raw.config ?? normalizeLegacy(raw));
+    const plan = validateBeatPlan(raw.beat_plan);
+
+    if (typeof raw.story !== "string" || !raw.story.trim()) {
+      return { status: 400, json: { error: "story is required——提供需要修订的小说正文" } };
+    }
+    const issueType: RepairIssueType = validateRepairIssueType(raw.issue_type);
+    const issueMessage = typeof raw.issue_message === "string" ? raw.issue_message.trim() : "";
+    if (!issueMessage) {
+      return { status: 400, json: { error: "issue_message is required——说明要修的问题" } };
+    }
+
+    const runtime = runtimeOf(raw);
+    const repairer = deps.repairer ?? new StoryRepairer(
+      deps.llm ?? clientFromEnv(runtime),
+      join(PROJECT_ROOT, "prompts", "repair.txt"),
+    );
+    const result = await repairer.repair(
+      repairRequestOf({ issue_type: issueType, issue_message: issueMessage }, raw.story, config, plan),
+    );
+    return { status: 200, json: result };
+  } catch (e) {
+    if (e instanceof RepairValidationError) {
+      return { status: 400, json: { error: e.message } };
+    }
+    if (e instanceof Error && (
+      e.name === "ConfigValidationError" ||
+      e.name === "RequestValidationError" ||
+      e.name === "UnsupportedConfigVersionError" ||
+      e.name === "BeatPlanValidationError"
+    )) {
+      return { status: 400, json: { error: e.message } };
+    }
+    if (e instanceof LLMError) {
+      // §15：明确错误，用户手动 Repair Again，禁止业务层自动重试
+      return { status: 502, json: { error: `Repair failed. 原因：${e.message}` } };
+    }
+    console.error("[repair] unexpected error:", e);
+    return { status: 500, json: { error: "Repair failed. 原因：服务器内部错误" } };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // §39 GET /api/runs/{run_id} 与 /api/runs/{run_id}/attempts/{attempt_number}
 // 只读已存在的产物。不提供 GET /api/runs 全局历史列表（§40）。
 // ---------------------------------------------------------------------------
@@ -455,6 +547,10 @@ export interface RunDetail {
   selected_attempt: number;
   max_attempts: number | null;
   min_review_score: number | null;
+  /** §39：Run 级 Repair 策略回显，前端据此展示当时允不允许修。 */
+  enable_repair: boolean | null;
+  max_repairs_per_attempt: number | null;
+  repair_count: number;
   story: string;
   validation: ValidationResult | null;
   validation_status: string;
@@ -463,14 +559,21 @@ export interface RunDetail {
   attempts: AttemptSummary[];
 }
 
-/** §35/§39 单个 Attempt 详情：正文 + 独立 Validation / Review + 采纳结论。 */
+/** §35/§39 单个 Attempt 详情：正文 + 独立 Validation / Review + 采纳结论。
+ *  v0.8.0 增加修订详情与 initial_story（§36：Repair 结果面板；§37：Before / After Story）。 */
 export interface AttemptDetail {
   run_id: string;
   attempt_number: number;
   accepted: boolean | null;
   retry_reason: RetryReason | null;
   selected: boolean;
+  /** §30：该 Attempt 的最终版本（修订后的正文）。 */
   story: string;
+  /** §30：发生过修订时，修订前的初始正文；没有修订时为 null。 */
+  initial_story: string | null;
+  repair_count: number;
+  /** §36：类型 / 原因 / 前后分数 / 校验变化；不带修订正文全文。 */
+  repairs: RepairDetail[];
   validation: ValidationResult | null;
   review: ReviewResult | null;
 }
@@ -510,6 +613,36 @@ function reasonOf(raw: unknown): RetryReason | null {
     : null;
 }
 
+/** §40 attempts[].repairs：只保留编号 / 类型 / 成败；条目被手改坏就跳过，不让整个详情 500。 */
+function repairsOf(meta: Record<string, unknown> | null): RepairSummary[] {
+  const raw = meta?.repairs;
+  if (!Array.isArray(raw)) return [];
+  const out: RepairSummary[] = [];
+  for (const item of raw) {
+    try {
+      out.push(repairSummary(validateRepairRecord(item)));
+    } catch {
+      /* 单条损坏不影响其它修订记录 */
+    }
+  }
+  return out;
+}
+
+/** §36 单个 Attempt 详情的修订视图：多出问题说明与前后分数 / 校验结论。 */
+function repairDetailsOf(meta: Record<string, unknown> | null): RepairDetail[] {
+  const raw = meta?.repairs;
+  if (!Array.isArray(raw)) return [];
+  const out: RepairDetail[] = [];
+  for (const item of raw) {
+    try {
+      out.push(repairDetail(validateRepairRecord(item)));
+    } catch {
+      /* 单条损坏不影响其它修订记录 */
+    }
+  }
+  return out;
+}
+
 function attemptSummaryFromDisk(
   runId: string,
   n: number,
@@ -518,12 +651,15 @@ function attemptSummaryFromDisk(
 ): AttemptSummary {
   const review = store.readAttemptReview(runId, n);
   const validation = store.readAttemptValidation(runId, n);
+  const repairs = repairsOf(meta);
   return {
     attempt_number: n,
     accepted: typeof meta?.accepted === "boolean" ? meta.accepted : false,
     retry_reason: reasonOf(meta?.retry_reason),
     review_score: review ? review.score : intOf(meta?.review_score),
     validation_passed: validation ? validation.passed : null,
+    repair_count: repairs.length,
+    repairs,
   };
 }
 
@@ -565,6 +701,10 @@ export async function getRun(
       selected_attempt: intOf(meta?.selected_attempt) ?? (numbers.length > 0 ? numbers[numbers.length - 1] : 0),
       max_attempts: intOf(meta?.max_attempts),
       min_review_score: intOf(meta?.min_review_score),
+      enable_repair: typeof meta?.enable_repair === "boolean" ? meta.enable_repair : null,
+      max_repairs_per_attempt: intOf(meta?.max_repairs_per_attempt),
+      // §40：Run 级 repair_count 从各 attempt 的修订记录累加，与 POST 响应同一口径。
+      repair_count: attempts.reduce((sum, a) => sum + a.repair_count, 0),
       story: store.readFinalStory(runId) ?? "",
       validation: store.readFinalValidation(runId),
       validation_status: strOf(meta?.validation_status) ?? "not_started",
@@ -620,6 +760,7 @@ export async function getRunAttempt(
   const meta = store.readRunMetadata(runId);
   const attemptMeta = store.readAttemptMetadata(runId, attemptNumber);
   const accepted = attemptMeta && typeof attemptMeta.accepted === "boolean" ? attemptMeta.accepted : null;
+  const repairs = repairDetailsOf(attemptMeta);
 
   return {
     status: 200,
@@ -630,6 +771,10 @@ export async function getRunAttempt(
       retry_reason: accepted ? null : reasonOf(attemptMeta?.retry_reason),
       selected: intOf(meta?.selected_attempt) === attemptNumber,
       story: store.readAttemptStory(runId, attemptNumber) ?? "",
+      // §30/§37：修订前的正文单独存放，UI 用它做 Before / After 两个 Tab。
+      initial_story: store.readAttemptInitialStory(runId, attemptNumber),
+      repair_count: repairs.length,
+      repairs,
       validation: store.readAttemptValidation(runId, attemptNumber),
       review: store.readAttemptReview(runId, attemptNumber),
     },

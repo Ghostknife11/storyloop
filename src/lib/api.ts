@@ -10,10 +10,22 @@ export interface AttemptSummaryApi {
   retry_reason: string | null;
   review_score: number | null;
   validation_passed: boolean | null;
+  /** §40 v0.8.0：这个 Attempt 内发生过的定点修订次数（Repair 不新增 Attempt）。 */
+  repair_count: number;
+  /** §40 只带编号 / 类型 / 成败，不带修订正文。 */
+  repairs: RepairSummaryApi[];
+}
+
+/** §40 Repair 摘要：UI 只显示类型与成败。 */
+export interface RepairSummaryApi {
+  repair_number: number;
+  issue_type: string;
+  success: boolean;
 }
 
 /** §32 Run 响应：run_id / 状态 / 正文 / 实际使用的 BeatPlan / 校验结果 / 评价 / 产物文件名。
- *  v0.7.0 增加重试结论与 Attempt 摘要（§38）。 */
+ *  v0.7.0 增加重试结论与 Attempt 摘要（§38）。
+ *  v0.8.0 增加 repair_count 与每个 Attempt 的 repairs 摘要（§40）。 */
 export interface RunApiResult {
   run_id: string;
   status: string;
@@ -33,6 +45,8 @@ export interface RunApiResult {
   attempt_count: number;
   /** §17：默认展示的就是这个 Attempt 的正文与结论（§36）。 */
   selected_attempt: number;
+  /** §40 Run 级修订次数 = 各 Attempt 修订次数之和。 */
+  repair_count: number;
   attempts: AttemptSummaryApi[];
 }
 
