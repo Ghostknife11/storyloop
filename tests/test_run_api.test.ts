@@ -5,11 +5,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { POST as postRuns } from "@/app/api/runs/route";
 import { POST as postRunsFromPlan } from "@/app/api/runs/from-plan/route";
+import { POST as postReview } from "@/app/api/review/route";
 import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
+import type { ReviewResult } from "@/types/review-result";
 
 /**
- * §31~§33 HTTP 路由层：只验证「JSON 解析 → 委托 service → 响应形状」，
+ * §31~§33/§46 HTTP 路由层：只验证「JSON 解析 → 委托 service → 响应形状」，
  * LLM 用 stubGlobal("fetch") 冒充，绝不访问真实付费 API。
  */
 
@@ -29,6 +31,13 @@ const plan: BeatPlan = validateBeatPlan({
   ],
 });
 
+const review: ReviewResult = {
+  score: 74,
+  summary: "故事整体完整，主线清楚，但中段推进略重复。",
+  strengths: ["开篇冲突建立迅速", "主角目标明确"],
+  problems: ["中段线索重复", "高潮转折略突然"],
+};
+
 const RUN_ID = /^\d{8}_\d{6}_[a-z0-9]{6}$/;
 
 const realCwd = process.cwd();
@@ -47,13 +56,18 @@ function withTmpDir() {
 
 /**
  * 冒充 OpenAI-compatible /chat/completions：
- * BeatPlanner 的 system 里带「只输出 JSON」，据此决定返回 BeatPlan 还是正文。
+ * system 消息区分三种角色——剧情策划（Planner）/ 基础审阅者（Reviewer）/ 作者（Generator）。
  */
-function stubLLM() {
+function stubLLM(reviewerOutput?: string) {
+  const reviewerText = reviewerOutput ?? JSON.stringify(review);
   const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body)) as { messages?: Array<{ role: string; content: string }> };
-    const isPlanner = (body.messages ?? []).some((m) => m.content.includes("只输出 JSON"));
-    const content = isPlanner ? JSON.stringify(plan) : "正文——陈岚走进雨夜。";
+    const system = (body.messages ?? []).map((m) => m.content).join("\n");
+    const content = system.includes("剧情策划")
+      ? JSON.stringify(plan)
+      : system.includes("审阅")
+        ? reviewerText
+        : "正文——陈岚走进雨夜。";
     return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content } }] }) };
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -73,8 +87,8 @@ async function readJson(res: Response) {
   return (await res.json()) as Record<string, unknown>;
 }
 
-describe("POST /api/runs（§32）", () => {
-  it("完整 Automatic Run：200 + run_id + runs/<run_id>/ 四件产物", async () => {
+describe("POST /api/runs（§32/§46）", () => {
+  it("完整 Automatic Run：200 + run_id + review + runs/<run_id>/ 五件产物", async () => {
     const dir = withTmpDir();
     stubLLM();
     const res = await postRuns(post("/api/runs", { config }));
@@ -83,13 +97,20 @@ describe("POST /api/runs（§32）", () => {
     expect(String(body.run_id)).toMatch(RUN_ID);
     expect(body.status).toBe("completed");
     expect(String(body.story)).toContain("正文");
+    // §27：成功响应包含 review
+    expect(body.review).toEqual(review);
+    expect(body.review_status).toBe("completed");
 
     const runDir = join(dir, "runs", String(body.run_id));
-    expect(readdirSync(runDir).sort()).toEqual(["beats.json", "config.json", "metadata.json", "story.md"]);
+    expect(readdirSync(runDir).sort()).toEqual([
+      "beats.json", "config.json", "metadata.json", "review.json", "story.md",
+    ]);
     // §16/§17 metadata 与响应一致
     const meta = JSON.parse(readFileSync(join(runDir, "metadata.json"), "utf8"));
     expect(meta.run_id).toBe(body.run_id);
     expect(meta.status).toBe("completed");
+    expect(meta.review_status).toBe("completed");
+    expect(meta.review_score).toBe(74);
   });
 
   it("请求体不是合法 JSON → 400", async () => {
@@ -118,6 +139,46 @@ describe("POST /api/runs（§32）", () => {
   });
 });
 
+describe("POST /api/runs — review failure（§28/§34/§46）", () => {
+  it("Reviewer 返回非法 JSON：仍 200 + story，review 为 null，review_status=failed", async () => {
+    const dir = withTmpDir();
+    stubLLM("我觉得这篇故事还不错，但没法给 JSON。");
+    const res = await postRuns(post("/api/runs", { config }));
+    // §28：不得因为 Review 失败丢弃成功生成的正文
+    expect(res.status).toBe(200);
+    const body = await readJson(res);
+    expect(body.status).toBe("completed");
+    expect(String(body.story)).toContain("正文");
+    expect(body.review).toBeNull();
+    expect(body.review_status).toBe("failed");
+    expect(String(body.review_error)).toContain("Reviewer 输出不是合法 JSON");
+
+    const runDir = join(dir, "runs", String(body.run_id));
+    // §49：Story 仍可见，Run 仍保留 Story Artifact
+    expect(existsSync(join(runDir, "story.md"))).toBe(true);
+    expect(existsSync(join(runDir, "metadata.json"))).toBe(true);
+    expect(existsSync(join(runDir, "review.json"))).toBe(false);
+    expect(readdirSync(runDir).sort()).toEqual([
+      "beats.json", "config.json", "metadata.json", "story.md",
+    ]);
+    const meta = JSON.parse(readFileSync(join(runDir, "metadata.json"), "utf8"));
+    expect(meta.status).toBe("completed");
+    expect(meta.review_status).toBe("failed");
+  });
+
+  it("Review 分数越界（101）同样只算 Review 失败", async () => {
+    const dir = withTmpDir();
+    stubLLM(JSON.stringify({ ...review, score: 101 }));
+    const res = await postRuns(post("/api/runs", { config }));
+    expect(res.status).toBe(200);
+    const body = await readJson(res);
+    expect(body.review).toBeNull();
+    expect(body.review_status).toBe("failed");
+    expect(String(body.review_error)).toContain("score 必须在 0 ~ 100");
+    expect(existsSync(join(dir, "runs", String(body.run_id), "story.md"))).toBe(true);
+  });
+});
+
 describe("POST /api/runs/from-plan（§33）", () => {
   it("完整 Manual Run：run_id 与 metadata / beats.json 完全一致", async () => {
     const dir = withTmpDir();
@@ -126,6 +187,7 @@ describe("POST /api/runs/from-plan（§33）", () => {
     expect(res.status).toBe(200);
     const body = await readJson(res);
     expect(String(body.run_id)).toMatch(RUN_ID);
+    expect(body.review).toEqual(review);
 
     const runDir = join(dir, "runs", String(body.run_id));
     const meta = JSON.parse(readFileSync(join(runDir, "metadata.json"), "utf8"));
@@ -136,9 +198,15 @@ describe("POST /api/runs/from-plan（§33）", () => {
     expect(savedBeats).toEqual(plan);
     const plannerCalls = fetchMock.mock.calls.filter(([, init]) => {
       const b = JSON.parse(String((init as RequestInit | undefined)?.body)) as { messages?: Array<{ content: string }> };
-      return (b.messages ?? []).some((m) => m.content.includes("只输出 JSON"));
+      return (b.messages ?? []).some((m) => m.content.includes("剧情策划"));
     });
     expect(plannerCalls).toHaveLength(0);
+    // §25：Reviewer 与 Generator 使用同一个 LLM 端点（无 Model Router）
+    const reviewerCalls = fetchMock.mock.calls.filter(([, init]) => {
+      const b = JSON.parse(String((init as RequestInit | undefined)?.body)) as { messages?: Array<{ content: string }> };
+      return (b.messages ?? []).some((m) => m.content.includes("审阅"));
+    });
+    expect(reviewerCalls).toHaveLength(1);
   });
 
   it("缺 beat_plan → 400，并指引先规划", async () => {
@@ -176,5 +244,84 @@ describe("POST /api/runs/from-plan（§33）", () => {
     const meta = JSON.parse(readFileSync(join(dir, "runs", String(body.run_id), "metadata.json"), "utf8"));
     expect(meta.status).toBe("failed");
     expect(meta.current_stage).toBe("generating");
+  });
+});
+
+describe("POST /api/review（§29/§46）", () => {
+  it("valid request → review", async () => {
+    withTmpDir();
+    stubLLM();
+    const res = await postReview(post("/api/review", { config, story: "陈岚走进雨夜。" }));
+    expect(res.status).toBe(200);
+    expect(await readJson(res)).toEqual(review);
+  });
+
+  it("§30 带 run_id 时覆盖该 Run 的 review.json", async () => {
+    const dir = withTmpDir();
+    // 先跑一次完整 Run，让 runs/<run_id>/ 存在
+    stubLLM();
+    const runRes = await postRuns(post("/api/runs", { config }));
+    const runId = String((await readJson(runRes)).run_id);
+
+    // 再手动审阅同一个正文，分数不同
+    stubLLM(JSON.stringify({ ...review, score: 88, summary: "重审后的总结。" }));
+    const res = await postReview(post("/api/review", { config, story: "正文——陈岚走进雨夜。", run_id: runId }));
+    expect(res.status).toBe(200);
+
+    const saved = JSON.parse(readFileSync(join(dir, "runs", runId, "review.json"), "utf8")) as ReviewResult;
+    expect(saved.score).toBe(88);
+    // §30：只覆盖，不建立 review_v1 / review_history
+    expect(readdirSync(join(dir, "runs", runId)).filter((f) => f.startsWith("review"))).toEqual(["review.json"]);
+  });
+
+  it("§29 story 缺失 → 400", async () => {
+    withTmpDir();
+    stubLLM();
+    const res = await postReview(post("/api/review", { config }));
+    expect(res.status).toBe(400);
+    expect((await readJson(res)).error).toContain("story is required");
+  });
+
+  it("config 非法 → 400", async () => {
+    withTmpDir();
+    stubLLM();
+    const res = await postReview(post("/api/review", {
+      config: { title: "", genre: "悬疑", premise: "x", target_words: 5000 },
+      story: "正文",
+    }));
+    expect(res.status).toBe(400);
+  });
+
+  it("§46 invalid reviewer JSON → 明确错误（502）", async () => {
+    withTmpDir();
+    stubLLM("这不是 JSON");
+    const res = await postReview(post("/api/review", { config, story: "正文" }));
+    expect(res.status).toBe(502);
+    expect((await readJson(res)).error).toContain("Reviewer 输出不是合法 JSON");
+  });
+
+  it("请求体不是合法 JSON → 400", async () => {
+    withTmpDir();
+    const res = await postReview(post("/api/review", "{oops"));
+    expect(res.status).toBe(400);
+    expect((await readJson(res)).error).toContain("JSON");
+  });
+
+  it("run_id 越界（..）被拒绝，不会写到 runs 之外", async () => {
+    withTmpDir();
+    stubLLM();
+    const res = await postReview(post("/api/review", { config, story: "正文", run_id: "../../evil" }));
+    expect(res.status).toBe(400);
+    expect((await readJson(res)).error).toContain("run_id 非法");
+    expect(existsSync(join(tmp as string, "evil"))).toBe(false);
+    expect(existsSync(join(tmp as string, "..", "evil"))).toBe(false);
+  });
+
+  it("run_id 不存在 → 400（不静默丢弃）", async () => {
+    withTmpDir();
+    stubLLM();
+    const res = await postReview(post("/api/review", { config, story: "正文", run_id: "20260101_000000_zzzzzz" }));
+    expect(res.status).toBe(400);
+    expect((await readJson(res)).error).toContain("run_id 不存在");
   });
 });

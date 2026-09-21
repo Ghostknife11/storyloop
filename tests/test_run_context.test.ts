@@ -32,16 +32,16 @@ describe("RunContext（§9/§10/§64）", () => {
   });
 
   it("initial status valid：created，stage/error 为 null", () => {
-    const ctx = createRunContext("0.4.0");
+    const ctx = createRunContext("0.5.0");
     expect(ctx.run_id).toMatch(RUN_ID);
-    expect(ctx.project_version).toBe("0.4.0");
+    expect(ctx.project_version).toBe("0.5.0");
     expect(ctx.status).toBe("created");
     expect(ctx.current_stage).toBeNull();
     expect(ctx.error).toBeNull();
   });
 
   it("basic status transition works", () => {
-    const ctx = createRunContext("0.4.0");
+    const ctx = createRunContext("0.5.0");
     transitionStage(ctx, "planning", "planning");
     expect(ctx.status).toBe("planning");
     expect(ctx.current_stage).toBe("planning");
@@ -52,8 +52,15 @@ describe("RunContext（§9/§10/§64）", () => {
     expect(ctx.status).toBe("completed");
   });
 
+  it("§18 reviewing 状态：Story 落盘之后的审阅阶段", () => {
+    const ctx = createRunContext("0.5.0");
+    transitionStage(ctx, "reviewing", "reviewing");
+    expect(ctx.status).toBe("reviewing");
+    expect(ctx.current_stage).toBe("reviewing");
+  });
+
   it("failed run records stage and error（§27/§28）", () => {
-    const ctx: RunContext = createRunContext("0.4.0");
+    const ctx: RunContext = createRunContext("0.5.0");
     transitionStage(ctx, "generating", "generating");
     failRun(ctx, "generating", "LLM API 返回 500");
     expect(ctx.status).toBe("failed");
@@ -63,7 +70,7 @@ describe("RunContext（§9/§10/§64）", () => {
 
   it("timestamps valid：ISO 字符串且接近当前时间", () => {
     const before = Date.now();
-    const ctx = createRunContext("0.4.0");
+    const ctx = createRunContext("0.5.0");
     const after = Date.now();
     const parsed = Date.parse(ctx.started_at);
     expect(Number.isNaN(parsed)).toBe(false);

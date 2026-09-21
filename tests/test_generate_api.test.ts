@@ -58,17 +58,23 @@ function runIdFromError(message: string): string {
   return message.split(" ")[1] ?? "";
 }
 
-describe("POST /api/runs（v0.4.0 Automatic Run）", () => {
-  it("链路：config → Planning → Generation → Persistence，四件产物落盘", async () => {
+describe("POST /api/runs（v0.5.0 Automatic Run）", () => {
+  it("链路：config → Planning → Generation → Persistence → Review；Review 失败不拖垮 Run", async () => {
     const dir = withTmpDir();
     const calls: Array<{ temperature: number }> = [];
     const r = await startRun({ config }, { llm: fakeLLM as never, planner: fakePlanner(plan, calls) as never });
     expect(r.status).toBe(200);
-    const ok = r.json as { run_id: string; status: string; story: string; beat_plan: BeatPlan; artifacts: Record<string, string> };
+    const ok = r.json as {
+      run_id: string; status: string; story: string; beat_plan: BeatPlan;
+      review: unknown; review_status: string; artifacts: Record<string, string>;
+    };
     expect(ok.run_id).toMatch(RUN_ID);
     expect(ok.status).toBe("completed");
     expect(ok.story).toContain("正文");
     expect(ok.beat_plan.beats).toHaveLength(2);
+    // fakeLLM 只回正文文本，Reviewer 拿不到合法 JSON → Review 失败，但 Story 仍成功（§28/§46）
+    expect(ok.review).toBeNull();
+    expect(ok.review_status).toBe("failed");
     expect(ok.artifacts).toEqual({ config: "config.json", beat_plan: "beats.json", story: "story.md", metadata: "metadata.json" });
     expect(calls).toHaveLength(1);
 
@@ -82,7 +88,10 @@ describe("POST /api/runs（v0.4.0 Automatic Run）", () => {
     expect(meta.run_id).toBe(ok.run_id);
     expect(meta.status).toBe("completed");
     expect(meta.current_stage).toBe("completed");
-    expect(meta.project_version).toBe("0.4.0");
+    expect(meta.project_version).toBe("0.5.0");
+    expect(meta.review_status).toBe("failed");
+    expect(meta.review_score).toBeUndefined();
+    expect(meta.review_error).toBeTruthy();
     expect(meta.finished_at).toBeTruthy();
   });
 
@@ -91,7 +100,7 @@ describe("POST /api/runs（v0.4.0 Automatic Run）", () => {
     const order: string[] = [];
     const planSpy = { plan: async () => { order.push("plan"); return plan; } };
     const genSpy = new StoryGenerator({ generate: async () => { order.push("generate"); return "正文"; } } as never);
-    await startRun({ config }, { planner: planSpy as never, generator: genSpy });
+    await startRun({ config }, { llm: fakeLLM as never, planner: planSpy as never, generator: genSpy });
     expect(order).toEqual(["plan", "generate"]);
   });
 
@@ -99,7 +108,7 @@ describe("POST /api/runs（v0.4.0 Automatic Run）", () => {
     withTmpDir();
     const r = await startRun(
       { title: "旧版请求", prompt: "旧版自由文本需求。" },
-      { planner: fakePlanner(plan) as never, generator },
+      { llm: fakeLLM as never, planner: fakePlanner(plan) as never, generator },
     );
     expect(r.status).toBe(200);
     expect((r.json as { run_id: string }).run_id).toMatch(RUN_ID);
@@ -146,10 +155,10 @@ describe("POST /api/runs（v0.4.0 Automatic Run）", () => {
   });
 });
 
-describe("POST /api/runs/from-plan（v0.4.0 Manual Run）", () => {
+describe("POST /api/runs/from-plan（v0.5.0 Manual Run）", () => {
   it("链路：不再调用 Planner，直接生成，run_id 与 metadata 一致", async () => {
     const dir = withTmpDir();
-    const r = await startRunFromPlan({ config, beat_plan: plan }, { generator });
+    const r = await startRunFromPlan({ config, beat_plan: plan }, { llm: fakeLLM as never, generator });
     expect(r.status).toBe(200);
     const ok = r.json as { run_id: string; story: string; beat_plan: BeatPlan };
     expect(ok.run_id).toMatch(RUN_ID);
@@ -164,7 +173,7 @@ describe("POST /api/runs/from-plan（v0.4.0 Manual Run）", () => {
     withTmpDir();
     const r = await startRunFromPlan(
       { config, beat_plan: plan },
-      { planner: { plan: async () => { throw new Error("Manual Run 不得调用 Planner"); } } as never, generator },
+      { llm: fakeLLM as never, planner: { plan: async () => { throw new Error("Manual Run 不得调用 Planner"); } } as never, generator },
     );
     expect(r.status).toBe(200);
   });
