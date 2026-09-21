@@ -2,17 +2,23 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { KeyRound, Save } from "lucide-react";
+import { KeyRound, RotateCcw, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
 import { PROVIDERS } from "@/lib/constants";
-import { useSettings } from "@/lib/settings-store";
+import {
+  MAX_ATTEMPTS_RANGE,
+  MIN_SCORE_RANGE,
+  useSettings,
+} from "@/lib/settings-store";
 
 /**
- * `/settings`（TASK §26）：最低配置 model / base_url / temperature。
+ * `/settings`（TASK §26/§30/§31）：model / base_url / temperature + 自动重试。
  * API Key 不进浏览器（§24）——只存服务端 .env。
+ * §66 这里只能暴露 Max Attempts / Minimum Review Score / Retry on Validation Failure：
+ * 不提供修复策略、问题定向、维度阈值、失败归因、自适应策略。
  */
 export default function SettingsPage() {
   const [settings, update] = useSettings();
@@ -72,6 +78,92 @@ export default function SettingsPage() {
             <Button onClick={handleSave} className="rounded-full bg-violet-600 hover:bg-violet-500 text-white">
               <Save className="h-4 w-4" /> 保存设置
             </Button>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur p-4 sm:p-5 space-y-4">
+          <div className="space-y-1">
+            <h2 className="text-[13px] font-semibold tracking-tight">Automatic Retry</h2>
+            <p className="text-[11px] text-muted-foreground leading-5">
+              重新生成整篇小说——使用同一份 StoryConfig 与 BeatPlan，不做局部修复。
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <Label className="text-[11px] text-muted-foreground">Enable Automatic Retry</Label>
+              <p className="text-[10px] text-muted-foreground">关闭后每次 Run 只生成一次</p>
+            </div>
+            <Switch
+              checked={mounted ? settings.retryEnabled : true}
+              onCheckedChange={(v) => update({ retryEnabled: v })}
+              aria-label="Enable Automatic Retry"
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <Label className="text-[11px] text-muted-foreground">Max Attempts</Label>
+              <p className="text-[10px] text-muted-foreground">
+                含首次生成，{MAX_ATTEMPTS_RANGE.min} ~ {MAX_ATTEMPTS_RANGE.max} 次
+              </p>
+            </div>
+            <Input
+              type="number"
+              min={MAX_ATTEMPTS_RANGE.min}
+              max={MAX_ATTEMPTS_RANGE.max}
+              step={1}
+              value={mounted ? settings.maxAttempts : 2}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                if (Number.isInteger(n) && n >= MAX_ATTEMPTS_RANGE.min && n <= MAX_ATTEMPTS_RANGE.max) {
+                  update({ maxAttempts: n });
+                }
+              }}
+              className="h-9 w-20 text-center font-mono"
+              aria-label="Max Attempts"
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <Label className="text-[11px] text-muted-foreground">Minimum Review Score</Label>
+              <p className="text-[10px] text-muted-foreground">
+                低于该总分即重试，{MIN_SCORE_RANGE.min} ~ {MIN_SCORE_RANGE.max}
+              </p>
+            </div>
+            <Input
+              type="number"
+              min={MIN_SCORE_RANGE.min}
+              max={MIN_SCORE_RANGE.max}
+              step={1}
+              value={mounted ? settings.minReviewScore : 70}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                if (Number.isFinite(n) && n >= MIN_SCORE_RANGE.min && n <= MIN_SCORE_RANGE.max) {
+                  update({ minReviewScore: n });
+                }
+              }}
+              className="h-9 w-20 text-center font-mono"
+              aria-label="Minimum Review Score"
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <Label className="text-[11px] text-muted-foreground">Retry on Validation Failure</Label>
+              <p className="text-[10px] text-muted-foreground">硬性校验未通过时也重新生成</p>
+            </div>
+            <Switch
+              checked={mounted ? settings.retryOnValidationFailure : true}
+              onCheckedChange={(v) => update({ retryOnValidationFailure: v })}
+              aria-label="Retry on Validation Failure"
+            />
+          </div>
+
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-[11px] text-muted-foreground leading-5">
+            <RotateCcw className="h-3.5 w-3.5 text-amber-400 inline-block align-[-2px] mr-1.5" />
+            Increasing max attempts may increase API usage and cost.
           </div>
         </div>
 

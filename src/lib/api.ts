@@ -3,7 +3,17 @@ import type { BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
 
-/** §32 Run 响应：run_id / 状态 / 正文 / 实际使用的 BeatPlan / 校验结果 / 评价 / 产物文件名。 */
+/** §34/§38 单个 Attempt 摘要：只带结论，不带完整正文。 */
+export interface AttemptSummaryApi {
+  attempt_number: number;
+  accepted: boolean;
+  retry_reason: string | null;
+  review_score: number | null;
+  validation_passed: boolean | null;
+}
+
+/** §32 Run 响应：run_id / 状态 / 正文 / 实际使用的 BeatPlan / 校验结果 / 评价 / 产物文件名。
+ *  v0.7.0 增加重试结论与 Attempt 摘要（§38）。 */
 export interface RunApiResult {
   run_id: string;
   status: string;
@@ -18,6 +28,12 @@ export interface RunApiResult {
   review_status: string;
   review_error?: string;
   artifacts: Record<string, string>;
+  /** §16：accepted / exhausted。 */
+  quality_status: "accepted" | "exhausted";
+  attempt_count: number;
+  /** §17：默认展示的就是这个 Attempt 的正文与结论（§36）。 */
+  selected_attempt: number;
+  attempts: AttemptSummaryApi[];
 }
 
 /** §28 失败时带上 run_id 与 stage，让 UI 能指出失败阶段（不猜）。 */
@@ -57,12 +73,20 @@ export async function planStory(
   return data as BeatPlan;
 }
 
+/** §37 RetryPolicy 由设置页下发，不属于 StoryConfig。 */
+export interface RetryPolicyApi {
+  max_attempts: number;
+  min_review_score: number;
+  retry_on_validation_failure: boolean;
+}
+
 /** §32 Automatic Run：StoryConfig → 一个完整 Run。 */
 export async function startRun(
   config: StoryConfig,
   runtime: { model?: string; baseUrl?: string; temperature?: number },
+  retryPolicy?: RetryPolicyApi,
 ): Promise<RunApiResult> {
-  return postRun("/api/runs", { config, ...runtime });
+  return postRun("/api/runs", { config, ...runtime, ...(retryPolicy ? { retry_policy: retryPolicy } : {}) });
 }
 
 /** §33 Manual Run：必须携带 beat_plan（§29 不偷偷回退到自动规划）。 */
@@ -70,8 +94,48 @@ export async function generateFromPlan(
   config: StoryConfig,
   plan: BeatPlan,
   runtime: { model?: string; baseUrl?: string; temperature?: number },
+  retryPolicy?: RetryPolicyApi,
 ): Promise<RunApiResult> {
-  return postRun("/api/runs/from-plan", { config, beat_plan: plan, ...runtime });
+  return postRun("/api/runs/from-plan", {
+    config,
+    beat_plan: plan,
+    ...runtime,
+    ...(retryPolicy ? { retry_policy: retryPolicy } : {}),
+  });
+}
+
+/**
+ * §39 GET /api/runs/<run_id>：读回一次 Run 的 Attempt 摘要。
+ * §40 没有全局 Run 历史接口，前端也不做历史列表。
+ */
+export async function fetchRun(runId: string): Promise<RunApiResult> {
+  const res = await fetch(`/api/runs/${encodeURIComponent(runId)}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || `读取 Run 失败（HTTP ${res.status}）`);
+  return data as RunApiResult;
+}
+
+/**
+ * §39 GET /api/runs/<run_id>/attempts/<n>：读回某一次 Attempt。
+ * §35 只做查看，前端不生成比较表 / Score Delta / 排名。
+ */
+export async function fetchRunAttempt(
+  runId: string,
+  attemptNumber: number,
+): Promise<{
+  run_id: string;
+  attempt_number: number;
+  accepted: boolean | null;
+  retry_reason: string | null;
+  selected: boolean;
+  story: string;
+  validation: ValidationResult | null;
+  review: ReviewResult | null;
+}> {
+  const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/attempts/${attemptNumber}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || `读取 Attempt 失败（HTTP ${res.status}）`);
+  return data as never;
 }
 
 /** §30 Prompt Preview（config 必填，beat_plan 可选）。 */

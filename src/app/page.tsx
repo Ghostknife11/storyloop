@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
 import {
   BookOpen, Copy, Download, Eye, FilePlus2, FolderOpen, Loader2,
-  Plus, Save, Sparkles, Trash2, ArrowUp, ArrowDown,
+  Plus, RotateCcw, Save, Sparkles, Trash2, ArrowUp, ArrowDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,12 +15,13 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { ReviewPanel } from "@/components/review-panel";
 import { ValidationPanel } from "@/components/validation-panel";
+import { AttemptPanel } from "@/components/attempt-panel";
 import {
-  generateFromPlan, planStory, previewPrompt, reviewStory, validateStory,
+  fetchRunAttempt, generateFromPlan, planStory, previewPrompt, reviewStory, validateStory,
   RunApiError, type RunApiResult,
 } from "@/lib/api";
 import { configFilename, parseStoryConfig, serializeStoryConfig } from "@/lib/config-io";
-import { useSettings } from "@/lib/settings-store";
+import { retryPolicyOf, useSettings } from "@/lib/settings-store";
 import {
   GENRE_PRESETS, STYLE_PRESETS, STORY_CONFIG_VERSION, TARGET_WORDS_DEFAULT,
   validateStoryConfig, type StoryConfig,
@@ -176,6 +177,14 @@ export default function GeneratePage() {
   const [reviewOverride, setReviewOverride] = useState<ReviewResult | null>(null);
   const [revalidating, setRevalidating] = useState(false);
   const [validationOverride, setValidationOverride] = useState<ValidationResult | null>(null);
+  // §36：默认展示 selected_attempt；点开其它 Attempt 才切过去
+  const [viewAttempt, setViewAttempt] = useState<{
+    number: number;
+    story: string;
+    validation: ValidationResult | null;
+    review: ReviewResult | null;
+  } | null>(null);
+  const [loadingAttempt, setLoadingAttempt] = useState<number | null>(null);
   const busyRef = useRef(false);
   const planBusyRef = useRef(false);
   const stepperTimers = useRef<number[]>([]);
@@ -227,6 +236,8 @@ export default function GeneratePage() {
     setReviewOverride(null);
     setRevalidating(false);
     setValidationOverride(null);
+    setViewAttempt(null);
+    setLoadingAttempt(null);
     clearStepperTimers();
   };
 
@@ -358,6 +369,8 @@ export default function GeneratePage() {
     setReviewOverride(null);
     setRevalidating(false);
     setValidationOverride(null);
+    setViewAttempt(null);
+    setLoadingAttempt(null);
     beginStepper();
     try {
       const config = formToConfig(form);
@@ -365,13 +378,18 @@ export default function GeneratePage() {
         model: settings.model || undefined,
         baseUrl: settings.baseUrl || undefined,
         temperature: settings.temperature,
-      });
+      }, retryPolicyOf(settings));
       clearStepperTimers();
       setResult(data);
       setRunTitle(title);
       setRunStage("completed");
       setPhase("success");
-      toast.success(`Run 完成：${data.run_id}`);
+      // §16/§34：把重试结论直接讲清楚，不让用户猜为什么换了正文
+      toast.success(
+        data.quality_status === "accepted"
+          ? `Run 完成：${data.run_id} · Attempt ${data.selected_attempt} 已采纳`
+          : `Run 完成：${data.run_id} · 尝试次数已用尽，展示 Attempt ${data.selected_attempt}`,
+      );
     } catch (e) {
       clearStepperTimers();
       const msg = e instanceof Error ? e.message : "未知错误";
@@ -459,6 +477,43 @@ export default function GeneratePage() {
     setTimeout(() => URL.revokeObjectURL(url), 1500);
   };
 
+  /** §35/§36 查看某一次 Attempt：按需拉取该 Attempt 的正文与结论，不做横向比较。 */
+  async function handleViewAttempt(attemptNumber: number) {
+    if (!result) return;
+    // 点回被选中的 Attempt：直接回到 RunOk 里的最终结果，不再请求一次
+    if (attemptNumber === result.selected_attempt) {
+      setViewAttempt(null);
+      setLoadingAttempt(null);
+      return;
+    }
+    setLoadingAttempt(attemptNumber);
+    try {
+      const detail = await fetchRunAttempt(result.run_id, attemptNumber);
+      setViewAttempt({
+        number: attemptNumber,
+        story: detail.story,
+        validation: detail.validation,
+        review: detail.review,
+      });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "读取 Attempt 失败");
+    } finally {
+      setLoadingAttempt(null);
+    }
+  }
+
+  const shownStory = viewAttempt ? viewAttempt.story : result?.story ?? "";
+  const shownValidation = viewAttempt ? viewAttempt.validation : validationOverride ?? result?.validation ?? null;
+  const shownValidationStatus = viewAttempt
+    ? (viewAttempt.validation ? "completed" : "not_started")
+    : validationOverride ? "completed" : result?.validation_status ?? "not_started";
+  const shownReview = viewAttempt ? viewAttempt.review : reviewOverride ?? result?.review ?? null;
+  const shownReviewStatus = viewAttempt
+    ? (viewAttempt.review ? "completed" : "not_started")
+    : reviewOverride ? "completed" : result?.review_status ?? "not_started";
+  /** §36：当前看的是哪一次 Attempt。 */
+  const viewingAttempt = viewAttempt?.number ?? result?.selected_attempt ?? 0;
+
   const handleDownloadConfig = () => {
     const blob = new Blob([serializeStoryConfig(formToConfig(form))], { type: "application/json;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -519,6 +574,18 @@ export default function GeneratePage() {
           {runStage === "completed" && result && (
             <span className="ml-auto text-emerald-500">Run {result.run_id} · {result.status}</span>
           )}
+        </div>
+      )}
+
+      {/* §33 重试提示：服务端不推送进度，这里只说明可能发生的自动重试，
+          真实结果一律以 Attempt 面板为准（不伪造 Attempt 1 → Retrying → Attempt 2 的过程）。 */}
+      {generating && settings.retryEnabled && settings.maxAttempts > 1 && (
+        <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono text-muted-foreground">
+          <RotateCcw className="h-3 w-3 text-violet-400" />
+          <span>
+            Automatic Retry on：校验未通过或审阅分数低于 {settings.minReviewScore} 时会重新生成整篇
+            （最多 {settings.maxAttempts} 次，会增加 API 调用与费用）。
+          </span>
         </div>
       )}
 
@@ -819,11 +886,23 @@ export default function GeneratePage() {
                     <div className="text-[11px] text-muted-foreground font-mono mb-4">
                       Run {result.run_id} · {result.status} · {result.beat_plan.beats.length} beats
                     </div>
+                    {/* §34/§35 Attempt 面板：计数 / 选中 Attempt / 质量结论 / 每次 Attempt 摘要。
+                        §36 默认展示 selected_attempt——正文区读的就是被选中那一次。 */}
+                    <div className="mb-4">
+                      <AttemptPanel
+                        attempts={result.attempts}
+                        selectedAttempt={result.selected_attempt}
+                        qualityStatus={result.quality_status}
+                        viewingAttempt={viewingAttempt}
+                        onViewAttempt={handleViewAttempt}
+                        loadingAttempt={loadingAttempt}
+                      />
+                    </div>
                     {/* §28 Validation 区域：Passed / Failed + Issues（Code / Severity / Message）。
                         §29 与 Review 分开：这里只有硬性检查，没有分数。 */}
                     <ValidationPanel
-                      validation={validationOverride ?? result.validation}
-                      validationStatus={validationOverride ? "completed" : result.validation_status}
+                      validation={shownValidation}
+                      validationStatus={shownValidationStatus}
                       validationError={result.validation_error}
                       revalidating={revalidating}
                       onValidateAgain={handleValidateAgain}
@@ -831,8 +910,8 @@ export default function GeneratePage() {
                     {/* §31 Review 区域：Score / Summary / Strengths / Problems。
                         §34 Review 失败时正文继续显示，只把本面板切成失败态。 */}
                     <ReviewPanel
-                      review={reviewOverride ?? result.review}
-                      reviewStatus={reviewOverride ? "completed" : result.review_status}
+                      review={shownReview}
+                      reviewStatus={shownReviewStatus}
                       reviewError={result.review_error}
                       reReviewing={reReviewing}
                       onReviewAgain={handleReviewAgain}
@@ -843,12 +922,16 @@ export default function GeneratePage() {
                       <div className="text-[11px] font-mono text-zinc-300">runs/{result.run_id}/</div>
                       <ul className="mt-1 space-y-0.5">
                         {Object.entries(result.artifacts).map(([key, file]) => (
-                          <li key={key} className="text-[11px] font-mono text-muted-foreground">{key} → {file}</li>
+                          <li key={key} className="text-[11px] font-mono text-muted-foreground">
+                            {key} → {viewAttempt && viewAttempt.number !== result.selected_attempt
+                              ? `attempts/${String(viewAttempt.number).padStart(2, "0")}/${file}`
+                              : file}
+                          </li>
                         ))}
                       </ul>
                     </div>
                     <div className="prose prose-invert max-w-none prose-p:text-[15px] prose-p:leading-[26px]">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{result.story}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{shownStory}</ReactMarkdown>
                     </div>
                   </div>
                 </ScrollArea>
