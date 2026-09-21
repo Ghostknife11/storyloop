@@ -68,6 +68,7 @@ describe("POST /api/runs（v0.6.0 Automatic Run）", () => {
       run_id: string; status: string; story: string; beat_plan: BeatPlan;
       validation: { passed: boolean; issues: Array<{ code: string }> }; validation_status: string;
       review: unknown; review_status: string; artifacts: Record<string, string>;
+      attempt_count: number; selected_attempt: number; quality_status: string;
     };
     expect(ok.run_id).toMatch(RUN_ID);
     expect(ok.status).toBe("completed");
@@ -91,8 +92,14 @@ describe("POST /api/runs（v0.6.0 Automatic Run）", () => {
     expect(calls).toHaveLength(1);
 
     const runDir = runDirOf(dir, ok.run_id);
+    // §14/§15：两次校验都不合格 → 默认策略自动重试一次后 exhausted，attempts/ 归档两次正文
+    expect(ok.attempt_count).toBe(2);
+    expect(ok.quality_status).toBe("exhausted");
+    expect(ok.selected_attempt).toBe(2);
+    // §8：planner 只规划一次，重试复用 BeatPlan
+    expect(calls).toHaveLength(1);
     expect(readdirSync(runDir).sort()).toEqual([
-      "beats.json", "config.json", "metadata.json", "story.md", "validation.json",
+      "attempts", "beats.json", "config.json", "metadata.json", "story.md", "validation.json",
     ]);
     expect(JSON.parse(readFileSync(join(runDir, "config.json"), "utf8")).protagonist?.name).toBe("陈岚");
     expect(JSON.parse(readFileSync(join(runDir, "beats.json"), "utf8")).beats).toHaveLength(2);
@@ -102,7 +109,13 @@ describe("POST /api/runs（v0.6.0 Automatic Run）", () => {
     expect(meta.run_id).toBe(ok.run_id);
     expect(meta.status).toBe("completed");
     expect(meta.current_stage).toBe("completed");
-    expect(meta.project_version).toBe("0.6.0");
+    expect(meta.project_version).toBe("0.7.0");
+    // §25：metadata 记录当时生效的策略与 Attempt 结论
+    expect(meta.max_attempts).toBe(2);
+    expect(meta.min_review_score).toBe(70);
+    expect(meta.attempt_count).toBe(2);
+    expect(meta.selected_attempt).toBe(2);
+    expect(meta.quality_status).toBe("exhausted");
     // §24：Validation 失败只记录，不改变 Run 状态
     expect(meta.validation_status).toBe("completed");
     expect(meta.validation_passed).toBe(false);
@@ -121,7 +134,8 @@ describe("POST /api/runs（v0.6.0 Automatic Run）", () => {
     const planSpy = { plan: async () => { order.push("plan"); return plan; } };
     const genSpy = new StoryGenerator({ generate: async () => { order.push("generate"); return "正文"; } } as never);
     await startRun({ config }, { llm: fakeLLM as never, planner: planSpy as never, generator: genSpy });
-    expect(order).toEqual(["plan", "generate"]);
+    // §8：Retry 不重新规划——plan 只出现一次；每次 Attempt 都以 generate 开头
+    expect(order).toEqual(["plan", "generate", "generate"]);
   });
 
   it("§26 legacy {title, prompt} 仍可跑 Automatic Run", async () => {

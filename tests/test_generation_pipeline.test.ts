@@ -94,8 +94,8 @@ function fakeReviewer(out: ReviewResult, calls: ReviewCall[] = []) {
 
 /** 落盘阶段注入失败：模拟磁盘错误，且不让内部路径泄漏给用户。 */
 class FailingStore extends ArtifactStore {
-  override putStory(runId: string, title: string, story: string): string {
-    throw new Error(`EACCES: permission denied, open '${join("D:", "secret", "runs", runId, "story.md")}'`);
+  override putAttemptStory(runId: string, attemptNumber: number, title: string, story: string): string {
+    throw new Error(`EACCES: permission denied, open '${join("D:", "secret", "runs", runId, "attempts", `0${attemptNumber}`, "story.md")}'`);
   }
 }
 
@@ -148,7 +148,7 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
 
     const runDir = join(dir, "runs", result.run_id);
     expect(readdirSync(runDir).sort()).toEqual([
-      "beats.json", "config.json", "metadata.json", "review.json", "story.md", "validation.json",
+      "attempts", "beats.json", "config.json", "metadata.json", "review.json", "story.md", "validation.json",
     ]);
     expect(readFileSync(join(runDir, "story.md"), "utf8")).toContain("# 消失的目击者");
     expect(JSON.parse(readFileSync(join(runDir, "review.json"), "utf8"))).toEqual(review);
@@ -158,7 +158,7 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
     expect(meta.run_id).toBe(result.run_id);
     expect(meta.status).toBe("completed");
     expect(meta.current_stage).toBe("completed");
-    expect(meta.project_version).toBe("0.6.0");
+    expect(meta.project_version).toBe("0.7.0");
     expect(meta.finished_at).toBeTruthy();
     // §17/§24：metadata 单独记录校验与审阅状态
     expect(meta.validation_status).toBe("completed");
@@ -168,6 +168,12 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
     expect(meta.review_status).toBe("completed");
     expect(meta.review_score).toBe(74);
     expect(meta.review_error).toBeUndefined();
+    // §25：metadata 记录当时生效的策略与 Attempt 结论
+    expect(meta.max_attempts).toBe(2);
+    expect(meta.min_review_score).toBe(70);
+    expect(meta.attempt_count).toBe(1);
+    expect(meta.selected_attempt).toBe(1);
+    expect(meta.quality_status).toBe("accepted");
   });
 
   it("§45 review.json / validation.json 内容与 GenerationResult 一致", async () => {
@@ -193,15 +199,15 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
     withTmpDir();
     const events: string[] = [];
     const store = new ArtifactStore();
-    const originalPutStory = store.putStory.bind(store);
-    store.putStory = (runId: string, title: string, story: string) => {
+    const originalPutStory = store.putAttemptStory.bind(store);
+    store.putAttemptStory = (runId: string, n: number, title: string, story: string) => {
       events.push("save-story");
-      return originalPutStory(runId, title, story);
+      return originalPutStory(runId, n, title, story);
     };
-    const originalPutValidation = store.putValidation.bind(store);
-    store.putValidation = (runId: string, v: ValidationResult) => {
+    const originalPutValidation = store.putAttemptValidation.bind(store);
+    store.putAttemptValidation = (runId: string, n: number, v: ValidationResult) => {
       events.push("save-validation");
-      return originalPutValidation(runId, v);
+      return originalPutValidation(runId, n, v);
     };
     const pipeline = new GenerationPipeline(
       fakePlanner(plan) as never,
@@ -211,6 +217,7 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
       store,
     );
     await pipeline.run(config);
+    // §23/§19：Attempt 内的顺序不变——Generate → Save Story → Validate → Save Validation → Review
     expect(events).toEqual(["save-story", "validate", "save-validation", "review"]);
   });
 
@@ -222,11 +229,13 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
     );
     const result = await pipeline.run(config);
     expect(Object.keys(result).sort()).toEqual([
-      "artifacts", "beat_plan", "config", "finished_at", "review", "review_error",
-      "review_status", "run_id", "started_at", "status", "story",
+      "artifacts", "attempt_count", "attempts", "beat_plan", "config", "finished_at",
+      "quality_status", "review", "review_error", "review_status", "run_id",
+      "selected_attempt", "started_at", "status", "story",
       "validation", "validation_error", "validation_status",
     ]);
-    for (const forbidden of ["repair", "retry", "attempt", "dimension", "fixed", "revised", "patched"]) {
+    // retry / attempt 是 v0.7.0 的正式能力；下面这些仍然一个都不许出现
+    for (const forbidden of ["repair", "dimension", "fixed", "revised", "patched", "benchmark"]) {
       for (const key of Object.keys(result)) {
         expect(key.toLowerCase()).not.toContain(forbidden);
       }
@@ -244,8 +253,8 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
     }
   });
 
-  it("§19 构造器只接受 planner / generator / validator / reviewer / artifactStore", () => {
-    // 第 6 个参数 projectVersion 有默认值，不计入 length
+  it("§19 构造器接受 planner / generator / validator / reviewer / artifactStore / retryPolicy", () => {
+    // retryPolicy（第 6 个）与 projectVersion（第 7 个）都有默认值，不计入 length
     expect(GenerationPipeline.length).toBe(5);
     const names = Object.getOwnPropertyNames(GenerationPipeline.prototype);
     expect(names).toContain("run");
@@ -468,8 +477,8 @@ describe("GenerationPipeline — review failure（§16/§44）", () => {
   it("review.json 写入失败同样只算 Review 失败，不丢正文", async () => {
     const dir = withTmpDir();
     class FailingReviewStore extends ArtifactStore {
-      override putReview(runId: string, r: ReviewResult): string {
-        throw new Error(`EACCES: permission denied, open '${join("D:", "secret", "runs", runId, "review.json")}'`);
+      override putAttemptReview(runId: string, attemptNumber: number, r: ReviewResult): string {
+        throw new Error(`EACCES: permission denied, open '${join("D:", "secret", "runs", runId, "attempts", `0${attemptNumber}`, "review.json")}'`);
       }
     }
     const pipeline = new GenerationPipeline(
@@ -525,12 +534,12 @@ describe("GenerationPipeline — validation stage（§17/§38/§39）", () => {
     withTmpDir();
     const events: string[] = [];
     const store = new ArtifactStore();
-    const putStory = store.putStory.bind(store);
-    const putValidation = store.putValidation.bind(store);
-    const putReview = store.putReview.bind(store);
-    store.putStory = (r, t, s) => { events.push("save-story"); return putStory(r, t, s); };
-    store.putValidation = (r, v) => { events.push("save-validation"); return putValidation(r, v); };
-    store.putReview = (r, v) => { events.push("save-review"); return putReview(r, v); };
+    const putStory = store.putAttemptStory.bind(store);
+    const putValidation = store.putAttemptValidation.bind(store);
+    const putReview = store.putAttemptReview.bind(store);
+    store.putAttemptStory = (r, n, t, s) => { events.push("save-story"); return putStory(r, n, t, s); };
+    store.putAttemptValidation = (r, n, v) => { events.push("save-validation"); return putValidation(r, n, v); };
+    store.putAttemptReview = (r, n, rv) => { events.push("save-review"); return putReview(r, n, rv); };
 
     const pipeline = new GenerationPipeline(
       { plan: async () => { events.push("plan"); return plan; } } as never,
@@ -545,7 +554,7 @@ describe("GenerationPipeline — validation stage（§17/§38/§39）", () => {
     ]);
   });
 
-  it("§39 Validation Failed：story.md / validation.json 都在，Review 仍执行，Run 仍 completed，不重新生成", async () => {
+  it("§39 Validation Failed + 默认策略：story.md / validation.json 都在，Review 仍执行，Run 仍 completed，并按策略重试一次", async () => {
     const dir = withTmpDir();
     const genCalls: GenCall[] = [];
     const reviewCalls: ReviewCall[] = [];
@@ -568,17 +577,43 @@ describe("GenerationPipeline — validation stage（§17/§38/§39）", () => {
     expect(existsSync(join(dir, "runs", result.run_id, "story.md"))).toBe(true);
     expect(existsSync(join(dir, "runs", result.run_id, "validation.json"))).toBe(true);
     // Review 照常执行
-    expect(reviewCalls).toHaveLength(1);
+    expect(reviewCalls).toHaveLength(2);
     expect(result.review).toEqual(review);
     expect(result.review_status).toBe("completed");
-    // §58：绝不自动重新生成 / 修复
-    expect(genCalls).toHaveLength(1);
+    // §14/§39：默认 retry_on_validation_failure=true，max_attempts=2 → 重试一次后仍不过 → exhausted
+    expect(genCalls).toHaveLength(2);
+    expect(result.attempt_count).toBe(2);
+    expect(result.selected_attempt).toBe(2);
+    expect(result.quality_status).toBe("exhausted");
+    expect(result.attempts.map((a) => a.retry_reason)).toEqual(["validation_failed", "validation_failed"]);
 
     const meta = readMeta(dir, result.run_id);
     expect(meta.validation_status).toBe("completed");
     expect(meta.validation_passed).toBe(false);
     expect(meta.validation_issue_count).toBe(1);
     expect(meta.status).toBe("completed");
+  });
+
+  it("§39 Validation Failed + 关闭 retry_on_validation_failure：只生成一次，仍是 exhausted 语义之外的 accepted", async () => {
+    withTmpDir();
+    const genCalls: GenCall[] = [];
+    const pipeline = new GenerationPipeline(
+      fakePlanner(plan) as never,
+      fakeGenerator("太短", genCalls) as never,
+      fakeValidator(failed) as never,
+      fakeReviewer(review) as never,
+      new ArtifactStore(),
+      { max_attempts: 3, min_review_score: 70, retry_on_validation_failure: false },
+    );
+
+    const result = await pipeline.run(config, undefined, {
+      max_attempts: 3, min_review_score: 70, retry_on_validation_failure: false,
+    });
+    // §14：校验失败但不是重试触发条件 → 直接采纳这一次
+    expect(genCalls).toHaveLength(1);
+    expect(result.quality_status).toBe("accepted");
+    expect(result.selected_attempt).toBe(1);
+    expect(result.attempts[0].accepted).toBe(true);
   });
 
   it("§18 EMPTY_CONTENT 时跳过 Review，Run 仍 completed", async () => {
