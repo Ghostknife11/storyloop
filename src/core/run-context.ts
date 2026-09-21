@@ -2,6 +2,7 @@
  * §8/§9/§10 RunContext：一次完整故事生成 = 一个 Run。
  * 状态只用于表示当前 Run 运行到了哪里（§11），不是 Observability。
  * v0.5.0 新增 reviewing（§18）：Story 落盘之后的审阅阶段。
+ * v0.6.0 新增 validating（§17）：Story 落盘之后、审阅之前的硬性有效性检查阶段。
  */
 
 import { randomBytes } from "node:crypto";
@@ -11,6 +12,7 @@ export type RunStatus =
   | "planning"
   | "generating"
   | "saving"
+  | "validating"
   | "reviewing"
   | "completed"
   | "failed";
