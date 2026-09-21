@@ -104,6 +104,81 @@ export class ArtifactStore {
   }
 
   // ---------------------------------------------------------------------------
+  // §28 只读访问：GET /api/runs/{run_id} 与 attempt 详情（§39）只读取内容，
+  // 不把服务器绝对路径带进响应（§67）。
+  // ---------------------------------------------------------------------------
+
+  /** 已存在的 attempt 编号，升序；只有目录名形如两位数字的才算（§6）。 */
+  listAttemptNumbers(runId: string): number[] {
+    const dir = join(this.runDir(runId), ATTEMPTS_DIR);
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && /^\d{2}$/.test(e.name))
+      .map((e) => Number(e.name))
+      .filter((n) => Number.isInteger(n) && n >= 1)
+      .sort((a, b) => a - b);
+  }
+
+  readRunMetadata(runId: string): Record<string, unknown> | null {
+    return this.readJson(runId, "metadata.json");
+  }
+
+  readAttemptMetadata(runId: string, attemptNumber: number): Record<string, unknown> | null {
+    return this.readJson(runId, this.attemptFile(attemptNumber, "metadata.json"));
+  }
+
+  readAttemptStory(runId: string, attemptNumber: number): string | null {
+    return this.readText(runId, this.attemptFile(attemptNumber, "story.md"));
+  }
+
+  readAttemptValidation(runId: string, attemptNumber: number): ValidationResult | null {
+    return this.readJson(runId, this.attemptFile(attemptNumber, "validation.json")) as ValidationResult | null;
+  }
+
+  readAttemptReview(runId: string, attemptNumber: number): ReviewResult | null {
+    return this.readJson(runId, this.attemptFile(attemptNumber, "review.json")) as ReviewResult | null;
+  }
+
+  readFinalStory(runId: string): string | null {
+    return this.readText(runId, "story.md");
+  }
+
+  readFinalValidation(runId: string): ValidationResult | null {
+    return this.readJson(runId, "validation.json") as ValidationResult | null;
+  }
+
+  readFinalReview(runId: string): ReviewResult | null {
+    return this.readJson(runId, "review.json") as ReviewResult | null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // §28 promoteAttemptToFinal：Windows 没有可靠符号链接，用复制/重写落地。
+  // ---------------------------------------------------------------------------
+
+  promoteAttempt(runId: string, attemptNumber: number): Record<string, string> {
+    const promoted: Record<string, string> = {};
+    const dir = this.attemptDir(runId, attemptNumber);
+    if (!existsSync(dir)) throw new Error(`Attempt ${attemptNumber} 不存在：${dir}`);
+
+    const storyPath = join(dir, "story.md");
+    if (existsSync(storyPath)) {
+      promoted["story.md"] = this.rootFile(runId, "story.md");
+      copyFileSync(storyPath, promoted["story.md"]);
+    }
+    const validationPath = join(dir, "validation.json");
+    if (existsSync(validationPath)) {
+      promoted["validation.json"] = this.rootFile(runId, "validation.json");
+      copyFileSync(validationPath, promoted["validation.json"]);
+    }
+    const reviewPath = join(dir, "review.json");
+    if (existsSync(reviewPath)) {
+      promoted["review.json"] = this.rootFile(runId, "review.json");
+      copyFileSync(reviewPath, promoted["review.json"]);
+    }
+    return promoted;
+  }
+
+  // ---------------------------------------------------------------------------
   // 内部：路径解析与原子写入
   // ---------------------------------------------------------------------------
 
