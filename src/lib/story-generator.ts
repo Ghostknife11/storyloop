@@ -45,7 +45,7 @@ export class StoryGenerator {
   }
 
   buildStoryPrompt(config: StoryConfig, plan: BeatPlan): string {
-    let out = this.template
+    const out = this.template
       .replaceAll("{{title}}", config.title)
       .replaceAll("{{genre}}", config.genre)
       .replaceAll("{{premise}}", config.premise)
