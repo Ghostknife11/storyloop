@@ -27,16 +27,18 @@ function attempt(patch: Partial<GenerationAttempt> = {}): GenerationAttempt {
     accepted: false,
     retry_reason: "validation_failed",
     error: null,
+    repairs: [],
     ...patch,
   };
 }
 
 describe("GenerationAttempt 字段（§5）", () => {
-  it("七个字段，一个不多", () => {
+  it("八个字段，一个不多", () => {
     expect(Object.keys(attempt()).sort()).toEqual([
       "accepted",
       "attempt_number",
       "error",
+      "repairs",
       "retry_reason",
       "review",
       "story",
@@ -135,6 +137,8 @@ describe("attemptSummary（§24/§38）", () => {
       retry_reason: "validation_failed",
       review_score: 74,
       validation_passed: true,
+      repair_count: 0,
+      repairs: [],
     });
     expect(JSON.stringify(s)).not.toContain("陈岚");
   });

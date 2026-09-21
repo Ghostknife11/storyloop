@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { GenerationPipeline, PipelineError } from "@/core/pipeline";
+import { DEFAULT_RETRY_POLICY } from "@/core/retry-policy";
 import { ArtifactStore } from "@/storage/artifact-store";
 import { StoryValidator } from "@/lib/story-validator";
 import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
@@ -158,7 +159,7 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
     expect(meta.run_id).toBe(result.run_id);
     expect(meta.status).toBe("completed");
     expect(meta.current_stage).toBe("completed");
-    expect(meta.project_version).toBe("0.7.0");
+    expect(meta.project_version).toBe("0.8.0");
     expect(meta.finished_at).toBeTruthy();
     // §17/§24：metadata 单独记录校验与审阅状态
     expect(meta.validation_status).toBe("completed");
@@ -174,6 +175,10 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
     expect(meta.attempt_count).toBe(1);
     expect(meta.selected_attempt).toBe(1);
     expect(meta.quality_status).toBe("accepted");
+    // §18：Repair 开关与上限同样落 metadata；这一跑没有修订，count 为 0
+    expect(meta.enable_repair).toBe(true);
+    expect(meta.max_repairs_per_attempt).toBe(1);
+    expect(meta.repair_count).toBe(0);
   });
 
   it("§45 review.json / validation.json 内容与 GenerationResult 一致", async () => {
@@ -234,27 +239,32 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
       "selected_attempt", "started_at", "status", "story",
       "validation", "validation_error", "validation_status",
     ]);
-    // retry / attempt 是 v0.7.0 的正式能力；下面这些仍然一个都不许出现
-    for (const forbidden of ["repair", "dimension", "fixed", "revised", "patched", "benchmark"]) {
+    // repair / retry / attempt 是 v0.7.0~v0.8.0 的正式能力；下面这些仍然一个都不许出现
+    for (const forbidden of ["dimension", "benchmark", "causal", "attribution", "policy"]) {
       for (const key of Object.keys(result)) {
         expect(key.toLowerCase()).not.toContain(forbidden);
       }
     }
   });
 
-  it("§30 只暴露 run() / runWithPlan()，没有未来能力入口", () => {
+  it("§65 只暴露 run() / runWithPlan()，没有未来能力入口", () => {
     const names = Object.getOwnPropertyNames(GenerationPipeline.prototype);
     expect(names).toContain("run");
     expect(names).toContain("runWithPlan");
+    // repair 已是 v0.8.0 正式能力（内部私有方法也算实现细节，不算对外入口）；
+    // 真正禁止的是这些还没做的能力名。
     for (const name of names) {
-      for (const forbidden of ["repair", "retry", "experiment", "benchmark", "observe"]) {
+      for (const forbidden of [
+        "experiment", "benchmark", "observe", "dimension", "causal", "attribution",
+        "optimize", "learn", "foreshadow",
+      ]) {
         expect(name.toLowerCase()).not.toContain(forbidden);
       }
     }
   });
 
   it("§19 构造器接受 planner / generator / validator / reviewer / artifactStore / retryPolicy", () => {
-    // retryPolicy（第 6 个）与 projectVersion（第 7 个）都有默认值，不计入 length
+    // retryPolicy / repairer / repairStrategy / projectVersion 都有默认值，不计入 length
     expect(GenerationPipeline.length).toBe(5);
     const names = Object.getOwnPropertyNames(GenerationPipeline.prototype);
     expect(names).toContain("run");
@@ -603,11 +613,11 @@ describe("GenerationPipeline — validation stage（§17/§38/§39）", () => {
       fakeValidator(failed) as never,
       fakeReviewer(review) as never,
       new ArtifactStore(),
-      { max_attempts: 3, min_review_score: 70, retry_on_validation_failure: false },
+      { ...DEFAULT_RETRY_POLICY, max_attempts: 3, retry_on_validation_failure: false },
     );
 
     const result = await pipeline.run(config, undefined, {
-      max_attempts: 3, min_review_score: 70, retry_on_validation_failure: false,
+      ...DEFAULT_RETRY_POLICY, max_attempts: 3, retry_on_validation_failure: false,
     });
     // §14：校验失败但不是重试触发条件 → 直接采纳这一次
     expect(genCalls).toHaveLength(1);

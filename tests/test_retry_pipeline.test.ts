@@ -7,12 +7,14 @@ import { ArtifactStore } from "@/storage/artifact-store";
 import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
 import type { RetryPolicy } from "@/core/retry-policy";
+import { DEFAULT_RETRY_POLICY } from "@/core/retry-policy";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
 
 /**
  * §19/§20/§45~§49/§53 重试 Pipeline：Evaluation → Decision → Automatic Retry。
- * §18 只做「失败才重试」的整篇重新生成，绝不做 Best-of-N、局部修复、定点改写。
+ * 这里的所有用例都不注入 Repairer，用来锁死「没有 Repair 时的重试行为」
+ * ——与 v0.7.0 逐字一致；Repair 相关流程见 tests/test_repair_pipeline.test.ts。
  * 只用 Fake 组件 + Fixture，绝不打真实付费 API。
  */
 
@@ -47,7 +49,7 @@ function review(score: number): ReviewResult {
 }
 
 function policy(patch: Partial<RetryPolicy> = {}): RetryPolicy {
-  return { max_attempts: 2, min_review_score: 70, retry_on_validation_failure: true, ...patch };
+  return { ...DEFAULT_RETRY_POLICY, ...patch };
 }
 
 /** 每次 generate 返回下一段正文：第 n 次 Attempt 拿到 stories[n-1]。 */
@@ -111,6 +113,8 @@ describe("§46 Pipeline Test — First Attempt Accepted", () => {
       accepted: true,
       retry_reason: null,
       error: null,
+      // §17：这个 Pipeline 没有注入 Repairer，Attempt 与 v0.7.0 逐字一致
+      repairs: [],
     });
     // §23：attempt 1 已 promote，根目录产物与 selected attempt 一致
     expect(readFileSync(join(dir, "runs", result.run_id, "story.md"), "utf8")).toBe(

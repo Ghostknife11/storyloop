@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_RETRY_POLICY,
   MAX_ATTEMPTS_LIMIT,
+  MAX_REPAIRS_LIMIT,
   RETRY_REASONS,
   RetryPolicyError,
   decideRetry,
@@ -44,11 +45,13 @@ function input(patch: Partial<RetryDecisionInput> = {}): RetryDecisionInput {
 }
 
 describe("RetryPolicy 常量（§3/§4/§22）", () => {
-  it("默认策略：初次生成 + 最多 1 次自动重试", () => {
+  it("默认策略：初次生成 + 最多 1 次自动重试 + 每个 Attempt 最多 1 次定点修订", () => {
     expect(DEFAULT_RETRY_POLICY).toEqual({
       max_attempts: 2,
       min_review_score: 70,
       retry_on_validation_failure: true,
+      enable_repair: true,
+      max_repairs_per_attempt: 1,
     });
   });
 
@@ -91,6 +94,40 @@ describe("validateRetryPolicy（§31/§51）", () => {
 
   it("非法 retry_on_validation_failure 拒绝", () => {
     expect(() => validateRetryPolicy({ retry_on_validation_failure: "yes" })).toThrow(RetryPolicyError);
+  });
+});
+
+/** §18/§39 RetryPolicy 的 Repair 部分：开关 + 每个 Attempt 的上限。 */
+describe("validateRetryPolicy — Repair 字段（§18）", () => {
+  it("缺 Repair 字段时用默认值补齐", () => {
+    expect(validateRetryPolicy({})).toEqual({
+      ...DEFAULT_RETRY_POLICY,
+      enable_repair: true,
+      max_repairs_per_attempt: 1,
+    });
+  });
+
+  it("max_repairs_per_attempt 允许 0 ~ 3（§34：0 = 关闭 Repair）", () => {
+    expect(MAX_REPAIRS_LIMIT).toEqual({ min: 0, max: 3 });
+    for (const n of [0, 1, 2, 3]) {
+      expect(validateRetryPolicy({ max_repairs_per_attempt: n }).max_repairs_per_attempt).toBe(n);
+    }
+  });
+
+  it("越界与非整数的 max_repairs_per_attempt 一律拒绝", () => {
+    for (const bad of [-1, 4, 1.5, "1", true]) {
+      expect(() => validateRetryPolicy({ max_repairs_per_attempt: bad })).toThrow(RetryPolicyError);
+    }
+  });
+
+  it("非法 enable_repair 拒绝", () => {
+    expect(() => validateRetryPolicy({ enable_repair: "on" })).toThrow(RetryPolicyError);
+  });
+
+  it("enable_repair 不影响 qualityOf：Accept / Retry 判定只看质量", () => {
+    const off = { ...DEFAULT_RETRY_POLICY, enable_repair: false };
+    expect(decideRetry(input({ policy: off, validation: FAILED })).reason).toBe("validation_failed");
+    expect(decideRetry(input({ policy: off })).reason).toBeNull();
   });
 });
 
