@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
 import {
   BookOpen, Copy, Download, Eye, FilePlus2, FolderOpen, Loader2,
-  Plus, RotateCcw, Save, Sparkles, Trash2, ArrowUp, ArrowDown,
+  Plus, RotateCcw, Save, Sparkles, Trash2, ArrowUp, ArrowDown, Wrench,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,8 +17,14 @@ import { ReviewPanel } from "@/components/review-panel";
 import { ValidationPanel } from "@/components/validation-panel";
 import { AttemptPanel } from "@/components/attempt-panel";
 import {
+  ManualRepair,
+  RepairPanel,
+  repairIssueLabel,
+  repairStageLabels,
+} from "@/components/repair-panel";
+import {
   fetchRunAttempt, generateFromPlan, planStory, previewPrompt, reviewStory, validateStory,
-  RunApiError, type RunApiResult,
+  RunApiError, type RepairDetailApi, type RunApiResult,
 } from "@/lib/api";
 import { configFilename, parseStoryConfig, serializeStoryConfig } from "@/lib/config-io";
 import { retryPolicyOf, useSettings } from "@/lib/settings-store";
@@ -35,7 +41,9 @@ type PlanPhase = "idle" | "planning" | "success" | "error";
 
 /** §40 固定阶段（§7/§18）：UI 只能按这个顺序展示，不自行发明阶段。
  *  v0.5.0 增加 Reviewing：Story 落盘之后的审阅阶段（§35）。
- *  v0.6.0 增加 Validating：Story 落盘之后、审阅之前的硬性检查阶段（§17）。 */
+ *  v0.6.0 增加 Validating：Story 落盘之后、审阅之前的硬性检查阶段（§17）。
+ *  v0.8.0 的 Repairing / Revalidating / Re-reviewing（§35）只在整个 Run 真的发生过修订时
+ *  才在终态补一个 Repairing 标记——没有修订的 Run 不显示这些阶段，也不伪造过程。 */
 const RUN_STAGES = [
   { key: "config", label: "Preparing" },
   { key: "planning", label: "Planning" },
@@ -184,6 +192,16 @@ export default function GeneratePage() {
     validation: ValidationResult | null;
     review: ReviewResult | null;
   } | null>(null);
+  // §36/§37：当前查看的 Attempt 的修订详情与修订前的正文（用于 Repair 面板与 Before / After）
+  const [attemptInfo, setAttemptInfo] = useState<{
+    number: number;
+    initialStory: string | null;
+    repairs: RepairDetailApi[];
+  } | null>(null);
+  // §37：Before / After 两个 Tab，默认展示修订后的版本
+  const [storyTab, setStoryTab] = useState<"before" | "after">("after");
+  // §38：手动修订成功后替换当前展示的正文（只改展示，不改 Run 产物）
+  const [repairOverride, setRepairOverride] = useState<string | null>(null);
   const [loadingAttempt, setLoadingAttempt] = useState<number | null>(null);
   const busyRef = useRef(false);
   const planBusyRef = useRef(false);
@@ -237,6 +255,9 @@ export default function GeneratePage() {
     setRevalidating(false);
     setValidationOverride(null);
     setViewAttempt(null);
+    setAttemptInfo(null);
+    setStoryTab("after");
+    setRepairOverride(null);
     setLoadingAttempt(null);
     clearStepperTimers();
   };
@@ -371,6 +392,9 @@ export default function GeneratePage() {
     setValidationOverride(null);
     setViewAttempt(null);
     setLoadingAttempt(null);
+    setAttemptInfo(null);
+    setStoryTab("after");
+    setRepairOverride(null);
     beginStepper();
     try {
       const config = formToConfig(form);
@@ -390,6 +414,8 @@ export default function GeneratePage() {
           ? `Run 完成：${data.run_id} · Attempt ${data.selected_attempt} 已采纳`
           : `Run 完成：${data.run_id} · 尝试次数已用尽，展示 Attempt ${data.selected_attempt}`,
       );
+      // §36：发生过修订时补一次请求，拿修订详情与修订前的正文（没有修订就不额外请求）
+      void loadAttemptInfo(data, data.selected_attempt);
     } catch (e) {
       clearStepperTimers();
       const msg = e instanceof Error ? e.message : "未知错误";
@@ -477,6 +503,30 @@ export default function GeneratePage() {
     setTimeout(() => URL.revokeObjectURL(url), 1500);
   };
 
+  /** §36/§37 读取某一次 Attempt 的修订详情（问题说明、前后分数、修订前的正文）。
+   *  只在这个 Attempt 真的发生过修订时调用——没有修订的 Attempt 不值得多一次请求。 */
+  async function loadAttemptInfo(run: RunApiResult, attemptNumber: number) {
+    const summary = run.attempts.find((a) => a.attempt_number === attemptNumber);
+    if (!summary || summary.repair_count === 0) {
+      setAttemptInfo(null);
+      setStoryTab("after");
+      return;
+    }
+    try {
+      const detail = await fetchRunAttempt(run.run_id, attemptNumber);
+      setAttemptInfo({
+        number: attemptNumber,
+        initialStory: detail.initial_story,
+        repairs: detail.repairs,
+      });
+      setStoryTab("after");
+    } catch (e) {
+      // §35：修订详情读不到不影响正文与结论的展示
+      toast.error(e instanceof Error ? e.message : "读取修订详情失败");
+      setAttemptInfo(null);
+    }
+  }
+
   /** §35/§36 查看某一次 Attempt：按需拉取该 Attempt 的正文与结论，不做横向比较。 */
   async function handleViewAttempt(attemptNumber: number) {
     if (!result) return;
@@ -484,6 +534,7 @@ export default function GeneratePage() {
     if (attemptNumber === result.selected_attempt) {
       setViewAttempt(null);
       setLoadingAttempt(null);
+      void loadAttemptInfo(result, attemptNumber);
       return;
     }
     setLoadingAttempt(attemptNumber);
@@ -495,6 +546,12 @@ export default function GeneratePage() {
         validation: detail.validation,
         review: detail.review,
       });
+      setAttemptInfo({
+        number: attemptNumber,
+        initialStory: detail.initial_story,
+        repairs: detail.repairs,
+      });
+      setStoryTab("after");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "读取 Attempt 失败");
     } finally {
@@ -502,7 +559,13 @@ export default function GeneratePage() {
     }
   }
 
-  const shownStory = viewAttempt ? viewAttempt.story : result?.story ?? "";
+  /** §37：看修订前还是修订后的正文；没有 initial_story 时只有 After 一个 Tab。 */
+  const baseStory = viewAttempt
+    ? viewAttempt.story
+    : repairOverride ?? result?.story ?? "";
+  const showBefore =
+    storyTab === "before" && attemptInfo?.initialStory !== null && attemptInfo !== null;
+  const shownStory = showBefore ? (attemptInfo?.initialStory ?? "") : baseStory;
   const shownValidation = viewAttempt ? viewAttempt.validation : validationOverride ?? result?.validation ?? null;
   const shownValidationStatus = viewAttempt
     ? (viewAttempt.validation ? "completed" : "not_started")
@@ -513,6 +576,10 @@ export default function GeneratePage() {
     : reviewOverride ? "completed" : result?.review_status ?? "not_started";
   /** §36：当前看的是哪一次 Attempt。 */
   const viewingAttempt = viewAttempt?.number ?? result?.selected_attempt ?? 0;
+  /** §36：当前 Attempt 的修订记录（只有真的修过才有内容）。 */
+  const shownRepairs = attemptInfo?.repairs ?? [];
+  /** §37：只有「当前看的这次 Attempt 修过」才给 Before / After 两个 Tab。 */
+  const hasBeforeStory = attemptInfo !== null && attemptInfo.initialStory !== null;
 
   const handleDownloadConfig = () => {
     const blob = new Blob([serializeStoryConfig(formToConfig(form))], { type: "application/json;charset=utf-8" });
@@ -586,6 +653,35 @@ export default function GeneratePage() {
             Automatic Retry on：校验未通过或审阅分数低于 {settings.minReviewScore} 时会重新生成整篇
             （最多 {settings.maxAttempts} 次，会增加 API 调用与费用）。
           </span>
+        </div>
+      )}
+
+      {/* §20/§35 修订提示：说明 Repair-before-Retry，但不在终态伪造修订过程。 */}
+      {generating && settings.repairEnabled && settings.maxRepairsPerAttempt > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono text-muted-foreground">
+          <Wrench className="h-3 w-3 text-violet-400" />
+          <span>
+            Targeted Repair on：未通过时先针对单个问题修订现有正文，再重新校验 / 审阅
+            （每次生成最多 {settings.maxRepairsPerAttempt} 次）。
+          </span>
+        </div>
+      )}
+
+      {/* §35：整个 Run 真的发生过修订时，在终态补一个 Repairing 标记（不伪造分步过程）。 */}
+      {runStage === "completed" && result && result.repair_count > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono">
+          {repairStageLabels(result.repair_count).map((label) => (
+            <span
+              key={label}
+              className={`flex items-center gap-1 rounded-full border px-2 py-0.5 ${
+                label === "Repairing"
+                  ? "border-violet-500/40 bg-violet-500/10 text-violet-300"
+                  : "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
+              }`}
+            >
+              ✓ {label}
+            </span>
+          ))}
         </div>
       )}
 
@@ -898,6 +994,25 @@ export default function GeneratePage() {
                         loadingAttempt={loadingAttempt}
                       />
                     </div>
+                    {/* §36 Repair 结果：Type / Reason / Before Score / After Score / Validation 变化 */}
+                    <RepairPanel repairs={shownRepairs} />
+                    {/* §38 手动定点修订：选一个 Issue Type、写清问题，针对当前正文修一次 */}
+                    <ManualRepair
+                      config={formToConfig(form)}
+                      plan={result.beat_plan}
+                      story={baseStory}
+                      validation={shownValidation}
+                      review={shownReview}
+                      runtime={{
+                        model: settings.model || undefined,
+                        baseUrl: settings.baseUrl || undefined,
+                        temperature: settings.temperature,
+                      }}
+                      onRepaired={(story) => {
+                        setRepairOverride(story);
+                        setStoryTab("after");
+                      }}
+                    />
                     {/* §28 Validation 区域：Passed / Failed + Issues（Code / Severity / Message）。
                         §29 与 Review 分开：这里只有硬性检查，没有分数。 */}
                     <ValidationPanel
@@ -930,6 +1045,38 @@ export default function GeneratePage() {
                         ))}
                       </ul>
                     </div>
+                    {/* §37 Before / After Story：只有这次 Attempt 真的修过才给两个 Tab */}
+                    {hasBeforeStory && (
+                      <div className="mb-3 flex flex-wrap items-center gap-1.5 text-[11px] font-mono">
+                        <button
+                          type="button"
+                          onClick={() => setStoryTab("before")}
+                          className={`rounded-full border px-2.5 py-0.5 ${
+                            showBefore
+                              ? "border-violet-500/40 bg-violet-500/10 text-violet-300"
+                              : "border-white/10 text-muted-foreground"
+                          }`}
+                          aria-label="Before Repair"
+                        >
+                          Before Repair
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setStoryTab("after")}
+                          className={`rounded-full border px-2.5 py-0.5 ${
+                            showBefore
+                              ? "border-white/10 text-muted-foreground"
+                              : "border-violet-500/40 bg-violet-500/10 text-violet-300"
+                          }`}
+                          aria-label="After Repair"
+                        >
+                          After Repair
+                        </button>
+                        {repairOverride && !viewAttempt && (
+                          <span className="text-muted-foreground">已应用一次手动修订（仅当前展示）</span>
+                        )}
+                      </div>
+                    )}
                     <div className="prose prose-invert max-w-none prose-p:text-[15px] prose-p:leading-[26px]">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{shownStory}</ReactMarkdown>
                     </div>

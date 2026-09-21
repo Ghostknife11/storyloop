@@ -87,11 +87,14 @@ export async function planStory(
   return data as BeatPlan;
 }
 
-/** §37 RetryPolicy 由设置页下发，不属于 StoryConfig。 */
+/** §37 RetryPolicy 由设置页下发，不属于 StoryConfig。
+ *  v0.8.0 增加定点修订两项（§34/§39）。 */
 export interface RetryPolicyApi {
   max_attempts: number;
   min_review_score: number;
   retry_on_validation_failure: boolean;
+  enable_repair: boolean;
+  max_repairs_per_attempt: number;
 }
 
 /** §32 Automatic Run：StoryConfig → 一个完整 Run。 */
@@ -127,6 +130,11 @@ export interface RunDetailApi {
   selected_attempt: number;
   max_attempts: number | null;
   min_review_score: number | null;
+  /** §39：当时生效的定点修订策略（更早的 Run 没有这两个字段时为 null）。 */
+  enable_repair: boolean | null;
+  max_repairs_per_attempt: number | null;
+  /** §40 Run 级修订总次数。 */
+  repair_count: number;
   story: string;
   validation: ValidationResult | null;
   validation_status: string;
@@ -135,7 +143,20 @@ export interface RunDetailApi {
   attempts: AttemptSummaryApi[];
 }
 
-/** §35/§38 Attempt 详情：正文 + 这一次独立的校验 / 审阅结论。 */
+/** §36 单个 Attempt 详情里的修订记录：多出问题说明与前后对比。 */
+export interface RepairDetailApi {
+  repair_number: number;
+  issue_type: string;
+  issue_message: string;
+  success: boolean;
+  before_review_score: number | null;
+  after_review_score: number | null;
+  before_validation_passed: boolean | null;
+  after_validation_passed: boolean | null;
+}
+
+/** §35/§38 Attempt 详情：正文 + 这一次独立的校验 / 审阅结论。
+ *  v0.8.0 增加修订详情与修订前的初始正文（§36：Repair 面板；§37：Before / After）。 */
 export interface AttemptDetailApi {
   run_id: string;
   attempt_number: number;
@@ -143,6 +164,10 @@ export interface AttemptDetailApi {
   retry_reason: string | null;
   selected: boolean;
   story: string;
+  /** §30/§37：发生过修订时修订前的正文，没有修订时为 null。 */
+  initial_story: string | null;
+  repair_count: number;
+  repairs: RepairDetailApi[];
   validation: ValidationResult | null;
   review: ReviewResult | null;
 }
@@ -221,4 +246,39 @@ export async function validateStory(
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error || `校验失败（HTTP ${res.status}）`);
   return data as ValidationResult;
+}
+
+/** §38 手动定点修订结果：完整修订后正文 + 类型 + 成败（notes 是失败原因）。 */
+export interface RepairResultApi {
+  repaired_story: string;
+  issue_type: string;
+  success: boolean;
+  notes: string | null;
+}
+
+/** §38/§50 手动 Repair：针对一条明确问题修订当前正文。
+ *  §65 只改正文，不改 StoryConfig / BeatPlan / 模型 / 温度，也不自动重试。 */
+export async function repairStory(
+  config: StoryConfig,
+  plan: BeatPlan,
+  story: string,
+  issueType: string,
+  issueMessage: string,
+  runtime: { model?: string; baseUrl?: string; temperature?: number } = {},
+): Promise<RepairResultApi> {
+  const res = await fetch("/api/repair", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      config,
+      beat_plan: plan,
+      story,
+      issue_type: issueType,
+      issue_message: issueMessage,
+      ...runtime,
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || `修订失败（HTTP ${res.status}）`);
+  return data as RepairResultApi;
 }

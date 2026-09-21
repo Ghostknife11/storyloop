@@ -1,8 +1,9 @@
 "use client";
 
-import { CheckCircle2, Loader2, RotateCcw, XCircle } from "lucide-react";
+import { CheckCircle2, Loader2, RotateCcw, Wrench, XCircle } from "lucide-react";
 import type { AttemptSummaryApi } from "@/lib/api";
 import { formatScore } from "@/lib/review-view";
+import { repairIssueLabel } from "@/components/repair-panel";
 
 /** §22/§35 Retry Reason → 中文说明。只有一个原因字段，不做失败归因（§67）。 */
 const RETRY_REASON_LABELS: Record<string, string> = {
@@ -43,6 +44,8 @@ export function AttemptPanel({
   if (attempts.length === 0) return null;
 
   const exhausted = qualityStatus === "exhausted";
+  // §40：修订发生在 Attempt 内部，所以总数是各 Attempt 修订次数之和。
+  const totalRepairs = attempts.reduce((sum, a) => sum + a.repair_count, 0);
 
   return (
     <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 sm:p-4">
@@ -54,6 +57,12 @@ export function AttemptPanel({
         <span className="text-[11px] font-mono text-muted-foreground" data-testid="selected-attempt">
           Selected Attempt: {selectedAttempt}
         </span>
+        {/* §40：Run 级修订次数 = 各 Attempt 修订次数之和，Repair 不新增 Attempt 行 */}
+        {totalRepairs > 0 && (
+          <span className="text-[11px] font-mono text-violet-300" data-testid="run-repair-count">
+            Repairs: {totalRepairs}
+          </span>
+        )}
         <span
           className={`ml-auto text-[10px] font-mono tracking-widest uppercase px-2 py-0.5 rounded-full border ${
             exhausted
@@ -123,6 +132,19 @@ export function AttemptPanel({
                   <span className="inline-flex items-center gap-1">
                     <XCircle className="h-3 w-3" />
                     Retry Reason: {retryReasonLabel(attempt.retry_reason)}
+                  </span>
+                )}
+                {/* §40：Repair 挂在这个 Attempt 内部，不新增 Attempt 行 */}
+                {attempt.repair_count > 0 && (
+                  <span className="inline-flex items-center gap-1 text-violet-300" data-testid={`attempt-${attempt.attempt_number}-repairs`}>
+                    <Wrench className="h-3 w-3" />
+                    Repairs: {attempt.repair_count}
+                    {attempt.repairs.map((r) => (
+                      <span key={r.repair_number}>
+                        {repairIssueLabel(r.issue_type)}
+                        {r.success ? " ✓" : " ✗"}
+                      </span>
+                    ))}
                   </span>
                 )}
               </div>

@@ -10,15 +10,17 @@ import { Switch } from "@/components/ui/switch";
 import { PROVIDERS } from "@/lib/constants";
 import {
   MAX_ATTEMPTS_RANGE,
+  MAX_REPAIRS_RANGE,
   MIN_SCORE_RANGE,
   useSettings,
 } from "@/lib/settings-store";
 
 /**
- * `/settings`（TASK §26/§30/§31）：model / base_url / temperature + 自动重试。
+ * `/settings`（TASK §26/§30/§31/§34）：model / base_url / temperature + 自动重试 + 定点修订。
  * API Key 不进浏览器（§24）——只存服务端 .env。
- * §66 这里只能暴露 Max Attempts / Minimum Review Score / Retry on Validation Failure：
- * 不提供修复策略、问题定向、维度阈值、失败归因、自适应策略。
+ * §66 自动重试只暴露 Max Attempts / Minimum Review Score / Retry on Validation Failure；
+ * §34/§63 定点修订只暴露 Enable Targeted Repair / Max Repairs Per Attempt——
+ * 没有修复策略排序、问题定向扩展、失败归因、自适应策略入口。
  */
 export default function SettingsPage() {
   const [settings, update] = useSettings();
@@ -164,6 +166,60 @@ export default function SettingsPage() {
           <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-[11px] text-muted-foreground leading-5">
             <RotateCcw className="h-3.5 w-3.5 text-amber-400 inline-block align-[-2px] mr-1.5" />
             Increasing max attempts may increase API usage and cost.
+          </div>
+        </div>
+
+        {/* §34 Targeted Repair：先修现有 Story，修不动才整篇重生。 */}
+        <div className="rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur p-4 sm:p-5 space-y-4">
+          <div className="space-y-1">
+            <h2 className="text-[13px] font-semibold tracking-tight">Targeted Repair</h2>
+            <p className="text-[11px] text-muted-foreground leading-5">
+              针对某一条明确的校验 / 审阅问题修订现有正文（结局、篇幅、主角在场、连贯、结构），
+              修订后会重新校验与审阅；修不动才整篇重生。
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <Label className="text-[11px] text-muted-foreground">Enable Targeted Repair</Label>
+              <p className="text-[10px] text-muted-foreground">关闭后不合格就直接整篇重写（v0.7.0 行为）</p>
+            </div>
+            <Switch
+              checked={mounted ? settings.repairEnabled : true}
+              onCheckedChange={(v) => update({ repairEnabled: v })}
+              aria-label="Enable Targeted Repair"
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <div className="space-y-0.5">
+              <Label className="text-[11px] text-muted-foreground">Max Repairs Per Attempt</Label>
+              <p className="text-[10px] text-muted-foreground">
+                同一次生成内最多修订几次，{MAX_REPAIRS_RANGE.min} ~ {MAX_REPAIRS_RANGE.max}
+              </p>
+            </div>
+            <Input
+              type="number"
+              min={MAX_REPAIRS_RANGE.min}
+              max={MAX_REPAIRS_RANGE.max}
+              step={1}
+              value={mounted ? settings.maxRepairsPerAttempt : 1}
+              disabled={!settings.repairEnabled}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                if (Number.isInteger(n) && n >= MAX_REPAIRS_RANGE.min && n <= MAX_REPAIRS_RANGE.max) {
+                  update({ maxRepairsPerAttempt: n });
+                }
+              }}
+              className="h-9 w-20 text-center font-mono"
+              aria-label="Max Repairs Per Attempt"
+            />
+          </div>
+
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-[11px] text-muted-foreground leading-5">
+            <RotateCcw className="h-3.5 w-3.5 text-amber-400 inline-block align-[-2px] mr-1.5" />
+            Each repair is one extra LLM call. v0.8.0 uses simple issue categories and does not
+            diagnose why a story failed.
           </div>
         </div>
 
