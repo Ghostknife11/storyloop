@@ -1,6 +1,6 @@
 /**
- * v0.6.0 CLI（TASK §31）：生成命令统一走 GenerationPipeline。
- *   run  —— StoryConfig → Config → Planning → Generation → Save Story → Validate → Review
+ * v0.7.0 CLI（TASK §31/§41/§42）：生成命令统一走 GenerationPipeline。
+ *   run  —— StoryConfig → Config → Planning → Attempt（Generate → Save → Validate → Review → Decide）→ Retry? → Finalize
  *   run --beats <beats.json> —— 手动模式：用户编辑后的 BeatPlan 直接进入生成
  *   plan —— 只产出 BeatPlan，供后续 run --beats 使用
  *   review —— 对已有正文单独审阅（与 Pipeline 使用同一个 BasicReviewer）
@@ -9,6 +9,7 @@
  *
  * 用法：
  *   npx tsx scripts/generate-cli.ts run --config configs/example_story.json
+ *   npx tsx scripts/generate-cli.ts run --config configs/example_story.json --max-attempts 2 --min-score 70
  *   npx tsx scripts/generate-cli.ts run --config configs/example_story.json --beats plan_20260920.beats.json
  *   npx tsx scripts/generate-cli.ts plan --config configs/example_story.json [--out <beats.json>]
  *   npx tsx scripts/generate-cli.ts review --config configs/example_story.json --story story.md [--run-id <run_id>]
@@ -39,6 +40,7 @@ function argValue(flag: string): string | undefined {
 const USAGE = [
   "用法：",
   "  npx tsx scripts/generate-cli.ts run --config <story.json> [--beats <beats.json>] [--model M] [--temperature T]",
+  "       [--max-attempts 1..5] [--min-score 0..100] [--no-retry-on-validation-failure]",
   "  npx tsx scripts/generate-cli.ts plan --config <story.json> [--out <beats.json>]",
   "  npx tsx scripts/generate-cli.ts review --config <story.json> --story <story.md> [--run-id <run_id>]",
   "  npx tsx scripts/generate-cli.ts validate --config <story.json> --story <story.md> [--run-id <run_id>]",
@@ -51,6 +53,27 @@ function runtimeOf() {
     baseUrl: argValue("--base-url"),
     temperature: Number.isFinite(temperature) ? temperature : undefined,
   };
+}
+
+/** §41 CLI 重试参数：越界即退出，与 Settings / API 使用同一套范围（§31）。 */
+function retryPolicyOf() {
+  const maxAttempts = Number(argValue("--max-attempts"));
+  const minScore = Number(argValue("--min-score"));
+  if (Number.isFinite(maxAttempts) && (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 5)) {
+    console.error("--max-attempts 必须是 1 ~ 5 的整数（含首次生成）");
+    process.exit(1);
+  }
+  if (Number.isFinite(minScore) && (minScore < 0 || minScore > 100)) {
+    console.error("--min-score 必须在 0 ~ 100 之间");
+    process.exit(1);
+  }
+  const policy: Record<string, unknown> = {};
+  if (Number.isFinite(maxAttempts)) policy.max_attempts = maxAttempts;
+  if (Number.isFinite(minScore)) policy.min_review_score = minScore;
+  if (process.argv.includes("--no-retry-on-validation-failure")) {
+    policy.retry_on_validation_failure = false;
+  }
+  return Object.keys(policy).length > 0 ? policy : undefined;
 }
 
 function readConfig(configPath: string) {
@@ -96,8 +119,28 @@ function reportRun(result: RunOk, started: number) {
   console.log(`Status: ${result.status}`);
   console.log(`Beats: ${result.beat_plan.beats.length}`);
   console.log(`Story: runs/${result.run_id}/story.md`);
+  // §41/§42 Attempt 过程：每一次尝试一行。被重试写 retry，用尽写 failed，采纳写 accepted。
+  result.attempts.forEach((a) => {
+    const score = a.review_score === null
+      ? null
+      : Number.isInteger(a.review_score) ? String(a.review_score) : a.review_score.toFixed(1);
+    if (a.retry_reason === "generation_error") {
+      console.log(`Attempt ${a.attempt_number} → failed`);
+    } else if (a.accepted) {
+      console.log(`Attempt ${a.attempt_number}${score ? `: review ${score}` : ""} → accepted`);
+    } else if (a.retry_reason === "validation_failed") {
+      console.log(`Attempt ${a.attempt_number}: validation failed → retry`);
+    } else if (score) {
+      console.log(`Attempt ${a.attempt_number}: review ${score} → retry`);
+    } else {
+      console.log(`Attempt ${a.attempt_number} → failed`);
+    }
+  });
+  console.log(`Quality Status: ${result.quality_status}`);
+  console.log(`Selected Attempt: ${result.selected_attempt}`);
   reportValidation(result.validation, result.validation_error);
   reportReview(result.review, result.review_error);
+  console.log(`Attempts: runs/${result.run_id}/attempts/`);
   console.log(`Artifacts: runs/${result.run_id}/`);
   console.log(`[cli] 完成（${((Date.now() - started) / 1000).toFixed(1)}s，${result.story.replace(/\s/g, "").length} 字）`);
 }
@@ -191,14 +234,21 @@ async function main() {
 
   const beatsPath = argValue("--beats");
   console.log(beatsPath ? "[cli] Manual Run（用户提供的 BeatPlan）" : "[cli] Automatic Run");
+  const retryPolicy = retryPolicyOf();
+  // §32：明确告知调用方自动重试会增加 API 调用与费用
+  const maxAttempts = Number(argValue("--max-attempts"));
+  if (Number.isFinite(maxAttempts) && maxAttempts > 1) {
+    console.log(`[cli] 自动重试已开启：最多 ${maxAttempts} 次生成尝试，会增加 API 调用与费用`);
+  }
   const started = Date.now();
   const { status, json } = beatsPath
     ? await startRunFromPlan({
       config,
       beat_plan: parseBeatPlan(readFileSync(beatsPath, "utf8")),
       ...runtime,
+      ...(retryPolicy ? { retry_policy: retryPolicy } : {}),
     })
-    : await startRun({ config, ...runtime });
+    : await startRun({ config, ...runtime, ...(retryPolicy ? { retry_policy: retryPolicy } : {}) });
 
   if (status !== 200) {
     // PipelineError 已带 run_id 与失败阶段（§28）
