@@ -94,15 +94,16 @@ export function validateGenerationAttempt(raw: unknown): GenerationAttempt {
       `attempts[${attemptNumber}] 已 accepted，不应再带 retry_reason`,
     );
   }
-  if (!accepted && retryReason === null) {
-    throw new GenerationAttemptError(
-      `attempts[${attemptNumber}] 未 accepted，必须给出 retry_reason 或 error`,
-    );
-  }
-
   const error = r.error === null || r.error === undefined ? null : r.error;
   if (error !== null && typeof error !== "string") {
     throw new GenerationAttemptError(`attempts[${attemptNumber}].error 必须是字符串或 null`);
+  }
+
+  // §5：未 accepted 时必须能说明原因——retry_reason 或 error 任一即可。
+  if (!accepted && retryReason === null && error === null) {
+    throw new GenerationAttemptError(
+      `attempts[${attemptNumber}] 未 accepted，必须给出 retry_reason 或 error`,
+    );
   }
 
   const validation =

@@ -114,6 +114,18 @@ function policyPatch(policy: RetryPolicy): Partial<MetaPatch> {
 }
 
 /**
+ * Pipeline 内部记录：§5 的 GenerationAttempt 加上各阶段 status / error。
+ * §5 规定 Attempt 对外只有七个字段，status 只在这里和 metadata / GenerationResult 里出现。
+ */
+interface AttemptRecord {
+  attempt: GenerationAttempt;
+  validation_status: ValidationStatus;
+  validation_error: string | null;
+  review_status: ReviewStatus;
+  review_error: string | null;
+}
+
+/**
  * §3/§25 GenerationPipeline：把一次完整生成组织成一个 Run。
  * v0.7.0 固定顺序（§19）：
  *   Config → Planning → [ Attempt n: Generate → Save Story → Validate → Review → Decide → Retry? ] → Finalize
@@ -175,16 +187,17 @@ export class GenerationPipeline {
       this.artifactStore.putBeatPlan(rid, beatPlan);
 
       // §19 重试循环：硬上限来自 policy.max_attempts（§15 禁止无限重试）。
-      const attempts: GenerationAttempt[] = [];
+      const records: AttemptRecord[] = [];
       for (let attemptNumber = 1; attemptNumber <= policy.max_attempts; attemptNumber++) {
-        const attempt = await this.runAttempt(ctx, rid, config, beatPlan, runtime, policy, attemptNumber);
-        attempts.push(attempt);
-        if (attempt.accepted) break;
-        // §11/§15：连正文都没拿到，且已是最后一次允许的 Attempt → Run 失败，
+        const record = await this.runAttempt(ctx, rid, config, beatPlan, runtime, policy, attemptNumber);
+        records.push(record);
+        if (record.attempt.accepted) break;
+        // §11.1/§20：生成失败也按策略再试（continue_if_allowed）；
+        // 只有最后一次允许的 Attempt 仍拿不到正文 → Run 失败，
         // 与 v0.6.0 一致：阶段可定位到 generating，已产出的 attempt 产物不删除。
-        if (attempt.story === null) {
+        if (record.attempt.story === null && attemptNumber >= policy.max_attempts) {
           throw new PipelineError(
-            `Run ${rid} failed at generating: ${attempt.error ?? "未知错误"}`,
+            `Run ${rid} failed at generating: ${record.attempt.error ?? "未知错误"}`,
             rid,
             "generating",
           );
@@ -192,24 +205,26 @@ export class GenerationPipeline {
       }
 
       // §17：第一个满足策略的 Attempt；全部 exhausted 时取最后一个（§16）。
-      const selected = attempts.find((a) => a.accepted) ?? attempts[attempts.length - 1];
-      const qualityStatus: QualityStatus = selected.accepted ? "accepted" : "exhausted";
+      const selected = records.find((r) => r.attempt.accepted) ?? records[records.length - 1];
+      const qualityStatus: QualityStatus = selected.attempt.accepted ? "accepted" : "exhausted";
 
       // §23/§28：根目录 story.md / validation.json / review.json 对应 selected attempt。
-      this.artifactStore.promoteAttempt(rid, selected.attempt_number);
+      this.artifactStore.promoteAttempt(rid, selected.attempt.attempt_number);
 
       transitionStage(ctx, "completed", "completed");
       this.artifactStore.putMetadata(
         rid,
         this.metaFor(ctx, runtime, {
           ...policyPatch(policy),
-          attempt_count: attempts.length,
-          selected_attempt: selected.attempt_number,
+          attempt_count: records.length,
+          selected_attempt: selected.attempt.attempt_number,
           quality_status: qualityStatus,
-          validation_status: selected.validation ? "completed" : "not_started",
-          validation: selected.validation,
-          review_status: selected.review ? "completed" : "not_started",
-          review: selected.review,
+          validation_status: selected.validation_status,
+          validation: selected.attempt.validation,
+          validation_error: selected.validation_error,
+          review_status: selected.review_status,
+          review: selected.attempt.review,
+          review_error: selected.review_error,
         }),
       );
 
@@ -217,19 +232,19 @@ export class GenerationPipeline {
         run_id: rid,
         config,
         beat_plan: beatPlan,
-        story: selected.story ?? "",
-        validation: selected.validation,
-        validation_status: selected.validation ? "completed" : "not_started",
-        validation_error: null,
-        review: selected.review,
-        review_status: selected.review ? "completed" : "not_started",
-        review_error: null,
-        attempt_count: attempts.length,
-        selected_attempt: selected.attempt_number,
+        story: selected.attempt.story ?? "",
+        validation: selected.attempt.validation,
+        validation_status: selected.validation_status,
+        validation_error: selected.validation_error,
+        review: selected.attempt.review,
+        review_status: selected.review_status,
+        review_error: selected.review_error,
+        attempt_count: records.length,
+        selected_attempt: selected.attempt.attempt_number,
         quality_status: qualityStatus,
-        attempts,
+        attempts: records.map((r) => r.attempt),
         status: "completed",
-        artifacts: artifactsOf(selected.validation, selected.review),
+        artifacts: artifactsOf(selected.attempt.validation, selected.attempt.review),
         started_at: ctx.started_at,
         finished_at: new Date().toISOString(),
       };
@@ -255,6 +270,8 @@ export class GenerationPipeline {
   /**
    * §19 单次 Attempt：Generate → Save Story → Validate → Review → RetryDecision。
    * §12 Reviewer / Validator 自身异常不升级为 Story 失败，只记录各自 status。
+   * AttemptRecord 在 §5 的 GenerationAttempt 之外保留各阶段 status：
+   * 对外只暴露 GenerationAttempt，status 只用于 metadata 与 GenerationResult。
    */
   private async runAttempt(
     ctx: RunContext,
@@ -264,7 +281,7 @@ export class GenerationPipeline {
     runtime: GenerateRuntime | undefined,
     policy: RetryPolicy,
     attemptNumber: number,
-  ): Promise<GenerationAttempt> {
+  ): Promise<AttemptRecord> {
     let story: string | null = null;
     let generationError: string | null = null;
 
@@ -307,10 +324,11 @@ export class GenerationPipeline {
       );
       try {
         validation = await this.validator.validate(config, story);
-        validationStatus = "completed";
         this.artifactStore.putAttemptValidation(rid, attemptNumber, validation);
+        validationStatus = "completed";
       } catch (e) {
-        // §12：Validator 自身异常 ≠ Story Failed。
+        // §12：Validator 自身异常（含校验产物写不出去）≠ Story Failed。
+        validation = null;
         validationStatus = "failed";
         validationError = safeDetail(errorDetail(e));
         console.error(`[pipeline] run ${rid} attempt ${attemptNumber} validation failed:`, e);
@@ -338,10 +356,11 @@ export class GenerationPipeline {
       );
       try {
         review = await this.reviewer.review(config, story);
-        reviewStatus = "completed";
         this.artifactStore.putAttemptReview(rid, attemptNumber, review);
+        reviewStatus = "completed";
       } catch (e) {
-        // §12：Review Error ≠ Story Retry Trigger。
+        // §12：Reviewer 自身异常（含审阅产物写不出去）≠ Story Retry Trigger。
+        review = null;
         reviewStatus = "failed";
         reviewError = safeDetail(errorDetail(e));
         console.error(`[pipeline] run ${rid} attempt ${attemptNumber} review failed:`, e);
@@ -358,12 +377,15 @@ export class GenerationPipeline {
       review,
     });
 
+    // §5/§16：accepted 表示这一次满足了策略，与 retry_reason 互斥。
+    // 到达 max_attempts 但质量仍未通过时 should_retry=false、reason 非空 → 不算采纳。
+    const accepted = decision.reason === null;
     const attemptError = generationError ?? validationError ?? reviewError;
 
     // §24 Attempt metadata：编号 / 是否被接受 / 重试原因 / 分数 / 校验结论。
     this.artifactStore.putAttemptMetadata(rid, attemptNumber, {
       attempt_number: attemptNumber,
-      accepted: !decision.should_retry,
+      accepted,
       retry_reason: decision.reason,
       review_score: review ? review.score : null,
       validation_passed: validation ? validation.passed : null,
@@ -375,13 +397,19 @@ export class GenerationPipeline {
     });
 
     return {
-      attempt_number: attemptNumber,
-      story,
-      validation,
-      review,
-      accepted: !decision.should_retry,
-      retry_reason: decision.reason,
-      error: attemptError,
+      attempt: {
+        attempt_number: attemptNumber,
+        story,
+        validation,
+        review,
+        accepted,
+        retry_reason: decision.reason,
+        error: attemptError,
+      },
+      validation_status: validationStatus,
+      validation_error: validationError,
+      review_status: reviewStatus,
+      review_error: reviewError,
     };
   }
 
