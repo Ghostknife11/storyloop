@@ -13,7 +13,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
-import { generateFromPlan, planStory, previewPrompt, RunApiError, type RunApiResult } from "@/lib/api";
+import { ReviewPanel } from "@/components/review-panel";
+import { generateFromPlan, planStory, previewPrompt, reviewStory, RunApiError, type RunApiResult } from "@/lib/api";
 import { configFilename, parseStoryConfig, serializeStoryConfig } from "@/lib/config-io";
 import { useSettings } from "@/lib/settings-store";
 import {
@@ -21,16 +22,19 @@ import {
   validateStoryConfig, type StoryConfig,
 } from "@/types/story-config";
 import { validateBeatPlan, type BeatPlan, type StoryBeat } from "@/types/beat-plan";
+import type { ReviewResult } from "@/types/review-result";
 
 type Phase = "idle" | "generating" | "success" | "error";
 type PlanPhase = "idle" | "planning" | "success" | "error";
 
-/** §40 固定阶段（§7）：UI 只能按这个顺序展示，不自行发明阶段。 */
+/** §40 固定阶段（§7/§18）：UI 只能按这个顺序展示，不自行发明阶段。
+ *  v0.5.0 增加 Reviewing：Story 落盘之后的审阅阶段（§35）。 */
 const RUN_STAGES = [
-  { key: "config", label: "Config" },
+  { key: "config", label: "Preparing" },
   { key: "planning", label: "Planning" },
-  { key: "generating", label: "Generation" },
-  { key: "saving", label: "Persistence" },
+  { key: "generating", label: "Writing" },
+  { key: "saving", label: "Saving" },
+  { key: "reviewing", label: "Reviewing" },
 ] as const;
 
 type RunStageKey = (typeof RUN_STAGES)[number]["key"];
@@ -160,6 +164,9 @@ export default function GeneratePage() {
   const [previewing, setPreviewing] = useState(false);
   const [loadOpen, setLoadOpen] = useState(false);
   const [loadText, setLoadText] = useState("");
+  // §34：Review Again 只重新审阅当前正文，不重新生成 Story
+  const [reReviewing, setReReviewing] = useState(false);
+  const [reviewOverride, setReviewOverride] = useState<ReviewResult | null>(null);
   const busyRef = useRef(false);
   const planBusyRef = useRef(false);
   const stepperTimers = useRef<number[]>([]);
@@ -186,7 +193,7 @@ export default function GeneratePage() {
     clearStepperTimers();
     setRunStage("config");
     // Manual Run 跳过 Planning（§29：beat_plan 由用户提供，Pipeline 不再调 Planner）
-    (["generating", "saving"] as RunStageKey[]).forEach((stage, i) => {
+    (["generating", "saving", "reviewing"] as RunStageKey[]).forEach((stage, i) => {
       stepperTimers.current.push(window.setTimeout(() => setRunStage(stage), (i + 1) * 700));
     });
   };
@@ -207,6 +214,8 @@ export default function GeneratePage() {
     setFailedRunId(null);
     setPreview(null);
     setPhase("idle");
+    setReReviewing(false);
+    setReviewOverride(null);
     clearStepperTimers();
   };
 
@@ -334,6 +343,8 @@ export default function GeneratePage() {
     setFailedStage(null);
     setFailedRunId(null);
     setRunFailed(false);
+    setReReviewing(false);
+    setReviewOverride(null);
     beginStepper();
     try {
       const config = formToConfig(form);
@@ -375,6 +386,31 @@ export default function GeneratePage() {
       toast.error(e instanceof Error ? e.message : "预览失败");
     } finally {
       setPreviewing(false);
+    }
+  }
+
+  // §29/§50 Review Again：只对当前正文重新审阅，绝不重新生成 Story。
+  async function handleReviewAgain() {
+    if (reReviewing || !result) return;
+    setReReviewing(true);
+    try {
+      const review = await reviewStory(
+        formToConfig(form),
+        result.story,
+        {
+          model: settings.model || undefined,
+          baseUrl: settings.baseUrl || undefined,
+          temperature: settings.temperature,
+        },
+        result.run_id,
+      );
+      // §30：服务端已覆盖该 Run 的 review.json，前端同步展示最新评价
+      setReviewOverride(review);
+      toast.success(`Review 完成：${review.score} / 100`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "审阅失败");
+    } finally {
+      setReReviewing(false);
     }
   }
 
@@ -754,6 +790,15 @@ export default function GeneratePage() {
                     <div className="text-[11px] text-muted-foreground font-mono mb-4">
                       Run {result.run_id} · {result.status} · {result.beat_plan.beats.length} beats
                     </div>
+                    {/* §31 Review 区域：Score / Summary / Strengths / Problems。
+                        §34 Review 失败时正文继续显示，只把本面板切成失败态。 */}
+                    <ReviewPanel
+                      review={reviewOverride ?? result.review}
+                      reviewStatus={reviewOverride ? "completed" : result.review_status}
+                      reviewError={result.review_error}
+                      reReviewing={reReviewing}
+                      onReviewAgain={handleReviewAgain}
+                    />
                     {/* §42 产物清单：只展示文件名，不展示服务端绝对路径（§67） */}
                     <div className="mb-4 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
                       <div className="text-[10px] font-mono tracking-widest uppercase text-muted-foreground mb-1.5">Artifacts</div>
