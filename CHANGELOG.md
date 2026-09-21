@@ -17,16 +17,58 @@ All notable changes to Storyloop.
 
 ### Changed
 
-- 版本 tag 由 `v0.x.x` 改为 `0.x.x`（`0.0.1` ~ `0.4.0`）。GitHub Releases 页按 release 创建时间倒序排列，
+- 版本 tag 由 `v0.x.x` 改为 `0.x.x`（`0.0.1` ~ `0.5.0`）。GitHub Releases 页按 release 创建时间倒序排列，
   而创建时间取自 annotated tag 的 tagger 时间且无法通过接口修改；原 `v0.0.1` / `v0.2.0` 两个 tag 的
   tagger 时间晚于 `v0.4.0`，导致页面版本顺序错乱。改用新 tag 名并将各 tag 的 tagger 时间对齐到其
-  commit 时间后，Releases 页顺序与版本号一致。Release 标题仍带 `v` 前缀（如 `v0.4.0 — Generation Pipeline`）。
-  Release URL 相应变为 `…/releases/tag/0.4.0`
+  commit 时间后，Releases 页顺序与版本号一致。Release 标题仍带 `v` 前缀（如 `v0.5.0 — Basic Reviewer`）。
+  Release URL 相应变为 `…/releases/tag/0.5.0`
 
 ### Fixed
 
 - About 页版本说明仍写作「初始公开原型」并声称规划尚未包含，与 v0.3.0 起已具备的 Beat 规划不符；改为按当前版本实际能力描述（规划已具备，评审 / 校验 / 修复 / 重试 / 实验 / 基准 / 自适应尚未包含）
 - About 页副标题与页面 metadata 的「生成原型」统一为「生成器」，与 README 一致
+
+---
+
+## [0.5.0] —— 2026-09-21
+
+### Added
+
+- Basic AI story reviewer（`BasicReviewer` + `prompts/reviewer.txt`）：对生成正文做一次基础审阅
+- `ReviewResult` 模型与校验（`src/types/review-result.ts`）：`score` / `summary` / `strengths` / `problems`
+- Overall 0–100 quality score：单一总分，越界（`< 0` 或 `> 100`）与非数字一律拒绝
+- Review summary：一段总体评价
+- Strengths and problems lists：两个字符串列表，条目 trim，允许为空数组
+- Review parser（`src/lib/review-parser.ts`）：容忍 ``` 代码围栏与首尾空白，其余非法 JSON 抛 `ReviewParseError`
+- Review JSON artifacts：`runs/<run_id>/review.json`，重复审阅时覆盖同一文件
+- Review stage in `GenerationPipeline`：正文落盘之后才审阅
+- Review status in run metadata：`review_status` / `review_error` / `review_score`
+- Review panel in the modern UI：分数 / 摘要 / 优点 / 问题，失败时保留正文并提供「重新审阅」
+- Manual review endpoint：`POST /api/review`（`{config, story}`，可选 `run_id` 覆盖该 Run 的 review.json）
+- CLI `review` 子命令，与 Pipeline 共用同一个 `BasicReviewer`
+- Tests：review-result / review-parser / basic-reviewer / ui-review
+
+### Changed
+
+- Complete generation runs now include post-generation review
+- Run metadata now records review status and basic review score
+- 固定阶段顺序由 Config → Planning → Generation → Persistence 扩展为
+  Config → Planning → Generation → Save Story → Review → Save Review
+- `RunStatus` 新增 `reviewing`；UI 进度指示由四阶段改为五阶段
+- `POST /api/runs` 与 `/api/runs/from-plan` 的响应新增 `review` / `review_status` / `review_error`
+- `GenerationPipeline` 构造参数新增 `BasicReviewer`；`RunDeps` 新增可选 `reviewer`
+- README 定位改为「具备剧情规划、正文生成、Run 持久化和基础自动审阅能力」，并明确审阅只反馈不改写
+
+### Fixed
+
+- `src/lib/story-generator.ts` 中 `buildStoryPrompt` 的累加变量声明为 `let` 但从未重新赋值，触发 `prefer-const` lint 错误；改为 `const`
+
+### Compatibility
+
+- 审阅失败不会让 Run 失败：`story.md` 与 `status: "completed"` 照常返回，只有 `review_status` 为 `failed`
+- 审阅温度固定为 `0.3`，与生成用的 `temperature` 相互独立
+- The reviewer provides feedback only. It does not automatically regenerate or repair the story.
+  没有 PASS / FAIL 阈值、没有多维评分、没有自动重试与自动修复。
 
 ---
 
