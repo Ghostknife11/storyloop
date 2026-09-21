@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   MAX_ATTEMPTS_RANGE,
+  MAX_REPAIRS_RANGE,
   MIN_SCORE_RANGE,
   retryPolicyOf,
   type AppSettings,
@@ -51,6 +52,9 @@ const RETRY_SETTING_KEYS = [
   "retryOnValidationFailure",
 ];
 
+/** §34：定点修订在设置里就这两个入口——开关 + 单次 Attempt 上限。 */
+const REPAIR_SETTING_KEYS = ["repairEnabled", "maxRepairsPerAttempt"];
+
 function settings(patch: Partial<AppSettings> = {}): AppSettings {
   return {
     baseUrl: "",
@@ -60,6 +64,8 @@ function settings(patch: Partial<AppSettings> = {}): AppSettings {
     maxAttempts: 2,
     minReviewScore: 70,
     retryOnValidationFailure: true,
+    repairEnabled: true,
+    maxRepairsPerAttempt: 1,
     ...patch,
   };
 }
@@ -72,6 +78,8 @@ const attempts: AttemptSummaryApi[] = [
     retry_reason: "review_score_below_threshold",
     review_score: 61,
     validation_passed: true,
+    repair_count: 0,
+    repairs: [],
   },
   {
     attempt_number: 2,
@@ -79,6 +87,8 @@ const attempts: AttemptSummaryApi[] = [
     retry_reason: "validation_failed",
     review_score: null,
     validation_passed: false,
+    repair_count: 1,
+    repairs: [{ repair_number: 1, issue_type: "length", success: false }],
   },
 ];
 
@@ -99,7 +109,13 @@ function stubJson(body: unknown) {
 describe("§30/§31 自动重试设置", () => {
   it("默认为开 / 2 / 70 / 开", () => {
     const p = retryPolicyOf(settings());
-    expect(p).toEqual({ max_attempts: 2, min_review_score: 70, retry_on_validation_failure: true });
+    expect(p).toEqual({
+      max_attempts: 2,
+      min_review_score: 70,
+      retry_on_validation_failure: true,
+      enable_repair: true,
+      max_repairs_per_attempt: 1,
+    });
   });
 
   it("关闭自动重试时只保留一次尝试，而不是造假阈值", () => {
@@ -121,13 +137,34 @@ describe("§30/§31 自动重试设置", () => {
     expect(retryPolicyOf(settings({ minReviewScore: 140 })).min_review_score).toBe(100);
   });
 
-  it("§66 设置里只有四个重试字段，没有修复策略 / 维度阈值 / 自适应策略", () => {
+  it("§66 设置里只有四个重试字段 + 两个修订字段，没有修复策略 / 维度阈值 / 自适应策略", () => {
     const keys = Object.keys(settings());
-    for (const forbidden of ["repair", "strategy", "dimension", "adaptive", "attribution", "target"]) {
+    for (const forbidden of ["strategy", "dimension", "adaptive", "attribution", "target", "diagnos", "rank"]) {
       expect(keys.some((k) => k.toLowerCase().includes(forbidden))).toBe(false);
     }
-    // §30 允许的全部就这四个，外加原有的 model / baseUrl / temperature
+    // §30 允许的全部就这四个，§34 允许的就这两个，外加原有的 model / baseUrl / temperature
     expect(keys.filter((k) => RETRY_SETTING_KEYS.includes(k))).toEqual(RETRY_SETTING_KEYS);
+    expect(keys.filter((k) => REPAIR_SETTING_KEYS.includes(k))).toEqual(REPAIR_SETTING_KEYS);
+  });
+});
+
+describe("§34 定点修订设置", () => {
+  it("默认开启，每次 Attempt 最多修一次", () => {
+    expect(MAX_REPAIRS_RANGE).toEqual({ min: 0, max: 3 });
+    expect(retryPolicyOf(settings())).toMatchObject({ enable_repair: true, max_repairs_per_attempt: 1 });
+  });
+
+  it("关闭修订时不改重试行为，只是不再修（§51-E）", () => {
+    const p = retryPolicyOf(settings({ repairEnabled: false, maxRepairsPerAttempt: 3 }));
+    expect(p.enable_repair).toBe(false);
+    expect(p.max_repairs_per_attempt).toBe(0);
+    expect(p.max_attempts).toBe(2);
+  });
+
+  it("修订次数越界夹回 0 ~ 3（§19：绝不无限修）", () => {
+    expect(retryPolicyOf(settings({ maxRepairsPerAttempt: -2 })).max_repairs_per_attempt).toBe(0);
+    expect(retryPolicyOf(settings({ maxRepairsPerAttempt: 9 })).max_repairs_per_attempt).toBe(3);
+    expect(retryPolicyOf(settings({ maxRepairsPerAttempt: 1.5 })).max_repairs_per_attempt).toBe(1);
   });
 });
 
@@ -147,8 +184,8 @@ describe("§34/§35 Attempt 面板状态", () => {
 
   it("selected attempt renders：exhausted 时选中最后一次，accepted 时选中通过那次", () => {
     const ok: AttemptSummaryApi[] = [
-      { attempt_number: 1, accepted: false, retry_reason: "validation_failed", review_score: null, validation_passed: false },
-      { attempt_number: 2, accepted: true, retry_reason: null, review_score: 88, validation_passed: true },
+      { attempt_number: 1, accepted: false, retry_reason: "validation_failed", review_score: null, validation_passed: false, repair_count: 0, repairs: [] },
+      { attempt_number: 2, accepted: true, retry_reason: null, review_score: 88, validation_passed: true, repair_count: 0, repairs: [] },
     ];
     expect(ok.find((a) => a.accepted)?.attempt_number).toBe(2);
     expect(attempts.some((a) => a.accepted)).toBe(false);
@@ -163,8 +200,10 @@ describe("§34/§35 Attempt 面板状态", () => {
 
   it("§35 每个 Attempt 只有摘要字段：没有分数差值 / 排名 / 平均分", () => {
     const keys = Object.keys(attempts[0]).sort();
-    expect(keys).toEqual(["accepted", "attempt_number", "retry_reason", "review_score", "validation_passed"]);
-    for (const forbidden of ["delta", "rank", "best", "average", "efficiency", "cost"]) {
+    expect(keys).toEqual([
+      "accepted", "attempt_number", "repair_count", "repairs", "retry_reason", "review_score", "validation_passed",
+    ]);
+    for (const forbidden of ["delta", "rank", "best", "average", "efficiency", "cost", "dimension", "causal"]) {
       expect(keys.some((k) => k.includes(forbidden))).toBe(false);
     }
   });
@@ -194,7 +233,13 @@ describe("§36/§39 前端读回 Run 与 Attempt", () => {
     });
     await startRun(config, { temperature: 0.8 }, retryPolicyOf(settings({ maxAttempts: 4, minReviewScore: 55 })));
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>;
-    expect(body.retry_policy).toEqual({ max_attempts: 4, min_review_score: 55, retry_on_validation_failure: true });
+    expect(body.retry_policy).toEqual({
+      max_attempts: 4,
+      min_review_score: 55,
+      retry_on_validation_failure: true,
+      enable_repair: true,
+      max_repairs_per_attempt: 1,
+    });
     // §37：策略不属于 StoryConfig
     expect(body.max_attempts).toBeUndefined();
   });
