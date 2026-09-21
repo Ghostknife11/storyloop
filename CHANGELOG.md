@@ -30,6 +30,30 @@ All notable changes to Storyloop.
 
 ---
 
+## [0.8.0] —— 2026-09-23
+
+### Added
+
+- Targeted story repair
+- RepairRequest and RepairResult models
+- RepairStrategy
+- StoryRepairer
+- Dedicated repair prompt
+- Basic repair issue categories
+- Repair-before-retry flow
+- Repair artifacts
+- Repair settings in the modern UI
+- Manual repair endpoint
+- Repair result inspection
+
+### Changed
+
+- Failed attempts can now be repaired before full regeneration
+- GenerationPipeline now re-validates and re-reviews repaired stories
+- Attempt artifacts preserve both the initial and repaired story when repair occurs
+
+---
+
 ## [0.7.0] —— 2026-09-22
 
 ### Added
