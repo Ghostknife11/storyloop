@@ -58,28 +58,42 @@ function runIdFromError(message: string): string {
   return message.split(" ")[1] ?? "";
 }
 
-describe("POST /api/runs（v0.5.0 Automatic Run）", () => {
-  it("链路：config → Planning → Generation → Persistence → Review；Review 失败不拖垮 Run", async () => {
+describe("POST /api/runs（v0.6.0 Automatic Run）", () => {
+  it("链路：config → Planning → Generation → Save → Validate → Review；Review 失败不拖垮 Run", async () => {
     const dir = withTmpDir();
     const calls: Array<{ temperature: number }> = [];
     const r = await startRun({ config }, { llm: fakeLLM as never, planner: fakePlanner(plan, calls) as never });
     expect(r.status).toBe(200);
     const ok = r.json as {
       run_id: string; status: string; story: string; beat_plan: BeatPlan;
+      validation: { passed: boolean; issues: Array<{ code: string }> }; validation_status: string;
       review: unknown; review_status: string; artifacts: Record<string, string>;
     };
     expect(ok.run_id).toMatch(RUN_ID);
     expect(ok.status).toBe("completed");
     expect(ok.story).toContain("正文");
     expect(ok.beat_plan.beats).toHaveLength(2);
+    // §17/§18：Validate 在 Review 之前，Story 已落盘后才校验
+    expect(ok.validation_status).toBe("completed");
+    // fakeLLM 的正文极短且不含主角 → Validation 失败，但 Run 仍 completed（§18）
+    expect(ok.validation.passed).toBe(false);
+    expect(ok.validation.issues.map((i) => i.code)).toContain("TOO_SHORT");
     // fakeLLM 只回正文文本，Reviewer 拿不到合法 JSON → Review 失败，但 Story 仍成功（§28/§46）
     expect(ok.review).toBeNull();
     expect(ok.review_status).toBe("failed");
-    expect(ok.artifacts).toEqual({ config: "config.json", beat_plan: "beats.json", story: "story.md", metadata: "metadata.json" });
+    expect(ok.artifacts).toEqual({
+      config: "config.json",
+      beat_plan: "beats.json",
+      story: "story.md",
+      validation: "validation.json",
+      metadata: "metadata.json",
+    });
     expect(calls).toHaveLength(1);
 
     const runDir = runDirOf(dir, ok.run_id);
-    expect(readdirSync(runDir).sort()).toEqual(["beats.json", "config.json", "metadata.json", "story.md"]);
+    expect(readdirSync(runDir).sort()).toEqual([
+      "beats.json", "config.json", "metadata.json", "story.md", "validation.json",
+    ]);
     expect(JSON.parse(readFileSync(join(runDir, "config.json"), "utf8")).protagonist?.name).toBe("陈岚");
     expect(JSON.parse(readFileSync(join(runDir, "beats.json"), "utf8")).beats).toHaveLength(2);
     expect(readFileSync(join(runDir, "story.md"), "utf8")).toContain("# 消失的目击者");
@@ -88,11 +102,17 @@ describe("POST /api/runs（v0.5.0 Automatic Run）", () => {
     expect(meta.run_id).toBe(ok.run_id);
     expect(meta.status).toBe("completed");
     expect(meta.current_stage).toBe("completed");
-    expect(meta.project_version).toBe("0.5.0");
+    expect(meta.project_version).toBe("0.6.0");
+    // §24：Validation 失败只记录，不改变 Run 状态
+    expect(meta.validation_status).toBe("completed");
+    expect(meta.validation_passed).toBe(false);
+    expect(meta.validation_issue_count).toBeGreaterThan(0);
     expect(meta.review_status).toBe("failed");
     expect(meta.review_score).toBeUndefined();
     expect(meta.review_error).toBeTruthy();
     expect(meta.finished_at).toBeTruthy();
+    // §25：落盘的 validation.json 与响应一致
+    expect(JSON.parse(readFileSync(join(runDir, "validation.json"), "utf8")).passed).toBe(false);
   });
 
   it("§7 固定顺序：Planning 在 Generation 之前，temperature 分别默认 0.7 / 0.8", async () => {
@@ -155,18 +175,25 @@ describe("POST /api/runs（v0.5.0 Automatic Run）", () => {
   });
 });
 
-describe("POST /api/runs/from-plan（v0.5.0 Manual Run）", () => {
-  it("链路：不再调用 Planner，直接生成，run_id 与 metadata 一致", async () => {
+describe("POST /api/runs/from-plan（v0.6.0 Manual Run）", () => {
+  it("链路：不再调用 Planner，直接生成，Validate 仍执行，run_id 与 metadata 一致", async () => {
     const dir = withTmpDir();
     const r = await startRunFromPlan({ config, beat_plan: plan }, { llm: fakeLLM as never, generator });
     expect(r.status).toBe(200);
-    const ok = r.json as { run_id: string; story: string; beat_plan: BeatPlan };
+    const ok = r.json as {
+      run_id: string; story: string; beat_plan: BeatPlan;
+      validation: { passed: boolean }; validation_status: string;
+    };
     expect(ok.run_id).toMatch(RUN_ID);
     expect(ok.story).toContain("正文");
     expect(ok.beat_plan.beats).toHaveLength(2);
+    // §17：Manual Run 同样在 Save Story 之后 Validate
+    expect(ok.validation_status).toBe("completed");
+    expect(ok.validation.passed).toBe(false);
     const meta = JSON.parse(readFileSync(join(runDirOf(dir, ok.run_id), "metadata.json"), "utf8"));
     expect(meta.run_id).toBe(ok.run_id);
     expect(meta.status).toBe("completed");
+    expect(existsSync(join(runDirOf(dir, ok.run_id), "validation.json"))).toBe(true);
   });
 
   it("§29 Manual Run 不触发 Planner（plan 被调用即失败）", async () => {

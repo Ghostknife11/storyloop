@@ -6,6 +6,7 @@ import { ArtifactStore } from "@/storage/artifact-store";
 import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
+import type { ValidationResult } from "@/types/validation-result";
 
 /**
  * §13/§14/§21/§22/§50/§63 ArtifactStore：只负责落盘，
@@ -36,6 +37,13 @@ const review: ReviewResult = {
   summary: "故事整体完整，主线清楚，但中段推进略重复。",
   strengths: ["开篇冲突建立迅速", "主角目标明确"],
   problems: ["中段线索重复", "高潮转折略突然"],
+};
+
+const passed: ValidationResult = { passed: true, issues: [] };
+
+const failed: ValidationResult = {
+  passed: false,
+  issues: [{ code: "TOO_SHORT", severity: "error", message: "正文长度 12 低于下限 750。" }],
 };
 
 let tmp: string | null = null;
@@ -120,6 +128,57 @@ describe("ArtifactStore（§13/§14/§63）", () => {
     expect(readdirSync(runDir(root, RUN_ID))).toEqual(["review.json"]);
   });
 
+  it("§21/§22 saves validation JSON", () => {
+    const { store, root } = withStore();
+    store.createRunDirectory(RUN_ID);
+    store.putValidation(RUN_ID, passed);
+    const saved = JSON.parse(readFileSync(join(runDir(root, RUN_ID), "validation.json"), "utf8")) as ValidationResult;
+    expect(saved).toEqual(passed);
+    expect(saved.passed).toBe(true);
+    expect(saved.issues).toEqual([]);
+  });
+
+  it("§22 失败的 ValidationResult 同样原样落盘（passed=false + issues）", () => {
+    const { store, root } = withStore();
+    store.createRunDirectory(RUN_ID);
+    store.putValidation(RUN_ID, failed);
+    const saved = JSON.parse(readFileSync(join(runDir(root, RUN_ID), "validation.json"), "utf8")) as ValidationResult;
+    expect(saved.passed).toBe(false);
+    expect(saved.issues).toEqual(failed.issues);
+    expect(saved.issues[0]?.code).toBe("TOO_SHORT");
+    expect(saved.issues[0]?.severity).toBe("error");
+  });
+
+  it("§27 re-validate 覆盖 validation.json，不产生 validation_v1 / validation_history", () => {
+    const { store, root } = withStore();
+    store.createRunDirectory(RUN_ID);
+    store.putValidation(RUN_ID, passed);
+    store.putValidation(RUN_ID, failed);
+    const saved = JSON.parse(readFileSync(join(runDir(root, RUN_ID), "validation.json"), "utf8")) as ValidationResult;
+    expect(saved).toEqual(failed);
+    // §27：同一份 validation.json 被覆盖，不建历史
+    expect(readdirSync(runDir(root, RUN_ID))).toEqual(["validation.json"]);
+  });
+
+  it("§41 validation JSON 为 UTF-8 中文且是合法 JSON", () => {
+    const { store, root } = withStore();
+    store.createRunDirectory(RUN_ID);
+    store.putValidation(RUN_ID, {
+      passed: false,
+      issues: [{ code: "MISSING_PROTAGONIST", severity: "error", message: "正文中未找到主角「陈岚」。" }],
+    });
+    const raw = readFileSync(join(runDir(root, RUN_ID), "validation.json"), "utf8");
+    expect(raw).toContain("陈岚");
+    const saved = JSON.parse(raw) as ValidationResult;
+    expect(saved.issues[0]?.message).toContain("陈岚");
+  });
+
+  it("§41 putValidation 与其它产物共用同一套越界防护", () => {
+    const { store, root } = withStore();
+    expect(() => store.putValidation("../escape", passed)).toThrow(/越界/);
+    expect(existsSync(join(root, "..", "escape"))).toBe(false);
+  });
+
   it("UTF-8 Chinese works", () => {
     const { store, root } = withStore();
     store.createRunDirectory(RUN_ID);
@@ -135,25 +194,27 @@ describe("ArtifactStore（§13/§14/§63）", () => {
     store.putConfig(RUN_ID, config);
     store.putBeatPlan(RUN_ID, plan);
     store.putStory(RUN_ID, config.title, "正文");
+    store.putValidation(RUN_ID, passed);
     store.putReview(RUN_ID, review);
     store.putMetadata(RUN_ID, { run_id: RUN_ID });
     const files = readdirSync(runDir(root, RUN_ID)).sort();
     expect(files).toEqual([
-      "beats.json", "config.json", "metadata.json", "review.json", "story.md",
+      "beats.json", "config.json", "metadata.json", "review.json", "story.md", "validation.json",
     ]);
     expect(files.some((f) => f.endsWith(".tmp"))).toBe(false);
   });
 
-  it("§22 成功 Run 的目录就是 config / beats / story / review / metadata", () => {
+  it("§22 成功 Run 的目录就是 config / beats / story / validation / review / metadata", () => {
     const { store, root } = withStore();
     store.createRunDirectory(RUN_ID);
     store.putConfig(RUN_ID, config);
     store.putBeatPlan(RUN_ID, plan);
     store.putStory(RUN_ID, config.title, "正文");
+    store.putValidation(RUN_ID, passed);
     store.putReview(RUN_ID, review);
     store.putMetadata(RUN_ID, { run_id: RUN_ID });
     expect(readdirSync(runDir(root, RUN_ID)).sort()).toEqual([
-      "beats.json", "config.json", "metadata.json", "review.json", "story.md",
+      "beats.json", "config.json", "metadata.json", "review.json", "story.md", "validation.json",
     ]);
   });
 

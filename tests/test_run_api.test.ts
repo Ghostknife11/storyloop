@@ -9,6 +9,7 @@ import { POST as postReview } from "@/app/api/review/route";
 import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
+import type { ValidationResult } from "@/types/validation-result";
 
 /**
  * §31~§33/§46 HTTP 路由层：只验证「JSON 解析 → 委托 service → 响应形状」，
@@ -40,6 +41,9 @@ const review: ReviewResult = {
 
 const RUN_ID = /^\d{8}_\d{6}_[a-z0-9]{6}$/;
 
+/** target_words=5000 时长度下限为 750：这里远超下限、含主角名、以句号结尾，可通过全部硬规则。 */
+const LONG_STORY = `陈岚推开派出所的玻璃门，${"雨水顺着屋檐砸在台阶上。".repeat(80)}`;
+
 const realCwd = process.cwd();
 let tmp: string | null = null;
 afterEach(() => {
@@ -58,7 +62,7 @@ function withTmpDir() {
  * 冒充 OpenAI-compatible /chat/completions：
  * system 消息区分三种角色——剧情策划（Planner）/ 基础审阅者（Reviewer）/ 作者（Generator）。
  */
-function stubLLM(reviewerOutput?: string) {
+function stubLLM(reviewerOutput?: string, story = LONG_STORY) {
   const reviewerText = reviewerOutput ?? JSON.stringify(review);
   const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body)) as { messages?: Array<{ role: string; content: string }> };
@@ -67,7 +71,7 @@ function stubLLM(reviewerOutput?: string) {
       ? JSON.stringify(plan)
       : system.includes("审阅")
         ? reviewerText
-        : "正文——陈岚走进雨夜。";
+        : story;
     return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content } }] }) };
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -88,7 +92,7 @@ async function readJson(res: Response) {
 }
 
 describe("POST /api/runs（§32/§46）", () => {
-  it("完整 Automatic Run：200 + run_id + review + runs/<run_id>/ 五件产物", async () => {
+  it("完整 Automatic Run：200 + run_id + validation + review + runs/<run_id>/ 六件产物", async () => {
     const dir = withTmpDir();
     stubLLM();
     const res = await postRuns(post("/api/runs", { config }));
@@ -96,19 +100,27 @@ describe("POST /api/runs（§32/§46）", () => {
     const body = await readJson(res);
     expect(String(body.run_id)).toMatch(RUN_ID);
     expect(body.status).toBe("completed");
-    expect(String(body.story)).toContain("正文");
+    expect(String(body.story)).toContain("陈岚");
     // §27：成功响应包含 review
     expect(body.review).toEqual(review);
     expect(body.review_status).toBe("completed");
+    // §26：成功响应同时包含 validation（硬性检查与审阅分开）
+    expect(body.validation).toEqual({ passed: true, issues: [] });
+    expect(body.validation_status).toBe("completed");
+    expect(body.validation_error).toBeUndefined();
 
     const runDir = join(dir, "runs", String(body.run_id));
     expect(readdirSync(runDir).sort()).toEqual([
-      "beats.json", "config.json", "metadata.json", "review.json", "story.md",
+      "beats.json", "config.json", "metadata.json", "review.json", "story.md", "validation.json",
     ]);
-    // §16/§17 metadata 与响应一致
+    expect(JSON.parse(readFileSync(join(runDir, "validation.json"), "utf8"))).toEqual({ passed: true, issues: [] });
+    // §16/§17/§24 metadata 与响应一致
     const meta = JSON.parse(readFileSync(join(runDir, "metadata.json"), "utf8"));
     expect(meta.run_id).toBe(body.run_id);
     expect(meta.status).toBe("completed");
+    expect(meta.validation_status).toBe("completed");
+    expect(meta.validation_passed).toBe(true);
+    expect(meta.validation_issue_count).toBe(0);
     expect(meta.review_status).toBe("completed");
     expect(meta.review_score).toBe(74);
   });
@@ -139,6 +151,71 @@ describe("POST /api/runs（§32/§46）", () => {
   });
 });
 
+describe("POST /api/runs — validation failed（§26/§42/§44）", () => {
+  it("§44B 极短 Story：HTTP 仍 200，story 保留，validation.passed=false + TOO_SHORT", async () => {
+    const dir = withTmpDir();
+    stubLLM(undefined, "只有一句话。");
+    const res = await postRuns(post("/api/runs", { config }));
+    // §26：Validation Failed 是业务结果，不是服务器异常
+    expect(res.status).toBe(200);
+    const body = await readJson(res);
+    expect(body.status).toBe("completed");
+    expect(String(body.story)).toBe("只有一句话。");
+    const validation = body.validation as ValidationResult;
+    expect(validation.passed).toBe(false);
+    expect(validation.issues.map((i) => i.code)).toContain("TOO_SHORT");
+    // §39：Review 仍然执行
+    expect(body.review).toEqual(review);
+    expect(body.review_status).toBe("completed");
+
+    const runDir = join(dir, "runs", String(body.run_id));
+    expect(existsSync(join(runDir, "story.md"))).toBe(true);
+    expect(existsSync(join(runDir, "validation.json"))).toBe(true);
+    const saved = JSON.parse(readFileSync(join(runDir, "validation.json"), "utf8")) as ValidationResult;
+    expect(saved.passed).toBe(false);
+    const meta = JSON.parse(readFileSync(join(runDir, "metadata.json"), "utf8"));
+    expect(meta.validation_passed).toBe(false);
+    expect(meta.validation_issue_count).toBe(saved.issues.length);
+  });
+
+  it("§18/§44C 空正文是 LLM 层先拦截，EMPTY_CONTENT 只作为 Validator 兜底规则", async () => {
+    // §16：真正的 LLM 请求失败仍属于 Generation Error，不属于 Validator。
+    // 空串 / 纯空白都会被 LLMClient 拦截成 502，因此 EMPTY_CONTENT 在真实 HTTP 链路上不可达，
+    // 它兜底的是「注入了假 Generator」或未来放宽 LLM 层拦截的情况——
+    // 该路径由 test_generation_pipeline.test.ts 与 test_story_validator.test.ts 覆盖。
+    const dir = withTmpDir();
+    for (const empty of ["", "   "]) {
+      stubLLM(undefined, empty);
+      const res = await postRuns(post("/api/runs", { config }));
+      expect(res.status).toBe(502);
+      const body = await readJson(res);
+      expect(body.stage).toBe("generating");
+      expect(String(body.error)).toContain("LLM 返回内容为空");
+      // 没有进入 Validate 阶段，因此不产生 validation.json
+      expect(existsSync(join(dir, "runs", String(body.run_id), "validation.json"))).toBe(false);
+      expect(existsSync(join(dir, "runs", String(body.run_id), "story.md"))).toBe(false);
+    }
+  });
+
+  it("§44D 主角缺失：MISSING_PROTAGONIST，且不因此重新生成", async () => {
+    const dir = withTmpDir();
+    const fetchMock = stubLLM(undefined, `${"林述安走在长长的走廊里。".repeat(90)}`);
+    const res = await postRuns(post("/api/runs", { config }));
+    const body = await readJson(res);
+    const validation = body.validation as ValidationResult;
+    expect(validation.issues.map((i) => i.code)).toContain("MISSING_PROTAGONIST");
+    expect(validation.passed).toBe(false);
+    // §58：Generator 只被调用一次，绝不自动重试
+    const genCalls = fetchMock.mock.calls.filter(([, init]) => {
+      const b = JSON.parse(String((init as RequestInit | undefined)?.body)) as { messages?: Array<{ content: string }> };
+      const system = (b.messages ?? []).map((m) => m.content).join("\n");
+      return !system.includes("剧情策划") && !system.includes("审阅");
+    });
+    expect(genCalls).toHaveLength(1);
+    expect(existsSync(join(dir, "runs", String(body.run_id), "story.md"))).toBe(true);
+  });
+});
+
 describe("POST /api/runs — review failure（§28/§34/§46）", () => {
   it("Reviewer 返回非法 JSON：仍 200 + story，review 为 null，review_status=failed", async () => {
     const dir = withTmpDir();
@@ -148,21 +225,24 @@ describe("POST /api/runs — review failure（§28/§34/§46）", () => {
     expect(res.status).toBe(200);
     const body = await readJson(res);
     expect(body.status).toBe("completed");
-    expect(String(body.story)).toContain("正文");
+    expect(String(body.story)).toContain("陈岚");
     expect(body.review).toBeNull();
     expect(body.review_status).toBe("failed");
     expect(String(body.review_error)).toContain("Reviewer 输出不是合法 JSON");
 
     const runDir = join(dir, "runs", String(body.run_id));
-    // §49：Story 仍可见，Run 仍保留 Story Artifact
+    // §49：Story 仍可见，Run 仍保留 Story Artifact；§17 validation 与 review 互不影响
     expect(existsSync(join(runDir, "story.md"))).toBe(true);
     expect(existsSync(join(runDir, "metadata.json"))).toBe(true);
+    expect(existsSync(join(runDir, "validation.json"))).toBe(true);
     expect(existsSync(join(runDir, "review.json"))).toBe(false);
     expect(readdirSync(runDir).sort()).toEqual([
-      "beats.json", "config.json", "metadata.json", "story.md",
+      "beats.json", "config.json", "metadata.json", "story.md", "validation.json",
     ]);
     const meta = JSON.parse(readFileSync(join(runDir, "metadata.json"), "utf8"));
     expect(meta.status).toBe("completed");
+    expect(meta.validation_status).toBe("completed");
+    expect(meta.validation_passed).toBe(true);
     expect(meta.review_status).toBe("failed");
   });
 

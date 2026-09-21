@@ -4,13 +4,16 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { GenerationPipeline, PipelineError } from "@/core/pipeline";
 import { ArtifactStore } from "@/storage/artifact-store";
+import { StoryValidator } from "@/lib/story-validator";
 import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
+import type { ValidationResult } from "@/types/validation-result";
 
 /**
- * §3/§5~§7/§16~§30/§43~§45/§59~§62 GenerationPipeline。
+ * §3/§5~§7/§16~§30/§38~§40/§43~§45/§59~§62 GenerationPipeline。
  * v0.5.0：Save Story → Review → Save Review（§18）。
+ * v0.6.0：Save Story → Validate → Save Validation → Review → Save Review（§17）。
  * 只用 Mock / Fake / Fixture，绝不打真实付费 API。
  */
 
@@ -37,11 +40,21 @@ const review: ReviewResult = {
   problems: ["中段线索重复", "高潮转折略突然"],
 };
 
+/** target_words=5000 时长度下限为 750：这里远超下限，含主角名、以句号结尾，可通过全部硬规则。 */
+const STORY = `陈岚推开派出所的玻璃门，${"雨水顺着屋檐砸在台阶上。".repeat(80)}`;
+
+const passed: ValidationResult = { passed: true, issues: [] };
+const failed: ValidationResult = {
+  passed: false,
+  issues: [{ code: "TOO_SHORT", severity: "error", message: "正文长度 12 明显短于目标字数（下限 750）。" }],
+};
+
 const RUN_ID = /^\d{8}_\d{6}_[a-z0-9]{6}$/;
 
 interface PlanCall { config: StoryConfig; temperature: number }
 interface GenCall { config: StoryConfig; plan: BeatPlan; temperature: number }
 interface ReviewCall { config: StoryConfig; story: string; temperature: number }
+interface ValidateCall { config: StoryConfig; story: string }
 
 function fakePlanner(out: BeatPlan, calls: PlanCall[] = []) {
   return {
@@ -57,6 +70,15 @@ function fakeGenerator(story: string, calls: GenCall[] = []) {
     generate: async (c: StoryConfig, p: BeatPlan, temperature = 0.8) => {
       calls.push({ config: c, plan: p, temperature });
       return story;
+    },
+  };
+}
+
+function fakeValidator(out: ValidationResult, calls: ValidateCall[] = []) {
+  return {
+    validate: async (c: StoryConfig, story: string) => {
+      calls.push({ config: c, story });
+      return out;
     },
   };
 }
@@ -95,65 +117,79 @@ function readMeta(dir: string, runId: string) {
 }
 
 describe("GenerationPipeline — successful full run（§43/§45/§59）", () => {
-  it("Planner → Generator → Save Story → Reviewer → Save Review → Complete", async () => {
+  it("Planner → Generator → Save Story → Validator → Save Validation → Reviewer → Save Review → Complete", async () => {
     const dir = withTmpDir();
     const order: string[] = [];
     const pipeline = new GenerationPipeline(
       { plan: async () => { order.push("plan"); return plan; } } as never,
-      { generate: async () => { order.push("generate"); return "正文内容"; } } as never,
+      { generate: async () => { order.push("generate"); return STORY; } } as never,
+      { validate: async () => { order.push("validate"); return passed; } } as never,
       { review: async () => { order.push("review"); return review; } } as never,
       new ArtifactStore(),
     );
 
     const result = await pipeline.run(config);
-    expect(order).toEqual(["plan", "generate", "review"]);
+    expect(order).toEqual(["plan", "generate", "validate", "review"]);
     expect(result.run_id).toMatch(RUN_ID);
     expect(result.status).toBe("completed");
-    expect(result.story).toBe("正文内容");
+    expect(result.story).toBe(STORY);
     expect(result.beat_plan).toEqual(plan);
     expect(result.config).toEqual(config);
+    expect(result.validation).toEqual(passed);
+    expect(result.validation_status).toBe("completed");
+    expect(result.validation_error).toBeNull();
     expect(result.review).toEqual(review);
     expect(result.review_status).toBe("completed");
     expect(result.review_error).toBeNull();
     expect(result.artifacts).toEqual({
       config: "config.json", beat_plan: "beats.json", story: "story.md",
-      metadata: "metadata.json", review: "review.json",
+      validation: "validation.json", metadata: "metadata.json", review: "review.json",
     });
 
     const runDir = join(dir, "runs", result.run_id);
     expect(readdirSync(runDir).sort()).toEqual([
-      "beats.json", "config.json", "metadata.json", "review.json", "story.md",
+      "beats.json", "config.json", "metadata.json", "review.json", "story.md", "validation.json",
     ]);
     expect(readFileSync(join(runDir, "story.md"), "utf8")).toContain("# 消失的目击者");
     expect(JSON.parse(readFileSync(join(runDir, "review.json"), "utf8"))).toEqual(review);
+    expect(JSON.parse(readFileSync(join(runDir, "validation.json"), "utf8"))).toEqual(passed);
 
     const meta = readMeta(dir, result.run_id);
     expect(meta.run_id).toBe(result.run_id);
     expect(meta.status).toBe("completed");
     expect(meta.current_stage).toBe("completed");
-    expect(meta.project_version).toBe("0.5.0");
+    expect(meta.project_version).toBe("0.6.0");
     expect(meta.finished_at).toBeTruthy();
-    // §17/§24：metadata 单独记录 review 状态与基础总分
+    // §17/§24：metadata 单独记录校验与审阅状态
+    expect(meta.validation_status).toBe("completed");
+    expect(meta.validation_passed).toBe(true);
+    expect(meta.validation_issue_count).toBe(0);
+    expect(meta.validation_error).toBeUndefined();
     expect(meta.review_status).toBe("completed");
     expect(meta.review_score).toBe(74);
     expect(meta.review_error).toBeUndefined();
   });
 
-  it("§45 review.json 内容与 GenerationResult.review 一致", async () => {
+  it("§45 review.json / validation.json 内容与 GenerationResult 一致", async () => {
     const dir = withTmpDir();
     const pipeline = new GenerationPipeline(
       fakePlanner(plan) as never,
-      fakeGenerator("正文") as never,
+      fakeGenerator(STORY) as never,
+      fakeValidator(passed) as never,
       fakeReviewer(review) as never,
       new ArtifactStore(),
     );
     const result = await pipeline.run(config);
-    const saved = JSON.parse(readFileSync(join(dir, "runs", result.run_id, "review.json"), "utf8"));
-    expect(saved).toEqual(result.review);
-    expect(saved.score).toBe(result.review?.score);
+    const runDir = join(dir, "runs", result.run_id);
+    const savedReview = JSON.parse(readFileSync(join(runDir, "review.json"), "utf8"));
+    const savedValidation = JSON.parse(readFileSync(join(runDir, "validation.json"), "utf8"));
+    expect(savedReview).toEqual(result.review);
+    expect(savedReview.score).toBe(result.review?.score);
+    expect(savedValidation).toEqual(result.validation);
+    expect(savedValidation.passed).toBe(result.validation?.passed);
   });
 
-  it("§18 Story 在 Review 之前就已落盘（save story 先于 review 调用）", async () => {
+  it("§17 Story 在 Validate 之前落盘，Validate 又在 Review 之前", async () => {
     withTmpDir();
     const events: string[] = [];
     const store = new ArtifactStore();
@@ -162,28 +198,35 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
       events.push("save-story");
       return originalPutStory(runId, title, story);
     };
+    const originalPutValidation = store.putValidation.bind(store);
+    store.putValidation = (runId: string, v: ValidationResult) => {
+      events.push("save-validation");
+      return originalPutValidation(runId, v);
+    };
     const pipeline = new GenerationPipeline(
       fakePlanner(plan) as never,
-      fakeGenerator("正文") as never,
+      fakeGenerator(STORY) as never,
+      { validate: async () => { events.push("validate"); return passed; } } as never,
       { review: async () => { events.push("review"); return review; } } as never,
       store,
     );
     await pipeline.run(config);
-    expect(events.indexOf("save-story")).toBeGreaterThanOrEqual(0);
-    expect(events.indexOf("save-story")).toBeLessThan(events.indexOf("review"));
+    expect(events).toEqual(["save-story", "validate", "save-validation", "review"]);
   });
 
-  it("§20 GenerationResult 只含约定字段（含 review，不含未来能力字段）", async () => {
+  it("§20 GenerationResult 只含约定字段（含 validation，不含未来能力字段）", async () => {
     withTmpDir();
     const pipeline = new GenerationPipeline(
-      fakePlanner(plan) as never, fakeGenerator("正文") as never, fakeReviewer(review) as never, new ArtifactStore(),
+      fakePlanner(plan) as never, fakeGenerator(STORY) as never,
+      fakeValidator(passed) as never, fakeReviewer(review) as never, new ArtifactStore(),
     );
     const result = await pipeline.run(config);
     expect(Object.keys(result).sort()).toEqual([
       "artifacts", "beat_plan", "config", "finished_at", "review", "review_error",
       "review_status", "run_id", "started_at", "status", "story",
+      "validation", "validation_error", "validation_status",
     ]);
-    for (const forbidden of ["validation", "repair", "retry", "attempt", "dimension"]) {
+    for (const forbidden of ["repair", "retry", "attempt", "dimension", "fixed", "revised", "patched"]) {
       for (const key of Object.keys(result)) {
         expect(key.toLowerCase()).not.toContain(forbidden);
       }
@@ -195,15 +238,15 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
     expect(names).toContain("run");
     expect(names).toContain("runWithPlan");
     for (const name of names) {
-      for (const forbidden of ["validate", "repair", "retry", "experiment", "benchmark", "observe"]) {
+      for (const forbidden of ["repair", "retry", "experiment", "benchmark", "observe"]) {
         expect(name.toLowerCase()).not.toContain(forbidden);
       }
     }
   });
 
-  it("§19 构造器只接受 planner / generator / reviewer / artifactStore", () => {
-    // 第 5 个参数 projectVersion 有默认值，不计入 length
-    expect(GenerationPipeline.length).toBe(4);
+  it("§19 构造器只接受 planner / generator / validator / reviewer / artifactStore", () => {
+    // 第 6 个参数 projectVersion 有默认值，不计入 length
+    expect(GenerationPipeline.length).toBe(5);
     const names = Object.getOwnPropertyNames(GenerationPipeline.prototype);
     expect(names).toContain("run");
     expect(names).toContain("runWithPlan");
@@ -216,7 +259,8 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
     const reviewCalls: ReviewCall[] = [];
     const pipeline = new GenerationPipeline(
       fakePlanner(plan, planCalls) as never,
-      fakeGenerator("正文", genCalls) as never,
+      fakeGenerator(STORY, genCalls) as never,
+      fakeValidator(passed) as never,
       fakeReviewer(review, reviewCalls) as never,
       new ArtifactStore(),
     );
@@ -235,24 +279,29 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
     expect(reviewCalls[0].temperature).toBe(0.3);
   });
 
-  it("Reviewer 收到的是生成的正文与本次 config", async () => {
+  it("Validator / Reviewer 收到的是生成的正文与本次 config", async () => {
     withTmpDir();
+    const validateCalls: ValidateCall[] = [];
     const reviewCalls: ReviewCall[] = [];
     const pipeline = new GenerationPipeline(
       fakePlanner(plan) as never,
-      fakeGenerator("正文——陈岚走进雨夜。") as never,
+      fakeGenerator(STORY) as never,
+      fakeValidator(passed, validateCalls) as never,
       fakeReviewer(review, reviewCalls) as never,
       new ArtifactStore(),
     );
     await pipeline.run(config);
-    expect(reviewCalls[0].story).toBe("正文——陈岚走进雨夜。");
+    expect(validateCalls[0].story).toBe(STORY);
+    expect(validateCalls[0].config).toEqual(config);
+    expect(reviewCalls[0].story).toBe(STORY);
     expect(reviewCalls[0].config).toEqual(config);
   });
 
   it("metadata 记录运行时 model", async () => {
     const dir = withTmpDir();
     const pipeline = new GenerationPipeline(
-      fakePlanner(plan) as never, fakeGenerator("正文") as never, fakeReviewer(review) as never, new ArtifactStore(),
+      fakePlanner(plan) as never, fakeGenerator(STORY) as never,
+      fakeValidator(passed) as never, fakeReviewer(review) as never, new ArtifactStore(),
     );
     const result = await pipeline.run(config, { model: "gpt-4o-mini" });
     expect(readMeta(dir, result.run_id).model).toBe("gpt-4o-mini");
@@ -269,7 +318,8 @@ describe("GenerationPipeline — runWithPlan（§29 Manual Run）", () => {
       },
     };
     const pipeline = new GenerationPipeline(
-      planner as never, fakeGenerator("正文", genCalls) as never, fakeReviewer(review) as never, new ArtifactStore(),
+      planner as never, fakeGenerator(STORY, genCalls) as never,
+      fakeValidator(passed) as never, fakeReviewer(review) as never, new ArtifactStore(),
     );
 
     const result = await pipeline.runWithPlan(config, plan);
@@ -281,14 +331,17 @@ describe("GenerationPipeline — runWithPlan（§29 Manual Run）", () => {
     expect(readMeta(dir, result.run_id).run_id).toBe(result.run_id);
   });
 
-  it("手动模式同样走完整 Review 阶段", async () => {
+  it("手动模式同样走完整 Validate + Review 阶段", async () => {
     const dir = withTmpDir();
     const pipeline = new GenerationPipeline(
-      fakePlanner(plan) as never, fakeGenerator("正文") as never, fakeReviewer(review) as never, new ArtifactStore(),
+      fakePlanner(plan) as never, fakeGenerator(STORY) as never,
+      fakeValidator(passed) as never, fakeReviewer(review) as never, new ArtifactStore(),
     );
     const result = await pipeline.runWithPlan(config, plan);
     expect(result.artifacts.story).toBe("story.md");
+    expect(result.artifacts.validation).toBe("validation.json");
     expect(result.artifacts.review).toBe("review.json");
+    expect(existsSync(join(dir, "runs", result.run_id, "validation.json"))).toBe(true);
     expect(existsSync(join(dir, "runs", result.run_id, "review.json"))).toBe(true);
   });
 });
@@ -298,7 +351,8 @@ describe("GenerationPipeline — planning failure（§18/§60）", () => {
     const dir = withTmpDir();
     const pipeline = new GenerationPipeline(
       { plan: async () => { throw new Error("Planner 输出不是合法 JSON"); } } as never,
-      fakeGenerator("正文") as never,
+      fakeGenerator(STORY) as never,
+      fakeValidator(passed) as never,
       fakeReviewer(review) as never,
       new ArtifactStore(),
     );
@@ -329,6 +383,7 @@ describe("GenerationPipeline — generation failure（§19/§61）", () => {
     const pipeline = new GenerationPipeline(
       fakePlanner(plan) as never,
       { generate: async () => { throw new Error("LLM API 返回 500"); } } as never,
+      fakeValidator(passed) as never,
       fakeReviewer(review) as never,
       new ArtifactStore(),
     );
@@ -353,7 +408,8 @@ describe("GenerationPipeline — persistence failure（§20/§62）", () => {
   it("save 失败：status=failed，current_stage=saving，错误信息不含内部路径", async () => {
     const dir = withTmpDir();
     const pipeline = new GenerationPipeline(
-      fakePlanner(plan) as never, fakeGenerator("正文") as never, fakeReviewer(review) as never, new FailingStore(),
+      fakePlanner(plan) as never, fakeGenerator(STORY) as never,
+      fakeValidator(passed) as never, fakeReviewer(review) as never, new FailingStore(),
     );
 
     const err = await pipeline.run(config).catch((e: unknown) => e);
@@ -372,7 +428,8 @@ describe("GenerationPipeline — review failure（§16/§44）", () => {
     const dir = withTmpDir();
     const pipeline = new GenerationPipeline(
       fakePlanner(plan) as never,
-      fakeGenerator("正文——陈岚走进雨夜。") as never,
+      fakeGenerator(STORY) as never,
+      fakeValidator(passed) as never,
       { review: async () => { throw new Error("Reviewer 输出不是合法 JSON"); } } as never,
       new ArtifactStore(),
     );
@@ -380,12 +437,15 @@ describe("GenerationPipeline — review failure（§16/§44）", () => {
     const result = await pipeline.run(config);
     // §16：Story 成功生成，Run 本身不算失败
     expect(result.status).toBe("completed");
-    expect(result.story).toBe("正文——陈岚走进雨夜。");
+    expect(result.story).toBe(STORY);
+    expect(result.validation).toEqual(passed);
+    expect(result.validation_status).toBe("completed");
     expect(result.review).toBeNull();
     expect(result.review_status).toBe("failed");
     expect(result.review_error).toContain("Reviewer 输出不是合法 JSON");
-    // §44：review.json 不出现，artifacts 里也没有 review 条目
+    // §44：review.json 不出现，artifacts 里也没有 review 条目；validation.json 仍在
     expect(result.artifacts.review).toBeUndefined();
+    expect(result.artifacts.validation).toBe("validation.json");
     expect(result.artifacts.story).toBe("story.md");
 
     const runDir = join(dir, "runs", result.run_id);
@@ -393,10 +453,13 @@ describe("GenerationPipeline — review failure（§16/§44）", () => {
     expect(existsSync(join(runDir, "config.json"))).toBe(true);
     expect(existsSync(join(runDir, "beats.json"))).toBe(true);
     expect(existsSync(join(runDir, "metadata.json"))).toBe(true);
+    expect(existsSync(join(runDir, "validation.json"))).toBe(true);
     expect(existsSync(join(runDir, "review.json"))).toBe(false);
 
     const meta = readMeta(dir, result.run_id);
     expect(meta.status).toBe("completed");
+    expect(meta.validation_status).toBe("completed");
+    expect(meta.validation_passed).toBe(true);
     expect(meta.review_status).toBe("failed");
     expect(meta.review_error).toContain("Reviewer 输出不是合法 JSON");
     expect(meta.review_score).toBeUndefined();
@@ -410,7 +473,8 @@ describe("GenerationPipeline — review failure（§16/§44）", () => {
       }
     }
     const pipeline = new GenerationPipeline(
-      fakePlanner(plan) as never, fakeGenerator("正文") as never, fakeReviewer(review) as never, new FailingReviewStore(),
+      fakePlanner(plan) as never, fakeGenerator(STORY) as never,
+      fakeValidator(passed) as never, fakeReviewer(review) as never, new FailingReviewStore(),
     );
 
     const result = await pipeline.run(config);
@@ -427,7 +491,8 @@ describe("GenerationPipeline — review failure（§16/§44）", () => {
     const genCalls: GenCall[] = [];
     const pipeline = new GenerationPipeline(
       fakePlanner(plan) as never,
-      fakeGenerator("正文", genCalls) as never,
+      fakeGenerator(STORY, genCalls) as never,
+      fakeValidator(passed) as never,
       { review: async () => { throw new Error("Reviewer 输出不是合法 JSON"); } } as never,
       new ArtifactStore(),
     );
@@ -435,16 +500,185 @@ describe("GenerationPipeline — review failure（§16/§44）", () => {
     expect(genCalls).toHaveLength(1);
   });
 
-  it("§69 不存在 PASS/FAIL 阈值：低分也只是普通 completed", async () => {
+  it("§69 不存在 PASS/FAIL 阈值：低分也只是普通 completed，且不影响 validation", async () => {
     withTmpDir();
     const lowScore = fakeReviewer({ ...review, score: 3 });
     const pipeline = new GenerationPipeline(
-      fakePlanner(plan) as never, fakeGenerator("正文") as never, lowScore as never, new ArtifactStore(),
+      fakePlanner(plan) as never, fakeGenerator(STORY) as never,
+      fakeValidator(passed) as never, lowScore as never, new ArtifactStore(),
     );
     const result = await pipeline.run(config);
     expect(result.status).toBe("completed");
     expect(result.review_status).toBe("completed");
     expect(result.review?.score).toBe(3);
-    expect(JSON.stringify(result)).not.toMatch(/pass|fail|needs.?retry|threshold/i);
+    // §59：Review 分数不参与 validation 判定，validation 仍是独立结论
+    expect(result.validation?.passed).toBe(true);
+    // §69：Review 侧不出现 PASS / FAIL / 等级 / 阈值
+    expect(
+      JSON.stringify({ review: result.review, review_status: result.review_status }),
+    ).not.toMatch(/pass|fail|needs.?retry|threshold|grade|tier/i);
+  });
+});
+
+describe("GenerationPipeline — validation stage（§17/§38/§39）", () => {
+  it("§38 调用顺序：Planner → Generator → Save Story → Validator → Save Validation → Reviewer → Save Review", async () => {
+    withTmpDir();
+    const events: string[] = [];
+    const store = new ArtifactStore();
+    const putStory = store.putStory.bind(store);
+    const putValidation = store.putValidation.bind(store);
+    const putReview = store.putReview.bind(store);
+    store.putStory = (r, t, s) => { events.push("save-story"); return putStory(r, t, s); };
+    store.putValidation = (r, v) => { events.push("save-validation"); return putValidation(r, v); };
+    store.putReview = (r, v) => { events.push("save-review"); return putReview(r, v); };
+
+    const pipeline = new GenerationPipeline(
+      { plan: async () => { events.push("plan"); return plan; } } as never,
+      { generate: async () => { events.push("generate"); return STORY; } } as never,
+      { validate: async () => { events.push("validate"); return passed; } } as never,
+      { review: async () => { events.push("review"); return review; } } as never,
+      store,
+    );
+    await pipeline.run(config);
+    expect(events).toEqual([
+      "plan", "generate", "save-story", "validate", "save-validation", "review", "save-review",
+    ]);
+  });
+
+  it("§39 Validation Failed：story.md / validation.json 都在，Review 仍执行，Run 仍 completed，不重新生成", async () => {
+    const dir = withTmpDir();
+    const genCalls: GenCall[] = [];
+    const reviewCalls: ReviewCall[] = [];
+    const pipeline = new GenerationPipeline(
+      fakePlanner(plan) as never,
+      fakeGenerator("太短", genCalls) as never,
+      fakeValidator(failed) as never,
+      fakeReviewer(review, reviewCalls) as never,
+      new ArtifactStore(),
+    );
+
+    const result = await pipeline.run(config);
+    // §18/§39：Validation Failed 是业务结果，不是 Pipeline Crash
+    expect(result.status).toBe("completed");
+    expect(result.validation).toEqual(failed);
+    expect(result.validation?.passed).toBe(false);
+    expect(result.validation_status).toBe("completed");
+    // 正文与校验结果都保留
+    expect(result.story).toBe("太短");
+    expect(existsSync(join(dir, "runs", result.run_id, "story.md"))).toBe(true);
+    expect(existsSync(join(dir, "runs", result.run_id, "validation.json"))).toBe(true);
+    // Review 照常执行
+    expect(reviewCalls).toHaveLength(1);
+    expect(result.review).toEqual(review);
+    expect(result.review_status).toBe("completed");
+    // §58：绝不自动重新生成 / 修复
+    expect(genCalls).toHaveLength(1);
+
+    const meta = readMeta(dir, result.run_id);
+    expect(meta.validation_status).toBe("completed");
+    expect(meta.validation_passed).toBe(false);
+    expect(meta.validation_issue_count).toBe(1);
+    expect(meta.status).toBe("completed");
+  });
+
+  it("§18 EMPTY_CONTENT 时跳过 Review，Run 仍 completed", async () => {
+    const dir = withTmpDir();
+    const reviewCalls: ReviewCall[] = [];
+    const emptyFailed: ValidationResult = {
+      passed: false,
+      issues: [{ code: "EMPTY_CONTENT", severity: "error", message: "正文为空，没有可校验的内容。" }],
+    };
+    const pipeline = new GenerationPipeline(
+      fakePlanner(plan) as never,
+      fakeGenerator("") as never,
+      fakeValidator(emptyFailed) as never,
+      fakeReviewer(review, reviewCalls) as never,
+      new ArtifactStore(),
+    );
+
+    const result = await pipeline.run(config);
+    expect(result.status).toBe("completed");
+    expect(result.validation?.issues[0]?.code).toBe("EMPTY_CONTENT");
+    expect(result.validation_status).toBe("completed");
+    // §18：没有可审阅的正文，跳过 Review
+    expect(reviewCalls).toHaveLength(0);
+    expect(result.review).toBeNull();
+    expect(result.review_status).toBe("not_started");
+    expect(result.artifacts.review).toBeUndefined();
+    expect(existsSync(join(dir, "runs", result.run_id, "review.json"))).toBe(false);
+    // 空正文本身仍然落盘
+    expect(existsSync(join(dir, "runs", result.run_id, "story.md"))).toBe(true);
+  });
+
+  it("§40 Validator 自身异常：正文保留，metadata.validation_status=failed，Story 非空时仍继续 Review", async () => {
+    const dir = withTmpDir();
+    const reviewCalls: ReviewCall[] = [];
+    const pipeline = new GenerationPipeline(
+      fakePlanner(plan) as never,
+      fakeGenerator(STORY) as never,
+      { validate: async () => { throw new Error("Validator 内部规则崩溃"); } } as never,
+      fakeReviewer(review, reviewCalls) as never,
+      new ArtifactStore(),
+    );
+
+    const result = await pipeline.run(config);
+    // §25：Validator Error ≠ Validation Failed，Run 不受影响
+    expect(result.status).toBe("completed");
+    expect(result.validation).toBeNull();
+    expect(result.validation_status).toBe("failed");
+    expect(result.validation_error).toContain("Validator 内部规则崩溃");
+    expect(existsSync(join(dir, "runs", result.run_id, "story.md"))).toBe(true);
+    expect(existsSync(join(dir, "runs", result.run_id, "validation.json"))).toBe(false);
+    expect(result.artifacts.validation).toBeUndefined();
+    // §40：Story 存在时推荐仍继续 Review
+    expect(reviewCalls).toHaveLength(1);
+    expect(result.review_status).toBe("completed");
+
+    const meta = readMeta(dir, result.run_id);
+    expect(meta.validation_status).toBe("failed");
+    expect(meta.validation_error).toContain("Validator 内部规则崩溃");
+    expect(meta.validation_passed).toBeUndefined();
+  });
+
+  it("§59 Review 分数再低也不会改变 validation 结论（Validator 与 Reviewer 独立）", async () => {
+    withTmpDir();
+    const pipeline = new GenerationPipeline(
+      fakePlanner(plan) as never,
+      fakeGenerator(STORY) as never,
+      fakeValidator(failed) as never,
+      fakeReviewer({ ...review, score: 0 }) as never,
+      new ArtifactStore(),
+    );
+    const result = await pipeline.run(config);
+    expect(result.validation?.passed).toBe(false);
+    expect(result.review?.score).toBe(0);
+    expect(result.review_status).toBe("completed");
+    // 反向：高分也不会让失败的校验通过
+    const second = new GenerationPipeline(
+      fakePlanner(plan) as never,
+      fakeGenerator(STORY) as never,
+      fakeValidator(passed) as never,
+      fakeReviewer({ ...review, score: 100 }) as never,
+      new ArtifactStore(),
+    );
+    const r2 = await second.run(config);
+    expect(r2.validation?.passed).toBe(true);
+  });
+
+  it("真实 StoryValidator：过短正文 → TOO_SHORT error，validation.json 落盘", async () => {
+    const dir = withTmpDir();
+    const pipeline = new GenerationPipeline(
+      fakePlanner(plan) as never,
+      fakeGenerator("只有一句话。") as never,
+      new StoryValidator(),
+      fakeReviewer(review) as never,
+      new ArtifactStore(),
+    );
+    const result = await pipeline.run(config);
+    expect(result.validation?.passed).toBe(false);
+    expect(result.validation?.issues.map((i) => i.code)).toContain("TOO_SHORT");
+    expect(existsSync(join(dir, "runs", result.run_id, "validation.json"))).toBe(true);
+    // §39：Review 仍然执行
+    expect(result.review_status).toBe("completed");
   });
 });
