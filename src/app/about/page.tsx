@@ -25,7 +25,7 @@ export default function AboutPage() {
       <div className="mx-auto max-w-2xl space-y-6">
         <div>
           <h1 className="text-lg font-bold tracking-tight">About</h1>
-          <p className="text-xs text-muted-foreground mt-1">一个具备剧情规划、正文生成、基础有效性检查和自动审阅能力的 AI 短篇小说生成器</p>
+          <p className="text-xs text-muted-foreground mt-1">一个具备剧情规划、基础有效性检查、自动审阅、自动重试和定点修订能力的 AI 短篇小说生成器</p>
         </div>
 
         <div className="rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur overflow-hidden">
@@ -38,7 +38,7 @@ export default function AboutPage() {
         </div>
 
         <div className="rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur p-4 sm:p-5 text-xs text-muted-foreground leading-5">
-          本项目按版本逐步公开演进。当前版本已包含提示词工程、StoryConfig 复用、剧情规划、正文生成、基于 Run 的生成流水线、正文的基础有效性检查（硬性规则，回答「基本可用吗」）、基础自动审阅（单一总分 / 摘要 / 优点 / 问题，回答「写得好吗」）与基于确定性策略的自动重试：校验不通过或总分低于阈值时整篇重新生成，直到满足策略或达到尝试次数上限，每次尝试都会单独归档。重试只重新生成整篇正文，不针对具体问题改写句子，也不修改 Ending / Character。多维评审、局部修复、故事改写、PASS / FAIL 质量门禁、实验、基准与自适应生成尚未包含在本版本中，将在后续版本逐步引入。
+          本项目按版本逐步公开演进。当前版本已包含提示词工程、StoryConfig 复用、剧情规划、正文生成、基于 Run 的生成流水线、正文的基础有效性检查（硬性规则，回答「基本可用吗」）、基础自动审阅（单一总分 / 摘要 / 优点 / 问题，回答「写得好吗」）、基于确定性策略的自动重试与定点修订。Attempt 不通过时先按某一条明确的问题（结局、篇幅、主角在场、前后连贯、结构，或审阅指出的具体问题）改写在手的这篇正文，修订后重新校验与重新审阅，修订彻底失败或仍不达标才带着同一份配置整篇重新生成，直到满足策略或达到尝试次数上限；每次尝试与每次修订都会单独归档。定点修订只使用简单问题类别，不做因果诊断，也不做失败归因。多维评审、Best-of-N 择优、PASS / FAIL 质量门禁、实验、基准与自适应生成尚未包含在本版本中，将在后续版本逐步引入。
         </div>
 
         <div className="flex gap-2">
