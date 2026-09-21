@@ -1,9 +1,9 @@
 # Storyloop · AI 故事工场
 
-> 一个具备剧情规划、正文生成、Run 持久化和基础自动审阅能力的 AI 短篇小说生成器。
-> A pipeline-based AI short-story generator with automatic post-generation review.
+> 一个具备剧情规划、正文生成、基础有效性检查和自动审阅能力的 AI 短篇小说生成器。
+> A pipeline-based AI short-story generator with hard validity checking and automatic post-generation review.
 
-## 功能（当前版本 v0.5.0 真实具备）
+## 功能（当前版本 v0.6.0 真实具备）
 
 - 现代 Web UI（暗色玻璃风格 · 响应式 · 深浅主题）
 - **可复用 StoryConfig**：保存 / 加载 / 新建，JSON 文件即配置
@@ -13,26 +13,42 @@
 - **BeatPlan 手动编辑**：增删 Beat、上下移动排序，生成前可反复调整
 - StoryConfig 在规划后发生变化时，BeatPlan 标记为 Outdated
 - **可编辑的外部 Prompt 模板**（`prompts/beat_planner.txt`、`prompts/story.txt`、`prompts/reviewer.txt`）
-- **GenerationPipeline**：一次完整生成 = 一个 Run，固定顺序 Config → Planning → Generation → Save Story → Review → Save Review
+- **GenerationPipeline**：一次完整生成 = 一个 Run，固定顺序 Config → Planning → Generation → Save Story → Validate → Save Validation → Review → Save Review
 - **RunContext + Run ID**：每次运行有唯一 `run_id`（时间戳 + 短随机）与状态 / 阶段记录
-- **Run Artifacts**：产物统一落在 `runs/<run_id>/`（`config.json` / `beats.json` / `story.md` / `review.json` / `metadata.json`），原子写入
+- **Run Artifacts**：产物统一落在 `runs/<run_id>/`（`config.json` / `beats.json` / `story.md` / `validation.json` / `review.json` / `metadata.json`），原子写入
+- **Story Validator（硬性有效性检查）**：正文落盘后立即跑一遍确定性规则，回答「这篇正文基本可用吗」
+- **Hard Failure Detection**：任一规则报 `error` 即 `passed: false`，规则、严重度与说明全部随 Run 返回
+- **Validation JSON Artifact**：校验结果落盘为 `validation.json`，可再次校验覆盖
 - **Basic AI Reviewer**：每次生成的正文自动获得一次基础审阅
 - **Overall 0–100 Score**：单一总分（不含多维度评分）
 - **Strengths & Problems**：优点与问题各一份字符串列表
 - **Review JSON Artifact**：审阅结果落盘为 `review.json`，可再次审阅覆盖
-- **Run 进度与结果 UI**：五阶段进度指示 + Run ID / 产物清单 / Review 面板 / 失败阶段
+- **Run 进度与结果 UI**：六阶段进度指示 + Run ID / 产物清单 / Validation 面板 / Review 面板 / 失败阶段
 - OpenAI-compatible LLM 支持（OpenAI / DeepSeek / 硅基流动 / 任意兼容端点）
 - Markdown 输出 + 生成元数据 JSON
-- CLI 统一走同一条 Pipeline（`scripts/generate-cli.ts run` / `plan` / `review`）
+- CLI 统一走同一条 Pipeline（`scripts/generate-cli.ts run` / `plan` / `review` / `validate`）
 - 本地配置（模型 / Base URL / 温度）
 
-> **Reviewer 的限制**：The reviewer provides feedback only. It does not automatically regenerate or repair the story.
-> 审阅只产出评价，不会因为分数低而重新生成，也不会逐条修复问题；审阅失败时正文与 Run 都保持原样，
-> 你可以手动重新审阅。
+> **Validator 与 Reviewer 是两件事**：
 >
-> 内容评审目前只有单一总分这一种形态：多维评审（Multi-dimensional Review）、故事校验（Story Validation）、
-> Beat 校验（Beat Validation）、自动修复（Repair）、质量重试（Retry Policy）、PASS / FAIL 质量门禁、
-> 实验（Experiment）、基准（Benchmark）、自适应生成（Adaptive Generation）尚未包含在本版本中。
+> | | Story Validator | Basic Reviewer |
+> |---|---|---|
+> | 回答的问题 | 「这篇正文基本可用吗」 | 「这篇故事写得好吗」 |
+> | 实现 | 确定性规则，不调用 LLM | LLM 审阅，主观评价 |
+> | 产出 | `ValidationResult`（`passed` + `issues`） | `ReviewResult`（`score` + `summary` + `strengths` + `problems`） |
+> | 判定性质 | 硬性：`error` 即不通过 | 软性：分数只做反馈 |
+>
+> 两者互不影响：**Review 分数不参与 Validation 判定**——哪怕 Review 打 0 分，校验该过还是过；
+> 哪怕 Review 打 100 分，校验该不过还是不过。
+
+> **Validator 的限制**：The validator only reports. It does not automatically regenerate, repair, extend or rewrite the ending.
+> 校验只给出通过 / 不通过与具体问题，不会因为不通过而重新生成，也不会自动修复、续写或改写结局；
+> 校验失败时正文与 Run 都保持原样，你可以手动重新校验（Validate Again），或自己发起一次新的生成。
+>
+> 本版本只有单一总分这一种评价形态：多维评审（Multi-dimensional Review）、故事改写（Story Repair）、
+> 质量重试（Retry Policy）、PASS / FAIL 质量门禁、商业审阅（Commercial Review）、
+> 实验（Experiment）、基准（Benchmark）、因果归因（Failure Attribution）、自适应生成（Adaptive Generation）
+> 尚未包含在本版本中。
 > 本版本也没有工作流引擎 / DAG / Stage Registry：阶段顺序固定，不能任意跳段。
 
 ## 架构
@@ -43,12 +59,12 @@
 └──────────┬───────────┘
            ▼
 ┌──────────────────────┐
-│   Run API            │  POST /api/runs · POST /api/runs/from-plan · POST /api/review
+│   Run API            │  POST /api/runs · POST /api/runs/from-plan · POST /api/validate · POST /api/review
 └──────────┬───────────┘
            ▼
 ┌──────────────────────┐
-│  GenerationPipeline  │  固定顺序：Config → Planning → Generation → Save Story → Review → Save Review
-│  · run()             │  StoryConfig → BeatPlan → Story → ReviewResult
+│  GenerationPipeline  │  固定顺序：Config → Planning → Generation → Save Story → Validate → Save Validation → Review → Save Review
+│  · run()             │  StoryConfig → BeatPlan → Story → ValidationResult → ReviewResult
 │  · runWithPlan()     │  用户编辑后的 BeatPlan 直接进入生成
 └──────────┬───────────┘
            ▼
@@ -59,6 +75,7 @@
 ┌──────────────────────┐
 │  BeatPlanner         │  prompts/beat_planner.txt → LLM → BeatPlan（可手动编辑）
 │  StoryGenerator      │  prompts/story.txt 渲染（含 Beat Plan）
+│  StoryValidator      │  确定性硬性规则 → ValidationResult（不调用 LLM，只检查，不改写）
 │  BasicReviewer       │  prompts/reviewer.txt → LLM → ReviewResult（只评价，不改写）
 └──────────┬───────────┘
            ▼
@@ -71,8 +88,10 @@
 └──────────────────────┘
 ```
 
-正文先落盘再审阅：即使 Reviewer 调用失败或输出非法，`story.md` 与整个 Run 都保持成功，
-只有 `review_status` 变为 `failed` 并记录原因。
+正文先落盘再校验、再审阅：即使 Validator 自身抛异常或 Reviewer 调用失败 / 输出非法，
+`story.md` 与整个 Run 都保持成功，只有对应的 `validation_status` / `review_status` 变为 `failed` 并记录原因。
+校验不通过（`passed: false`）同样**不是** Run 失败：`status` 仍为 `completed`，
+正文与 `validation.json` 都在，Review 照常执行，系统不会自动重新生成。
 
 ## Run 与产物
 
@@ -87,18 +106,68 @@ runs/
     ├── config.json      # 本次运行使用的 StoryConfig
     ├── beats.json       # 实际采用的 BeatPlan
     ├── story.md         # 生成的正文
-    ├── review.json      # 审阅结果（Review 失败时不存在）
-    └── metadata.json    # run_id / project_version / status / 阶段 / 时间 / 模型 / review_status
+    ├── validation.json  # 硬性校验结果（Validating 阶段失败时不存在）
+    ├── review.json      # 审阅结果（Review 失败或被跳过时不存在）
+    └── metadata.json    # run_id / project_version / status / 阶段 / 时间 / 模型 / validation_status / review_status
 ```
 
 `metadata.json` 的字段：`run_id`、`project_version`、`status`（`created` / `planning` /
-`generating` / `saving` / `reviewing` / `completed` / `failed`）、`current_stage`、`started_at`、`finished_at`、
-`error`、`model`、`artifacts`、`review_status`（`reviewing` / `completed` / `failed`）、`review_error`、
-`review_score`。失败时 `status` 为 `failed`，`error` 为安全错误信息（不含服务器绝对路径），
+`generating` / `saving` / `validating` / `reviewing` / `completed` / `failed`）、`current_stage`、`started_at`、`finished_at`、
+`error`、`model`、`artifacts`、`validation_status`（`validating` / `completed` / `failed`）、
+`validation_passed`（布尔，`validation_status` 为 `completed` 时才有）、`validation_issue_count`、
+`validation_error`（Validator 自身异常时记录）、`review_status`（`reviewing` / `completed` / `failed`）、
+`review_error`、`review_score`。失败时 `status` 为 `failed`，`error` 为安全错误信息（不含服务器绝对路径），
 且已经写出的产物不会被删除。
 
-失败阶段可识别：`config` / `planning` / `generating` / `persistence`。审阅失败不是 Run 失败：
-`status` 仍为 `completed`，只有 `review_status` 为 `failed`。
+失败阶段可识别：`config` / `planning` / `generating` / `persistence`。
+**校验不通过不是 Run 失败**：`status` 仍为 `completed`，`validation_status` 为 `completed`，
+`validation_passed` 为 `false`。**校验器自身崩溃也不是 Run 失败**：`validation_status` 为 `failed`，
+`validation_error` 记录原因，此时不写 `validation.json`。审阅失败同理，只影响 `review_status`。
+
+## ValidationResult
+
+硬性校验的结果是一个扁平结构，只有一个结论和一份问题清单：
+
+| Field | Type | Description |
+|---|---|---|
+| `passed` | boolean | `true` 当且仅当没有 `severity: "error"` 的 issue |
+| `issues` | ValidationIssue[] | 问题清单（可为空数组） |
+
+`ValidationIssue` 也只有三个字段：
+
+| Field | Type | Description |
+|---|---|---|
+| `code` | string | 稳定问题码（见下表） |
+| `severity` | `"warning"` \| `"error"` | 只有两级；`error` 会让 `passed` 变 `false` |
+| `message` | string | 人类可读的具体说明 |
+
+```json
+{
+  "passed": false,
+  "issues": [
+    { "code": "TOO_SHORT", "severity": "error", "message": "正文长度 312 明显短于目标字数（下限 750）。" }
+  ]
+}
+```
+
+内置规则与问题码：
+
+| Code | Severity | 触发条件 |
+|---|---|---|
+| `EMPTY_CONTENT` | error | 正文为空或全是空白字符 |
+| `INVALID_OUTPUT` | error | 拿到的是错误 JSON / API 错误串 / 明显错误对象，而不是小说正文 |
+| `TOO_SHORT` | error | `实际字数 < max(300, target_words × 0.15)` |
+| `POSSIBLE_TRUNCATION` | error | 启发式判定疑似截断：引号未闭合，或结尾停在句子中间 |
+| `MISSING_ENDING` | warning | 结尾缺少终止标点，看起来没有完整收束 |
+| `MISSING_PROTAGONIST` | error | 配置了 `protagonist.name` 但正文中找不到该名字 |
+
+字数统计对中文与英文一视同仁：CJK 字符逐个计数，连续的拉丁字母 / 数字算一个词，
+标点与空白不计入——不用 `len(text.split())` 那种对中文完全失效的方法。
+规则刻意保持宽松，宁可漏报也不误报；`MISSING_PROTAGONIST` 只在配置了主角名时才检查。
+
+没有角色一致性分析、动机分析、故事弧检查、Beat 校验、商业可行性评审——
+Validator 只回答「基本可用吗」，不回答「写得好不好」。
+再次校验会覆盖同一个 `validation.json`，不产生 `validation_v1.json` 或历史版本文件。
 
 ## ReviewResult
 
@@ -131,19 +200,26 @@ cp .env.example .env    # 配置 LLM_BASE_URL / LLM_API_KEY / LLM_MODEL
 npm run dev             # http://localhost:3000
 ```
 
-命令行生成与审阅（与 UI / API 共用同一条 GenerationPipeline）：
+命令行生成、校验与审阅（与 UI / API 共用同一条 GenerationPipeline）：
 
 ```bash
-# 一次完整 Run：StoryConfig → Plan → Generate → Save Story → Review
+# 一次完整 Run：StoryConfig → Plan → Generate → Save Story → Validate → Review
 npx tsx scripts/generate-cli.ts run --config configs/example_story.json
 
 # 手动模式：先单独规划，人工编辑 beats.json 后再生成
 npx tsx scripts/generate-cli.ts plan --config configs/example_story.json --out beats.json
 npx tsx scripts/generate-cli.ts run --config configs/example_story.json --beats beats.json
 
+# 只校验一段已有正文（不生成、不审阅）
+npx tsx scripts/generate-cli.ts validate --config configs/example_story.json --story story.md
+
 # 只审阅已有正文（不生成；带 --run-id 时覆盖该 Run 的 review.json）
 npx tsx scripts/generate-cli.ts review --config configs/example_story.json --story story.md
 ```
+
+`run` 结束时会依次打印 Run ID / Status / Beats / 正文路径 / `Validation: PASSED|FAILED`
+（附每条 issue 的 severity、code 与 message）/ Review Score / Artifacts。
+校验不通过不会让 CLI 以非零码退出——它是一次成功的业务结果，只是结论为不通过。
 
 ## StoryConfig
 
@@ -228,23 +304,32 @@ npx tsx scripts/generate-cli.ts review --config configs/example_story.json --sto
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/runs` | `{config}` → 自动模式完整 Run，返回 `{run_id, status, story, beat_plan, review, review_status, artifacts}` |
+| POST | `/api/runs` | `{config}` → 自动模式完整 Run，返回 `{run_id, status, story, beat_plan, validation, validation_status, validation_error?, review, review_status, artifacts}` |
 | POST | `/api/runs/from-plan` | `{config, beat_plan}` → 手动模式 Run（跳过规划） |
+| POST | `/api/validate` | `{config, story}`（+可选 `run_id`）→ 单独校验正文，返回 `ValidationResult` |
 | POST | `/api/review` | `{config, story}`（+可选 `run_id`）→ 单独审阅正文，返回 `ReviewResult` |
 | POST | `/api/plan` | StoryConfig → BeatPlan（只规划，不生成正文） |
 | POST | `/api/generate` | 兼容入口，等价于 `/api/runs/from-plan` |
 | POST | `/api/prompt/preview` | `config`（+可选 `beat_plan`）→ 渲染后的最终 Prompt（开发预览） |
 | GET | `/api/health` | `{status: "ok"}` |
-| GET | `/api/version` | `{version: "0.5.0"}` |
+| GET | `/api/version` | `{version: "0.6.0"}` |
 
 `artifacts` 是产物文件名映射，例如
 `{"config":"config.json","beat_plan":"beats.json","story":"story.md","metadata":"metadata.json"}`；
-审阅成功时还会多出 `"review":"review.json"`。这些文件位于服务器的 `runs/<run_id>/` 下，
-响应中不会返回服务器绝对路径。
+校验成功时还会多出 `"validation":"validation.json"`，审阅成功时多出 `"review":"review.json"`。
+这些文件位于服务器的 `runs/<run_id>/` 下，响应中不会返回服务器绝对路径。
 
-审阅结果随 Run 一起返回：`review` 为 `ReviewResult` 或 `null`，`review_status` 为
-`reviewing` / `completed` / `failed`，失败时另有 `review_error`。**审阅失败不会让 Run 失败**——
-`story` 与 `status: "completed"` 照常返回，只是没有 `review`。
+校验与审阅结果都随 Run 一起返回：`validation` 为 `ValidationResult` 或 `null`，
+`validation_status` 为 `validating` / `completed` / `failed`（Validator 自身异常时另有 `validation_error`）；
+`review` 为 `ReviewResult` 或 `null`，`review_status` 为 `reviewing` / `completed` / `failed`。
+**校验不通过不会让 Run 失败**——`story` 与 `status: "completed"` 照常返回，`validation.passed` 为 `false`，
+HTTP 状态码仍然是 200（这是一次成功的业务结果，不是错误）。同样地，`validation_status` 为 `failed`
+只表示校验器自己出了问题，Run 本身依然 `completed`。
+
+`POST /api/validate` 只校验、不生成；带上已存在的 `run_id` 时会覆盖该 Run 的 `validation.json`，
+`run_id` 非法或不存在时返回 400。请求体缺少 `story` 字段或类型不对时返回 400；
+`story` 有值但全是空白则返回 200 + `EMPTY_CONTENT`——那是内容层面的硬失败，不是请求格式错误。
+真实的 LLM 请求失败属于生成错误，不由 Validator 负责。
 
 `POST /api/review` 只审阅、不生成；带上已存在的 `run_id` 时会覆盖该 Run 的 `review.json`，
 `run_id` 非法或不存在时返回 400。
@@ -274,12 +359,18 @@ curl -X POST http://localhost:3000/api/runs/from-plan \
 curl -X POST http://localhost:3000/api/review \
   -H "Content-Type: application/json" \
   --data-binary @review-request.json
+
+# 单独校验一段正文：请求体为 {"config": {...}, "story": "正文文本"}
+curl -X POST http://localhost:3000/api/validate \
+  -H "Content-Type: application/json" \
+  --data-binary @validate-request.json
 ```
 
 > 说明：`target_words` 是目标字数，实际输出长度会受模型能力和上下文窗口影响。
 > `/api/runs` 与 `/api/runs/from-plan` 需要 `config` 字段（缺失或非法返回 400）；
 > 旧版扁平 `{title, prompt}` 请求仍会归一化为 StoryConfig。
-> `/api/review` 需要 `config` 与非空 `story`；审阅用的温度固定为 `0.3`，与生成温度相互独立。
+> `/api/validate` 与 `/api/review` 需要 `config` 与字符串 `story`；审阅用的温度固定为 `0.3`，
+> 与生成温度相互独立。校验不调用 LLM，因此没有温度一说，结果完全确定。
 
 ## Prompt Template
 
@@ -332,8 +423,9 @@ curl -X POST http://localhost:3000/api/review \
 ```bash
 npm test    # artifact-store / basic-reviewer / beat-parser / beat-plan / beat-planner / config-loader /
             # generate-api / generation-pipeline / llm / plan-api / prompt-builder / review-parser /
-            # review-result / run-api / run-context / story-config / story-generator / template-loading /
-            # ui-review / ui-story-config / ui-two-stage / version
+            # review-result / run-api / run-context / story-config / story-generator / story-validator /
+            # template-loading / ui-review / ui-story-config / ui-two-stage / ui-validation /
+            # validation-api / validation-result / version
 ```
 
 所有测试都不调用真实 LLM：LLM 由注入的桩对象或 `fetch` 桩替代。
@@ -350,3 +442,4 @@ npm test    # artifact-store / basic-reviewer / beat-parser / beat-plan / beat-p
 - `CHANGELOG.md`：版本历史
 - `configs/example_story.json`：示例 StoryConfig
 - `prompts/reviewer.txt`：审阅 Prompt 模板
+- `src/lib/validation-rules.ts`：六条硬性校验规则的实现（无外部依赖，可直接阅读）
