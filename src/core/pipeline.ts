@@ -660,6 +660,8 @@ export class GenerationPipeline {
 
       // §30：attempt 根目录的 story.md 代表这个 Attempt 的最终版本 = 修订后版本。
       this.artifactStore.putAttemptStory(rid, attemptNumber, config.title, current);
+      // §29：修订后的正文在 repairs/NN/story.md 里也留一份。
+      this.artifactStore.putRepairStory(rid, attemptNumber, repairNumber, config.title, current);
       // §32：只记录这次修订的前后对比，不做历史 Repair Analytics。
       this.artifactStore.putRepairMetadata(rid, attemptNumber, repairNumber, {
         repair_number: repairNumber,

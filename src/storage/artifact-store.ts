@@ -5,15 +5,27 @@ import type { BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
 import { attemptDirectoryName } from "@/core/generation-attempt";
+import {
+  repairDirectoryName,
+  type RepairMetadata,
+  type RepairRequestRecord,
+} from "@/types/repair";
 
 /**
  * §13/§22 ArtifactStore：只负责创建目录、保存 JSON / Markdown / Metadata、返回路径。
  * 不得调用 LLM、分析内容、决定 Pipeline 流程。§22 File System Only。
  * v0.7.0 新增 Attempt 级产物（§23）与 promote（§28）：不改变既有方法的语义。
+ * v0.8.0 新增 Repair 级产物（§29-§32）与 initial_story.md（§30）：同样是纯追加。
  */
 
 /** §23/§60 attempt 根目录名；§28 Windows 不可靠目录层级命名，这里固定 ASCII。 */
 const ATTEMPTS_DIR = "attempts";
+
+/** §29 repairs 子目录：挂在 attempt 目录内——Repair 不新增 attempt（§17）。 */
+const REPAIRS_DIR = "repairs";
+
+/** §30 首次修订前的初始正文：只有真的发生过修订才写，没修订的 Attempt 不需要它。 */
+const INITIAL_STORY = "initial_story.md";
 
 export class ArtifactStore {
   private runsRoot: string;
@@ -105,6 +117,43 @@ export class ArtifactStore {
   }
 
   // ---------------------------------------------------------------------------
+  // §29-§32 Repair 级产物：runs/<run_id>/attempts/NN/repairs/NN/
+  // ---------------------------------------------------------------------------
+
+  /**
+   * §30 initial_story.md：第一次修订之前保存初始正文。
+   * §30 attempt 根目录的 story.md 始终是该 Attempt 的最终版本，所以初始版本必须另有其名。
+   */
+  putAttemptInitialStory(runId: string, attemptNumber: number, title: string, story: string): string {
+    return this.putText(runId, this.attemptFile(attemptNumber, INITIAL_STORY), `# ${title}\n\n${story}\n`);
+  }
+
+  /** §31 repair request.json：编号 + 类型 + 问题说明，正好三个字段。 */
+  putRepairRequest(runId: string, attemptNumber: number, request: RepairRequestRecord): string {
+    return this.putJson(runId, this.repairFile(attemptNumber, request.repair_number, "request.json"), request);
+  }
+
+  /** §30 修订后正文：attempt 的 story.md 由调用方更新为同一份内容。 */
+  putRepairStory(runId: string, attemptNumber: number, repairNumber: number, title: string, story: string): string {
+    return this.putText(runId, this.repairFile(attemptNumber, repairNumber, "story.md"), `# ${title}\n\n${story}\n`);
+  }
+
+  /** §15：Repair 后必须重新 Validate——结论单独落一份，不覆盖 attempt 的 validation.json。 */
+  putRepairValidation(runId: string, attemptNumber: number, repairNumber: number, validation: ValidationResult): string {
+    return this.putJson(runId, this.repairFile(attemptNumber, repairNumber, "validation.json"), validation);
+  }
+
+  /** §16：Repair 后必须重新 Review——同理，不覆盖 attempt 的 review.json。 */
+  putRepairReview(runId: string, attemptNumber: number, repairNumber: number, review: ReviewResult): string {
+    return this.putJson(runId, this.repairFile(attemptNumber, repairNumber, "review.json"), review);
+  }
+
+  /** §32 Repair metadata：只记录这次修订前后的对比，不做历史 Repair Analytics。 */
+  putRepairMetadata(runId: string, attemptNumber: number, repairNumber: number, metadata: RepairMetadata): string {
+    return this.putJson(runId, this.repairFile(attemptNumber, repairNumber, "metadata.json"), metadata);
+  }
+
+  // ---------------------------------------------------------------------------
   // §28 只读访问：GET /api/runs/{run_id} 与 attempt 详情（§39）只读取内容，
   // 不把服务器绝对路径带进响应（§67）。
   // ---------------------------------------------------------------------------
@@ -112,6 +161,17 @@ export class ArtifactStore {
   /** 已存在的 attempt 编号，升序；只有目录名形如两位数字的才算（§6）。 */
   listAttemptNumbers(runId: string): number[] {
     const dir = join(this.runDir(runId), ATTEMPTS_DIR);
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && /^\d{2}$/.test(e.name))
+      .map((e) => Number(e.name))
+      .filter((n) => Number.isInteger(n) && n >= 1)
+      .sort((a, b) => a - b);
+  }
+
+  /** §40 某个 Attempt 下已存在的 repair 编号，升序；目录规则与 attempt 一致。 */
+  listRepairNumbers(runId: string, attemptNumber: number): number[] {
+    const dir = join(this.runDir(runId), ATTEMPTS_DIR, attemptDirectoryName(attemptNumber), REPAIRS_DIR);
     if (!existsSync(dir)) return [];
     return readdirSync(dir, { withFileTypes: true })
       .filter((e) => e.isDirectory() && /^\d{2}$/.test(e.name))
@@ -128,8 +188,13 @@ export class ArtifactStore {
     return this.readJson(runId, this.attemptFile(attemptNumber, "metadata.json"));
   }
 
+  /** §23 Attempt 级产物的读回：repairs 一并读出来，GET 才能给出修复摘要（§40）。 */
   readAttemptStory(runId: string, attemptNumber: number): string | null {
     return this.readText(runId, this.attemptFile(attemptNumber, "story.md"));
+  }
+
+  readAttemptInitialStory(runId: string, attemptNumber: number): string | null {
+    return this.readText(runId, this.attemptFile(attemptNumber, INITIAL_STORY));
   }
 
   readAttemptValidation(runId: string, attemptNumber: number): ValidationResult | null {
@@ -197,6 +262,17 @@ export class ArtifactStore {
 
   private attemptFile(attemptNumber: number, filename: string): string {
     return `${ATTEMPTS_DIR}/${attemptDirectoryName(attemptNumber)}/${filename}`;
+  }
+
+  /** attempts/NN/repairs/NN/filename（§29）。 */
+  private repairFile(attemptNumber: number, repairNumber: number, filename: string): string {
+    return `${ATTEMPTS_DIR}/${attemptDirectoryName(attemptNumber)}/${REPAIRS_DIR}/${repairDirectoryName(repairNumber)}/${filename}`;
+  }
+
+  /** 解析（不创建）repair 目录路径。 */
+  private repairDirPath(runId: string, attemptNumber: number, repairNumber: number): string {
+    const n = repairDirectoryName(repairNumber);
+    return resolve(this.runDir(runId), ATTEMPTS_DIR, attemptDirectoryName(attemptNumber), REPAIRS_DIR, n);
   }
 
   private rootFile(runId: string, filename: string): string {
