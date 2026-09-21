@@ -7,7 +7,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Storyloop — AI 短篇小说生成器",
-  description: "一个具备剧情规划、正文生成、Run 持久化和基础自动审阅能力的 AI 短篇小说生成器",
+  description: "一个具备剧情规划、正文生成、基础有效性检查和自动审阅能力的 AI 短篇小说生成器",
 };
 
 export default function RootLayout({

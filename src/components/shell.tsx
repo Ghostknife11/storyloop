@@ -35,7 +35,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [version, setVersion] = useState("v0.5.0");
+  const [version, setVersion] = useState("v0.6.0");
   const { resolvedTheme, setTheme } = useTheme();
   useEffect(() => { setMounted(true); }, []);
   useEffect(() => {

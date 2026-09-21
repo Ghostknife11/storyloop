@@ -17,16 +17,72 @@ All notable changes to Storyloop.
 
 ### Changed
 
-- 版本 tag 由 `v0.x.x` 改为 `0.x.x`（`0.0.1` ~ `0.5.0`）。GitHub Releases 页按 release 创建时间倒序排列，
+- 版本 tag 由 `v0.x.x` 改为 `0.x.x`（`0.0.1` ~ `0.6.0`）。GitHub Releases 页按 release 创建时间倒序排列，
   而创建时间取自 annotated tag 的 tagger 时间且无法通过接口修改；原 `v0.0.1` / `v0.2.0` 两个 tag 的
   tagger 时间晚于 `v0.4.0`，导致页面版本顺序错乱。改用新 tag 名并将各 tag 的 tagger 时间对齐到其
-  commit 时间后，Releases 页顺序与版本号一致。Release 标题仍带 `v` 前缀（如 `v0.5.0 — Basic Reviewer`）。
-  Release URL 相应变为 `…/releases/tag/0.5.0`
+  commit 时间后，Releases 页顺序与版本号一致。Release 标题仍带 `v` 前缀（如 `v0.6.0 — Story Validator`）。
+  Release URL 相应变为 `…/releases/tag/0.6.0`
 
 ### Fixed
 
 - About 页版本说明仍写作「初始公开原型」并声称规划尚未包含，与 v0.3.0 起已具备的 Beat 规划不符；改为按当前版本实际能力描述（规划已具备，评审 / 校验 / 修复 / 重试 / 实验 / 基准 / 自适应尚未包含）
 - About 页副标题与页面 metadata 的「生成原型」统一为「生成器」，与 README 一致
+
+---
+
+## [0.6.0] —— 2026-09-21
+
+### Added
+
+- Story Validator（`src/lib/story-validator.ts` + `src/lib/validation-rules.ts`）：正文落盘后的硬性有效性检查，
+  回答「这篇正文基本可用吗」。不调用 LLM，纯确定性规则
+- `ValidationResult` / `ValidationIssue` 模型与校验（`src/types/validation-result.ts`）：
+  `{passed, issues}` 与 `{code, severity, message}`
+- Severity 只有 `warning` / `error` 两级：任一 `error` 即 `passed: false`，只有 warning 或全无时 `passed: true`
+- 六条稳定问题码的校验规则：`EMPTY_CONTENT` / `INVALID_OUTPUT` / `TOO_SHORT` /
+  `POSSIBLE_TRUNCATION` / `MISSING_ENDING` / `MISSING_PROTAGONIST`
+- 长度下限 `max(300, target_words × 0.15)`，配一视同仁的字数统计：CJK 字符逐个计数、连续拉丁字母 / 数字算一个词，
+  标点与空白不计入（不用对中文失效的 `len(text.split())`）
+- 截断启发式：引号未闭合、结尾停在句子中间、缺少终止标点——刻意宽松，宁可漏报不误报
+- 主角存在性检查只在配置了 `protagonist.name` 时执行；没有角色一致性 / 动机 / 故事弧分析
+- Validation JSON artifacts：`runs/<run_id>/validation.json`，重复校验时覆盖同一文件
+- Validation stage in `GenerationPipeline`：Save Story 之后、Review 之前
+- Validation status in run metadata：`validation_status` / `validation_passed` / `validation_issue_count` /
+  `validation_error`；`validation_status` 区分「校验不通过」（`completed` + `passed: false`）
+  与「校验器自身异常」（`failed`）
+- Validation panel in the modern UI：独立于 Review 的校验区块，展示 Passed / Failed 与每条 Issue 的
+  Code / Severity / Message，失败时保留正文并提供「Validate Again」
+- Manual validation endpoint：`POST /api/validate`（`{config, story}`，可选 `run_id` 覆盖该 Run 的 validation.json）
+- CLI `validate` 子命令，与 Pipeline 共用同一个 `StoryValidator`；`run` 结束时报 `Validation: PASSED|FAILED`
+- Tests：validation-result / story-validator / validation-api / ui-validation
+
+### Changed
+
+- 固定阶段顺序由 Config → Planning → Generation → Save Story → Review → Save Review 扩展为
+  Config → Planning → Generation → Save Story → **Validate → Save Validation** → Review → Save Review
+- `RunStatus` 新增 `validating`；UI 进度指示由五阶段改为六阶段
+- `POST /api/runs` 与 `/api/runs/from-plan` 的响应新增 `validation` / `validation_status` / `validation_error?`
+- `GenerationPipeline` 构造参数新增 `StoryValidator`；`RunDeps` 新增可选 `validator`
+- README 定位改为「具备剧情规划、正文生成、基础有效性检查和自动审阅能力」，并明确区分
+  Validator（硬性 · 规则 · 可用吗）与 Reviewer（软性 · LLM · 写得好吗）
+
+### Fixed
+
+- `POST /api/validate` 曾把「有值但全是空白」的 `story` 当请求格式错误返回 400，使 `EMPTY_CONTENT`
+  无法经由 API 触发；现在只有 `story` 缺失或类型不为字符串才返回 400，空白正文交由 `EMPTY_CONTENT` 规则报告
+- 六条校验规则的提示信息原为英文，与项目其余部分的中文不一致；统一改为中文
+- `tsx` 被 README 的 `npx tsx scripts/generate-cli.ts` 使用却未在 `package.json` 中声明，
+  导致文档中的 CLI 命令无法直接运行
+
+### Compatibility
+
+- 校验不通过不会让 Run 失败：`story.md`、`validation.json` 与 `status: "completed"` 照常返回，
+  `validation.passed` 为 `false`，HTTP 状态码仍为 200（这是一次成功的业务结果，不是错误）
+- Validator 自身抛异常也不是 Run 失败：正文保留，`validation_status` 为 `failed` 并记录 `validation_error`，
+  此时不写 `validation.json`；Story 非空时 Review 仍照常执行
+- `EMPTY_CONTENT` 时跳过 Review（没有可审阅的正文），但空正文本身仍会落盘
+- The validator reports only. It does not automatically regenerate, repair, extend or rewrite the ending.
+- Review 分数不参与 Validation 判定：哪怕 Review 打 0 分，校验该过还是过；打 100 分，该不过还是不过
 
 ---
 
