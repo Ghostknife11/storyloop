@@ -1,9 +1,9 @@
 # Storyloop · AI 故事工场
 
-> 一个具备剧情规划、正文生成、基础有效性检查和自动审阅能力的 AI 短篇小说生成器。
-> A pipeline-based AI short-story generator with hard validity checking and automatic post-generation review.
+> 一个具备剧情规划、正文生成、基础有效性检查、自动审阅与自动重试能力的 AI 短篇小说生成器。
+> A pipeline-based AI short-story generator with hard validity checking, automatic post-generation review, and automatic retries.
 
-## 功能（当前版本 v0.6.0 真实具备）
+## 功能（当前版本 v0.7.0 真实具备）
 
 - 现代 Web UI（暗色玻璃风格 · 响应式 · 深浅主题）
 - **可复用 StoryConfig**：保存 / 加载 / 新建，JSON 文件即配置
@@ -13,9 +13,9 @@
 - **BeatPlan 手动编辑**：增删 Beat、上下移动排序，生成前可反复调整
 - StoryConfig 在规划后发生变化时，BeatPlan 标记为 Outdated
 - **可编辑的外部 Prompt 模板**（`prompts/beat_planner.txt`、`prompts/story.txt`、`prompts/reviewer.txt`）
-- **GenerationPipeline**：一次完整生成 = 一个 Run，固定顺序 Config → Planning → Generation → Save Story → Validate → Save Validation → Review → Save Review
+- **GenerationPipeline**：一次完整生成 = 一个 Run，固定顺序 Config → Planning →〔Attempt 1: Generate → Save Story → Validate → Review → 重试判定〕→ Finalize；一次 Run 可包含多次 Attempt
 - **RunContext + Run ID**：每次运行有唯一 `run_id`（时间戳 + 短随机）与状态 / 阶段记录
-- **Run Artifacts**：产物统一落在 `runs/<run_id>/`（`config.json` / `beats.json` / `story.md` / `validation.json` / `review.json` / `metadata.json`），原子写入
+- **Run Artifacts**：产物统一落在 `runs/<run_id>/`（`config.json` / `beats.json` / `story.md` / `validation.json` / `review.json` / `metadata.json`），每次 Attempt 的产物另存 `attempts/NN/`
 - **Story Validator（硬性有效性检查）**：正文落盘后立即跑一遍确定性规则，回答「这篇正文基本可用吗」
 - **Hard Failure Detection**：任一规则报 `error` 即 `passed: false`，规则、严重度与说明全部随 Run 返回
 - **Validation JSON Artifact**：校验结果落盘为 `validation.json`，可再次校验覆盖
@@ -23,11 +23,15 @@
 - **Overall 0–100 Score**：单一总分（不含多维度评分）
 - **Strengths & Problems**：优点与问题各一份字符串列表
 - **Review JSON Artifact**：审阅结果落盘为 `review.json`，可再次审阅覆盖
-- **Run 进度与结果 UI**：六阶段进度指示 + Run ID / 产物清单 / Validation 面板 / Review 面板 / 失败阶段
+- **Automatic Retry（自动重试）**：生成失败、校验不通过或总分低于阈值时按确定性策略整篇重新生成，直到被接受或达到尝试次数上限
+- **RetryPolicy**：`max_attempts`（默认 2，含首次生成）/ `min_review_score`（默认 70）/ `retry_on_validation_failure`（默认 true）三项，运行前可配置
+- **GenerationAttempt**：每次尝试单独记录编号、正文、校验、审阅、是否接受与原因，产物落在 `attempts/01/`、`attempts/02/` …
+- **quality_status**：Run 级结论只有 `accepted`（第一次满足策略的尝试被接受）与 `exhausted`（达到上限仍未满足）两种
+- **Run 进度与结果 UI**：六阶段进度指示 + Attempt 计数 + Run ID / 产物清单 / Validation 面板 / Review 面板 / 失败阶段
 - OpenAI-compatible LLM 支持（OpenAI / DeepSeek / 硅基流动 / 任意兼容端点）
 - Markdown 输出 + 生成元数据 JSON
 - CLI 统一走同一条 Pipeline（`scripts/generate-cli.ts run` / `plan` / `review` / `validate`）
-- 本地配置（模型 / Base URL / 温度）
+- 本地配置（模型 / Base URL / 温度 / 自动重试字段）
 
 > **Validator 与 Reviewer 是两件事**：
 >
@@ -41,14 +45,15 @@
 > 两者互不影响：**Review 分数不参与 Validation 判定**——哪怕 Review 打 0 分，校验该过还是过；
 > 哪怕 Review 打 100 分，校验该不过还是不过。
 
-> **Validator 的限制**：The validator only reports. It does not automatically regenerate, repair, extend or rewrite the ending.
-> 校验只给出通过 / 不通过与具体问题，不会因为不通过而重新生成，也不会自动修复、续写或改写结局；
-> 校验失败时正文与 Run 都保持原样，你可以手动重新校验（Validate Again），或自己发起一次新的生成。
+> **自动重试只重新生成整篇正文**：校验不通过或总分低于 `min_review_score` 时，系统带着同一个
+> StoryConfig 与同一份 BeatPlan 再生成一次完整正文，绝不针对具体问题改写句子、修改 Ending / Character，
+> 也不做局部修复。重试由确定性策略驱动，没有学习、没有自适应：同样的输入得到同样的重试次数。
+> Reviewer 自身调用失败不是重试理由（这时该次尝试因拿到分数而被接受），Validator 自身异常也不算正文失败。
+> 达到 `max_attempts` 后硬停止：Run 以 `exhausted` 结束，已产出的所有 Attempt 产物都保留。
 >
-> 本版本只有单一总分这一种评价形态：多维评审（Multi-dimensional Review）、故事改写（Story Repair）、
-> 质量重试（Retry Policy）、PASS / FAIL 质量门禁、商业审阅（Commercial Review）、
-> 实验（Experiment）、基准（Benchmark）、因果归因（Failure Attribution）、自适应生成（Adaptive Generation）
-> 尚未包含在本版本中。
+> 本版本仍然没有：Story 局部修复与定点改写、多维评审、Best-of-N 择优、PASS / FAIL 质量门禁、
+> 商业审阅（Commercial Review）、实验（Experiment）、基准（Benchmark）、
+> 因果归因（Failure Attribution）、自适应生成（Adaptive Generation）。
 > 本版本也没有工作流引擎 / DAG / Stage Registry：阶段顺序固定，不能任意跳段。
 
 ## 架构
@@ -63,9 +68,10 @@
 └──────────┬───────────┘
            ▼
 ┌──────────────────────┐
-│  GenerationPipeline  │  固定顺序：Config → Planning → Generation → Save Story → Validate → Save Validation → Review → Save Review
+│  GenerationPipeline  │  固定顺序：Config → Planning →〔Attempt 1..max_attempts: Generate → Save Story → Validate → Review → 重试判定 〕→ Finalize
 │  · run()             │  StoryConfig → BeatPlan → Story → ValidationResult → ReviewResult
 │  · runWithPlan()     │  用户编辑后的 BeatPlan 直接进入生成
+│  · RetryPolicy       │  max_attempts / min_review_score / retry_on_validation_failure（全部尝试共用同一份 BeatPlan）
 └──────────┬───────────┘
            ▼
 ┌──────────────────────┐
@@ -90,8 +96,10 @@
 
 正文先落盘再校验、再审阅：即使 Validator 自身抛异常或 Reviewer 调用失败 / 输出非法，
 `story.md` 与整个 Run 都保持成功，只有对应的 `validation_status` / `review_status` 变为 `failed` 并记录原因。
-校验不通过（`passed: false`）同样**不是** Run 失败：`status` 仍为 `completed`，
-正文与 `validation.json` 都在，Review 照常执行，系统不会自动重新生成。
+一次 Attempt 之后的 RetryDecision 只由确定性规则给出：(1) 生成失败且还有次数 → 重试；
+(2) 校验不通过且策略允许 → 重试；(3) 审阅成功但总分低于 `min_review_score` → 重试；否则接受该次尝试。
+第 (1) 种情况若已到达最后一允许的 Attempt，整个 Run 以 `generating` 阶段失败结束（与 v0.6.0 一致）；
+第 (2)(3) 种情况到达上限则 Run 以 `exhausted` 正常收尾，`selected_attempt` 指向最后一次尝试的正文。
 
 ## Run 与产物
 
@@ -104,25 +112,41 @@
 runs/
 └── 20260920_101530_k3f9aq/
     ├── config.json      # 本次运行使用的 StoryConfig
-    ├── beats.json       # 实际采用的 BeatPlan
-    ├── story.md         # 生成的正文
-    ├── validation.json  # 硬性校验结果（Validating 阶段失败时不存在）
-    ├── review.json      # 审阅结果（Review 失败或被跳过时不存在）
-    └── metadata.json    # run_id / project_version / status / 阶段 / 时间 / 模型 / validation_status / review_status
+    ├── beats.json       # 实际采用的 BeatPlan（多次 Attempt 复用同一份）
+    ├── story.md         # 被选中那一次 Attempt 的正文（selected_attempt）
+    ├── validation.json  # 被选中那一次 Attempt 的硬性校验结果
+    ├── review.json      # 被选中那一次 Attempt 的审阅结果
+    ├── metadata.json    # run_id / project_version / status / 阶段 / 时间 / 模型 / retry 字段 / attempt_count 等
+    └── attempts/        # 每次尝试单独归档（01 起，两位数字）
+        ├── 01/
+        │   ├── story.md       # 该次尝试的正文（与根目录 story.md 同为 `# 标题\n\n正文`）
+        │   ├── validation.json
+        │   ├── review.json
+        │   └── metadata.json  # attempt_number / accepted / retry_reason / review_score / validation_passed 等
+        └── 02/
+            └── ……
 ```
+
+根目录的 `story.md` / `validation.json` / `review.json` 始终对应**被选中的那一次 Attempt**
+（第一个满足策略的尝试；全部未满足时取最后一次）。文件是复制，不是符号链接，Windows 下同样可用。
 
 `metadata.json` 的字段：`run_id`、`project_version`、`status`（`created` / `planning` /
 `generating` / `saving` / `validating` / `reviewing` / `completed` / `failed`）、`current_stage`、`started_at`、`finished_at`、
 `error`、`model`、`artifacts`、`validation_status`（`validating` / `completed` / `failed`）、
 `validation_passed`（布尔，`validation_status` 为 `completed` 时才有）、`validation_issue_count`、
 `validation_error`（Validator 自身异常时记录）、`review_status`（`reviewing` / `completed` / `failed`）、
-`review_error`、`review_score`。失败时 `status` 为 `failed`，`error` 为安全错误信息（不含服务器绝对路径），
-且已经写出的产物不会被删除。
+`review_error`、`review_score`，以及 v0.7.0 新增的重试字段：`max_attempts`、`min_review_score`、
+`retry_on_validation_failure`、`attempt_count`、`selected_attempt`、`quality_status`（`accepted` / `exhausted`）。
+失败时 `status` 为 `failed`，`error` 为安全错误信息（不含服务器绝对路径），
+且已经写出的产物不会被删除。没有重试统计 / 归因字段——那些属于后续版本。
 
 失败阶段可识别：`config` / `planning` / `generating` / `persistence`。
 **校验不通过不是 Run 失败**：`status` 仍为 `completed`，`validation_status` 为 `completed`，
-`validation_passed` 为 `false`。**校验器自身崩溃也不是 Run 失败**：`validation_status` 为 `failed`，
-`validation_error` 记录原因，此时不写 `validation.json`。审阅失败同理，只影响 `review_status`。
+`validation_passed` 为 `false`，此时会按策略自动重试。**校验器自身崩溃也不是 Run 失败**：
+`validation_status` 为 `failed`，`validation_error` 记录原因，此时不写 `validation.json`，也不会触发重试。
+审阅失败同理，只影响 `review_status`。自动重试达到上限也不是 Run 失败：`status` 仍是 `completed`，
+`quality_status` 为 `exhausted`，所有 Attempt 的产物都保留。只有连正文都拿不到时，
+Run 才以 `generating` 阶段失败结束。
 
 ## ValidationResult
 
@@ -192,6 +216,43 @@ Validator 只回答「基本可用吗」，不回答「写得好不好」。
 没有多维评分、严重度、证据定位、置信度，也没有 PASS / FAIL 判定——审阅只提供反馈。
 再次审阅会覆盖同一个 `review.json`，不产生 `review_v1.json` 或历史版本文件。
 
+## RetryPolicy
+
+重试策略是一个扁平结构，只有三个字段，全部有默认值：
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `max_attempts` | integer 1 ~ 5 | `2` | 尝试次数上限，**含第一次生成**；2 = 初次生成 + 最多 1 次自动重试 |
+| `min_review_score` | number 0 ~ 100 | `70` | 单一总分阈值，达到即满足 |
+| `retry_on_validation_failure` | boolean | `true` | 校验不通过是否值得重试 |
+
+每次尝试记作一个 `GenerationAttempt`，也只有固定七个字段：
+
+| Field | Type | Description |
+|---|---|---|
+| `attempt_number` | integer | 编号，从 1 开始，多次尝试单调递增 |
+| `story` | string \| null | 这一次生成的正文（生成失败时为 `null`） |
+| `validation` | ValidationResult \| null | 这一次的校验结论 |
+| `review` | ReviewResult \| null | 这一次的审阅结论 |
+| `accepted` | boolean | 是否满足策略并被选中 |
+| `retry_reason` | string \| null | 未接受时的原因，取值只有 `generation_error` / `validation_failed` / `review_score_below_threshold` |
+| `error` | string \| null | 阶段自身异常的安全说明（不含路径） |
+
+一次 Run 里的 RetryDecision 按固定顺序判断，没有权重、没有随机、没有模型参与：
+
+1. 生成失败且还有剩余次数 → `generation_error`；
+2. 校验不通过且 `retry_on_validation_failure` 为 true → `validation_failed`；
+3. 审阅成功但 `review.score < min_review_score` → `review_score_below_threshold`；
+4. 以上都不命中 → 接受当前尝试。
+
+两个组件自身异常的处理：Reviewer 调用失败/输出非法只让该次尝试拿不到分数，**不会**触发重试；
+Validator 自身异常只作废「校验不通过」这一格判据，不会把正文判为失败。
+到达 `max_attempts` 后硬停止——不存在 `while not accepted: regenerate()` 这种循环。
+
+`quality_status` 是 Run 级结论，只有两种取值：`accepted`（第一次满足策略的尝试被接受）与
+`exhausted`（达到上限仍未满足，此时 `selected_attempt` 指向最后一次尝试）。
+系统不会在多次尝试里挑一个「最好的」——没有 Best-of-N 择优，也没有重试统计与归因。
+
 ## 快速开始
 
 ```bash
@@ -203,12 +264,15 @@ npm run dev             # http://localhost:3000
 命令行生成、校验与审阅（与 UI / API 共用同一条 GenerationPipeline）：
 
 ```bash
-# 一次完整 Run：StoryConfig → Plan → Generate → Save Story → Validate → Review
+# 一次完整 Run：StoryConfig → Plan → Generate → Save Story → Validate → Review（自动重试最多再生成一次）
 npx tsx scripts/generate-cli.ts run --config configs/example_story.json
 
 # 手动模式：先单独规划，人工编辑 beats.json 后再生成
 npx tsx scripts/generate-cli.ts plan --config configs/example_story.json --out beats.json
 npx tsx scripts/generate-cli.ts run --config configs/example_story.json --beats beats.json
+
+# 自定义重试策略：最多 3 次尝试、总分阈值 80、校验失败不重试
+npx tsx scripts/generate-cli.ts run --config configs/example_story.json --max-attempts 3 --min-score 80 --no-retry-on-validation-failure
 
 # 只校验一段已有正文（不生成、不审阅）
 npx tsx scripts/generate-cli.ts validate --config configs/example_story.json --story story.md
@@ -217,9 +281,11 @@ npx tsx scripts/generate-cli.ts validate --config configs/example_story.json --s
 npx tsx scripts/generate-cli.ts review --config configs/example_story.json --story story.md
 ```
 
-`run` 结束时会依次打印 Run ID / Status / Beats / 正文路径 / `Validation: PASSED|FAILED`
-（附每条 issue 的 severity、code 与 message）/ Review Score / Artifacts。
-校验不通过不会让 CLI 以非零码退出——它是一次成功的业务结果，只是结论为不通过。
+`run` 结束时会依次打印 Run ID / Status / 每次 Attempt 的结论（`Attempt 2: review 63 → retry` 这样的单行）、
+Quality Status（`accepted` / `exhausted`）/ Selected Attempt / 正文路径 /
+`Validation: PASSED|FAILED`（附每条 issue 的 severity、code 与 message）/ Review Score / Artifacts / Attempts 目录。
+校验不通过不会让 CLI 以非零码退出——它是一次成功的业务结果，只是结论为不通过；
+`exhausted` 同样正常退出（业务收尾，不是程序失败），只有生成失败或参数非法才返回非零码。
 
 ## StoryConfig
 
@@ -298,21 +364,28 @@ npx tsx scripts/generate-cli.ts review --config configs/example_story.json --sto
 }
 ```
 
-> 生成失败或计划非法时，Storyloop 只报告错误并保留你已编辑的 BeatPlan，不会自动重试或自动改写（重试由你手动触发）。
+> 生成失败或计划非法时，Storyloop 只报告错误并保留你已编辑的 BeatPlan：自动重试只会带着同一份
+> BeatPlan 整篇重新生成，不会改写它，也不会针对具体问题修改句子。
 
 ## API
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/runs` | `{config}` → 自动模式完整 Run，返回 `{run_id, status, story, beat_plan, validation, validation_status, validation_error?, review, review_status, artifacts}` |
-| POST | `/api/runs/from-plan` | `{config, beat_plan}` → 手动模式 Run（跳过规划） |
+| POST | `/api/runs` | `{config, retry_policy?}` → 自动模式完整 Run，返回 `{run_id, status, story, beat_plan, validation, validation_status, validation_error?, review, review_status, quality_status, attempt_count, selected_attempt, attempts, artifacts}` |
+| POST | `/api/runs/from-plan` | `{config, beat_plan, retry_policy?}` → 手动模式 Run（跳过规划） |
 | POST | `/api/validate` | `{config, story}`（+可选 `run_id`）→ 单独校验正文，返回 `ValidationResult` |
 | POST | `/api/review` | `{config, story}`（+可选 `run_id`）→ 单独审阅正文，返回 `ReviewResult` |
 | POST | `/api/plan` | StoryConfig → BeatPlan（只规划，不生成正文） |
 | POST | `/api/generate` | 兼容入口，等价于 `/api/runs/from-plan` |
 | POST | `/api/prompt/preview` | `config`（+可选 `beat_plan`）→ 渲染后的最终 Prompt（开发预览） |
+| GET | `/api/runs/<run_id>` | 读回一次 Run 与它的 Attempt 摘要（`<run_id>` 非法或不存在时 400 / 404） |
+| GET | `/api/runs/<run_id>/attempts/<n>` | 读回某一次 Attempt 的详情（`<n>` 非法或不存在时 400 / 404） |
 | GET | `/api/health` | `{status: "ok"}` |
-| GET | `/api/version` | `{version: "0.6.0"}` |
+| GET | `/api/version` | `{version: "0.7.0"}` |
+
+`retry_policy` 可省略，省略时用默认值 `{max_attempts: 2, min_review_score: 70, retry_on_validation_failure: true}`。
+它不属于 StoryConfig，因此不会写进 `config.json`，只会记录在 Run 的 `metadata.json` 里。
+非法值（`max_attempts` 不是 1 ~ 5 的整数、`min_review_score` 越出 0 ~ 100）返回 400，Run 不会开始。
 
 `artifacts` 是产物文件名映射，例如
 `{"config":"config.json","beat_plan":"beats.json","story":"story.md","metadata":"metadata.json"}`；
@@ -326,16 +399,14 @@ npx tsx scripts/generate-cli.ts review --config configs/example_story.json --sto
 HTTP 状态码仍然是 200（这是一次成功的业务结果，不是错误）。同样地，`validation_status` 为 `failed`
 只表示校验器自己出了问题，Run 本身依然 `completed`。
 
-`POST /api/validate` 只校验、不生成；带上已存在的 `run_id` 时会覆盖该 Run 的 `validation.json`，
-`run_id` 非法或不存在时返回 400。请求体缺少 `story` 字段或类型不对时返回 400；
-`story` 有值但全是空白则返回 200 + `EMPTY_CONTENT`——那是内容层面的硬失败，不是请求格式错误。
-真实的 LLM 请求失败属于生成错误，不由 Validator 负责。
-
-`POST /api/review` 只审阅、不生成；带上已存在的 `run_id` 时会覆盖该 Run 的 `review.json`，
-`run_id` 非法或不存在时返回 400。
+v0.7.0 的 Run 响应还带四个重试字段：`quality_status`（`accepted` / `exhausted`）、
+`attempt_count`（本次 Run 实际做了几次尝试）、`selected_attempt`（被选中那一次尝试的编号）、
+`attempts`（每次尝试的摘要数组：编号 / 是否接受 / 原因 / 分数 / 校验结论，**不含正文**）。
+每次 Attempt 的完整正文与结论用 `GET /api/runs/<run_id>/attempts/<n>` 单独取。
+没有全局 Run 历史接口——读 Run 必须带上 `run_id`。
 
 失败响应形如 `{error: "安全错误信息", run_id?: "...", stage?: "planning"}`，HTTP 状态码：
-`400` 请求体 / 配置 / BeatPlan 非法，`502` LLM 或规划 / 生成失败，`500` 其他内部错误。
+`400` 请求体 / 配置 / BeatPlan / 重试策略非法，`502` LLM 或规划 / 生成失败，`500` 其他内部错误。
 
 ### curl 示例
 
@@ -364,11 +435,23 @@ curl -X POST http://localhost:3000/api/review \
 curl -X POST http://localhost:3000/api/validate \
   -H "Content-Type: application/json" \
   --data-binary @validate-request.json
+
+# 自定义重试策略：最多 3 次尝试、总分阈值 80
+curl -X POST http://localhost:3000/api/runs \
+  -H "Content-Type: application/json" \
+  -d '{"config": '"$(cat configs/example_story.json)"', "retry_policy": {"max_attempts": 3, "min_review_score": 80, "retry_on_validation_failure": true}}'
+
+# 读回一次 Run（含 Attempt 摘要）
+curl http://localhost:3000/api/runs/$(jq -r .run_id run.json)
+
+# 读回一次 Attempt 的完整正文与结论
+curl http://localhost:3000/api/runs/$(jq -r .run_id run.json)/attempts/2
 ```
 
 > 说明：`target_words` 是目标字数，实际输出长度会受模型能力和上下文窗口影响。
 > `/api/runs` 与 `/api/runs/from-plan` 需要 `config` 字段（缺失或非法返回 400）；
 > 旧版扁平 `{title, prompt}` 请求仍会归一化为 StoryConfig。
+> `retry_policy` 可选，缺失或字段非法（类型不对 / 越界）时返回 400，Run 不会开始。
 > `/api/validate` 与 `/api/review` 需要 `config` 与字符串 `story`；审阅用的温度固定为 `0.3`，
 > 与生成温度相互独立。校验不调用 LLM，因此没有温度一说，结果完全确定。
 
@@ -421,14 +504,17 @@ curl -X POST http://localhost:3000/api/validate \
 ## 测试
 
 ```bash
-npm test    # artifact-store / basic-reviewer / beat-parser / beat-plan / beat-planner / config-loader /
-            # generate-api / generation-pipeline / llm / plan-api / prompt-builder / review-parser /
+npm test    # artifact-store / basic-reviewer / beat-parser / beat-plan / beat-planner /
+            # config-loader / generate-api / generation-attempt / generation-pipeline / llm /
+            # plan-api / prompt-builder / retry-api / retry-pipeline / retry-policy / review-parser /
             # review-result / run-api / run-context / story-config / story-generator / story-validator /
-            # template-loading / ui-review / ui-story-config / ui-two-stage / ui-validation /
+            # template-loading / ui-retry / ui-review / ui-story-config / ui-two-stage / ui-validation /
             # validation-api / validation-result / version
 ```
 
 所有测试都不调用真实 LLM：LLM 由注入的桩对象或 `fetch` 桩替代。
+重试相关断言同样只用桩：`GenerationPipeline` 由注入的假 Generator / Validator / Reviewer 驱动，
+用来验证尝试次数、reason 取值与 `quality_status`，从不触发真实模型调用。
 
 ## 技术栈
 
@@ -442,4 +528,5 @@ npm test    # artifact-store / basic-reviewer / beat-parser / beat-plan / beat-p
 - `CHANGELOG.md`：版本历史
 - `configs/example_story.json`：示例 StoryConfig
 - `prompts/reviewer.txt`：审阅 Prompt 模板
+- `src/core/retry-policy.ts`：重试策略与 RetryDecision 的实现（纯函数，无外部依赖，可直接阅读）
 - `src/lib/validation-rules.ts`：六条硬性校验规则的实现（无外部依赖，可直接阅读）
