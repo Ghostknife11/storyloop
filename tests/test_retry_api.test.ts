@@ -82,7 +82,11 @@ function scriptedReviewer(results: ReviewResult[]) {
   return { review: async () => results[Math.min(i++, results.length - 1)] };
 }
 
-/** 走服务层直接注入假组件：测试聚焦 HTTP 契约，不打真实 API。 */
+/**
+ * 走服务层直接注入假组件：测试聚焦 HTTP 契约，不打真实 API。
+ * deps 里同时注入假 Repairer（这里故意「修不好」），否则 buildPipeline 会造一个
+ * 真 StoryRepairer 去打真实 LLM——测试绝不允许发生这种事（§66）。
+ */
 async function runWith(
   body: unknown,
   stories: string[],
@@ -95,6 +99,7 @@ async function runWith(
     generator: scriptedGenerator(stories) as never,
     validator: scriptedValidator(validations) as never,
     reviewer: scriptedReviewer(reviews) as never,
+    repairer: { repair: async () => ({ repaired_story: "", issue_type: "general", success: false, notes: "修订失败：测试用的假 Repairer" }) } as never,
   } as never);
 }
 
@@ -185,6 +190,10 @@ describe("POST /api/runs — retry policy（§37/§51）", () => {
       retry_reason: "review_score_below_threshold",
       review_score: 61,
       validation_passed: true,
+      // §58/§59：Repair 在整篇重试之前先试一次；这里的假 Repairer 修不好，
+      // 所以这一次 Attempt 多出一条失败修订记录，随后才走 Full Retry。
+      repair_count: 1,
+      repairs: [{ repair_number: 1, issue_type: "structure", success: false }],
     });
     // §36：正文默认来自 selected attempt
     expect(body.story).toContain("第二次");

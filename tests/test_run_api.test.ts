@@ -79,6 +79,20 @@ function stubLLM(reviewerOutput?: string, story = LONG_STORY) {
   return fetchMock;
 }
 
+/** 取每条请求的 system 文本，供按角色筛选调用次数用。 */
+function systemOf(init?: RequestInit): string {
+  const b = JSON.parse(String(init?.body)) as { messages?: Array<{ content: string }> };
+  return (b.messages ?? []).map((m) => m.content).join("\n");
+}
+
+/** 按 system 关键词筛 LLM 调用：Planner（剧情策划）/ Reviewer（审阅）/ Repairer（修订）/ Generator（其余）。 */
+function callsWithSystem(
+  fetchMock: { mock: { calls: unknown[][] } },
+  match: (system: string) => boolean,
+) {
+  return fetchMock.mock.calls.filter(([, init]) => match(systemOf(init as RequestInit | undefined)));
+}
+
 function post(url: string, payload: unknown) {
   const body = typeof payload === "string" ? payload : JSON.stringify(payload);
   return new NextRequest(`http://localhost${url}`, {
@@ -208,11 +222,9 @@ describe("POST /api/runs — validation failed（§26/§42/§44）", () => {
     expect(validation.issues.map((i) => i.code)).toContain("MISSING_PROTAGONIST");
     expect(validation.passed).toBe(false);
     // §14/§47：Validation Failed + 默认策略 → 再生成一次；默认 max_attempts=2
-    const genCalls = fetchMock.mock.calls.filter(([, init]) => {
-      const b = JSON.parse(String((init as RequestInit | undefined)?.body)) as { messages?: Array<{ content: string }> };
-      const system = (b.messages ?? []).map((m) => m.content).join("\n");
-      return !system.includes("剧情策划") && !system.includes("审阅");
-    });
+    const genCalls = callsWithSystem(fetchMock, (system) =>
+      !system.includes("剧情策划") && !system.includes("审阅") && !system.includes("修订"),
+    );
     expect(genCalls).toHaveLength(2);
     expect(body.attempt_count).toBe(2);
     expect(body.selected_attempt).toBe(2);
@@ -221,9 +233,32 @@ describe("POST /api/runs — validation failed（§26/§42/§44）", () => {
       "validation_failed",
       "validation_failed",
     ]);
+    // §13/§47：MISSING_PROTAGONIST → character_presence，每个 Attempt 先定点修订再整篇重试。
+    // 修订没有产生新 Attempt（§17），所以 attempt_count 仍是 2，但多出来两次 Repair 调用。
+    const repairCalls = callsWithSystem(fetchMock, (system) => system.includes("修订"));
+    expect(repairCalls).toHaveLength(2);
+    expect(body.repair_count).toBe(2);
+    expect((body.attempts as AttemptSummaryApi[]).map((a) => a.repair_count)).toEqual([1, 1]);
+    expect((body.attempts as AttemptSummaryApi[]).map((a) => a.repairs)).toEqual([
+      [{ repair_number: 1, issue_type: "character_presence", success: false }],
+      [{ repair_number: 1, issue_type: "character_presence", success: false }],
+    ]);
     // §17：正文仍然落盘，selected attempt 已 promote
     expect(existsSync(join(dir, "runs", String(body.run_id), "story.md"))).toBe(true);
     expect(existsSync(join(dir, "runs", String(body.run_id), "attempts", "02", "story.md"))).toBe(true);
+  });
+
+  it("§51-E 请求体关闭 Repair：链路退回 v0.7.0，没有任何 Repair 调用", async () => {
+    const dir = withTmpDir();
+    const fetchMock = stubLLM(undefined, `${"林述安走在长长的走廊里。".repeat(90)}`);
+    const res = await postRuns(post("/api/runs", { config, retry_policy: { enable_repair: false } }));
+    expect(res.status).toBe(200);
+    const body = await readJson(res);
+    const repairCalls = callsWithSystem(fetchMock, (system) => system.includes("修订"));
+    expect(repairCalls).toHaveLength(0);
+    expect(body.repair_count).toBe(0);
+    expect((body.attempts as AttemptSummaryApi[]).every((a) => a.repair_count === 0)).toBe(true);
+    expect(existsSync(join(dir, "runs", String(body.run_id), "story.md"))).toBe(true);
   });
 });
 

@@ -109,10 +109,13 @@ describe("POST /api/runs（v0.6.0 Automatic Run）", () => {
     expect(meta.run_id).toBe(ok.run_id);
     expect(meta.status).toBe("completed");
     expect(meta.current_stage).toBe("completed");
-    expect(meta.project_version).toBe("0.7.0");
+    expect(meta.project_version).toBe("0.8.0");
     // §25：metadata 记录当时生效的策略与 Attempt 结论
     expect(meta.max_attempts).toBe(2);
     expect(meta.min_review_score).toBe(70);
+    // §18：Repair 策略同样落 metadata
+    expect(meta.enable_repair).toBe(true);
+    expect(meta.max_repairs_per_attempt).toBe(1);
     expect(meta.attempt_count).toBe(2);
     expect(meta.selected_attempt).toBe(2);
     expect(meta.quality_status).toBe("exhausted");
