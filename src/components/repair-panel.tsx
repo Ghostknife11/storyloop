@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { CheckCircle2, Loader2, Wrench, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -162,11 +162,14 @@ export function ManualRepair({
   const [issueType, setIssueType] = useState(initial.issue_type);
   const [issueMessage, setIssueMessage] = useState(initial.issue_message);
   const [repairing, setRepairing] = useState(false);
+  /** §35 state 是异步的，双击时第二次回调看到的还是旧值，用 ref 同步挡住。 */
+  const repairingRef = useRef(false);
 
   const canRepair = !repairing && !disabled && story.trim().length > 0 && issueMessage.trim().length > 0;
 
   async function handleRepair() {
-    if (!canRepair) return;
+    if (repairingRef.current) return;
+    repairingRef.current = true;
     setRepairing(true);
     try {
       const result = await repairStory(config, plan, story, issueType, issueMessage.trim(), runtime);
@@ -179,6 +182,7 @@ export function ManualRepair({
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "修订失败");
     } finally {
+      repairingRef.current = false;
       setRepairing(false);
     }
   }

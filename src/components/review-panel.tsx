@@ -15,6 +15,8 @@ export interface ReviewPanelProps {
   reviewStatus: string;
   reviewError?: string | null;
   reReviewing?: boolean;
+  /** §36 没有正文就没有审阅对象，按钮禁用；也避免正在请求时重复提交（§35）。 */
+  disabled?: boolean;
   onReviewAgain?: () => void;
 }
 
@@ -23,6 +25,7 @@ export function ReviewPanel({
   reviewStatus,
   reviewError,
   reReviewing = false,
+  disabled = false,
   onReviewAgain,
 }: ReviewPanelProps) {
   const state = reviewPanelState({ review, reviewStatus, reviewError, reReviewing });
@@ -101,7 +104,13 @@ export function ReviewPanel({
             正文已保留（story.md 未受影响）。可以点击 Review Again 只重新审阅，不会重新生成正文。
           </div>
           {onReviewAgain && (
-            <Button variant="outline" size="sm" className="h-8 rounded-full text-xs" onClick={onReviewAgain}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-full text-xs"
+              onClick={onReviewAgain}
+              disabled={disabled || reReviewing}
+            >
               <RefreshCw className="h-3.5 w-3.5" /> Review Again
             </Button>
           )}

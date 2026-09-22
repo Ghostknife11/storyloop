@@ -16,6 +16,8 @@ export interface ValidationPanelProps {
   validationStatus: string;
   validationError?: string | null;
   revalidating?: boolean;
+  /** §36 没有正文就没有校验对象，按钮禁用；也避免正在请求时重复提交（§35）。 */
+  disabled?: boolean;
   onValidateAgain?: () => void;
 }
 
@@ -29,6 +31,7 @@ export function ValidationPanel({
   validationStatus,
   validationError,
   revalidating = false,
+  disabled = false,
   onValidateAgain,
 }: ValidationPanelProps) {
   const state = validationPanelState({ validation, validationStatus, validationError, revalidating });
@@ -119,6 +122,7 @@ export function ValidationPanel({
               size="sm"
               className="h-8 rounded-full text-xs"
               onClick={onValidateAgain}
+              disabled={disabled || revalidating}
             >
               <RefreshCw className="h-3.5 w-3.5" /> Validate Again
             </Button>
@@ -134,7 +138,13 @@ export function ValidationPanel({
             正文已保留（story.md 未受影响）。可以点击 Validate Again 只重新跑硬性检查，不会重新生成正文。
           </div>
           {onValidateAgain && (
-            <Button variant="outline" size="sm" className="h-8 rounded-full text-xs" onClick={onValidateAgain}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 rounded-full text-xs"
+              onClick={onValidateAgain}
+              disabled={disabled || revalidating}
+            >
               <RefreshCw className="h-3.5 w-3.5" /> Validate Again
             </Button>
           )}

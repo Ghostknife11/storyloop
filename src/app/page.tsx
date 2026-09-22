@@ -205,6 +205,10 @@ export default function GeneratePage() {
   const [loadingAttempt, setLoadingAttempt] = useState<number | null>(null);
   const busyRef = useRef(false);
   const planBusyRef = useRef(false);
+  /** §35 同一原因：state 是异步的，双击时第二次回调看到的还是旧值，
+   *  所以「正在请求」这件事必须用 ref 同步挡住，不能只靠 state。 */
+  const reReviewingRef = useRef(false);
+  const revalidatingRef = useRef(false);
   const stepperTimers = useRef<number[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -448,7 +452,8 @@ export default function GeneratePage() {
 
   // §29/§50 Review Again：只对当前正文重新审阅，绝不重新生成 Story。
   async function handleReviewAgain() {
-    if (reReviewing || !result) return;
+    if (reReviewingRef.current || !result) return;
+    reReviewingRef.current = true;
     setReReviewing(true);
     try {
       const review = await reviewStory(
@@ -467,13 +472,15 @@ export default function GeneratePage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "审阅失败");
     } finally {
+      reReviewingRef.current = false;
       setReReviewing(false);
     }
   }
 
   // §27 Validate Again：只对当前正文重新跑硬性规则，绝不重新生成 Story，也不调用 Reviewer。
   async function handleValidateAgain() {
-    if (revalidating || !result) return;
+    if (revalidatingRef.current || !result) return;
+    revalidatingRef.current = true;
     setRevalidating(true);
     try {
       const validation = await validateStory(formToConfig(form), result.story, result.run_id);
@@ -483,6 +490,7 @@ export default function GeneratePage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "校验失败");
     } finally {
+      revalidatingRef.current = false;
       setRevalidating(false);
     }
   }
@@ -1020,6 +1028,7 @@ export default function GeneratePage() {
                       validationStatus={shownValidationStatus}
                       validationError={result.validation_error}
                       revalidating={revalidating}
+                      disabled={!baseStory}
                       onValidateAgain={handleValidateAgain}
                     />
                     {/* §31 Review 区域：Score / Summary / Strengths / Problems。
@@ -1029,6 +1038,7 @@ export default function GeneratePage() {
                       reviewStatus={shownReviewStatus}
                       reviewError={result.review_error}
                       reReviewing={reReviewing}
+                      disabled={!baseStory}
                       onReviewAgain={handleReviewAgain}
                     />
                     {/* §42 产物清单：只展示文件名，不展示服务端绝对路径（§67） */}

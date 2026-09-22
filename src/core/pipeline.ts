@@ -22,7 +22,7 @@ import type { GenerationAttempt } from "@/core/generation-attempt";
 import { RepairStrategy } from "@/core/repair-strategy";
 import type { RepairRecord } from "@/types/repair";
 import { repairRequestOf } from "@/types/repair";
-import { logger } from "@/lib/logger";
+import { logger, redactSecrets } from "@/lib/logger";
 import { projectVersion as readProjectVersion } from "@/lib/version";
 
 /**
@@ -71,12 +71,13 @@ export interface GenerationResult {
   finished_at: string;
 }
 
-/** §27/§28/§67 安全错误信息：node:fs 的异常文本带服务器绝对路径，
- * 进用户可见的 message / metadata 前先抹掉；原始异常只进服务端技术日志。 */
+/** §27/§28/§67 安全错误信息：node:fs 的异常文本带服务器绝对路径，LLM/HTTP 客户端的
+ * 异常文本可能带回请求头，两者都不该进用户可见的 message / metadata。
+ * 所以每条错误文本都要抹掉绝对路径并脱敏凭据；原始异常只进服务端技术日志。 */
 const ABSOLUTE_PATH = /(?:[A-Za-z]:)?[\\/][^\s'"]*[\\/][^\s'"]*/g;
 
 function safeDetail(raw: string): string {
-  return raw.replace(ABSOLUTE_PATH, "<path>");
+  return redactSecrets(raw.replace(ABSOLUTE_PATH, "<path>"));
 }
 
 function errorDetail(e: unknown): string {

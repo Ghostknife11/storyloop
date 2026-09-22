@@ -50,9 +50,17 @@ export interface RunApiResult {
   attempts: AttemptSummaryApi[];
 }
 
-/** §28 失败时带上 run_id 与 stage，让 UI 能指出失败阶段（不猜）。 */
+/** §28 失败时带上 run_id 与 stage，让 UI 能指出失败阶段（不猜）。
+ *  §34 kind 区分失败来源：网络 / 超时 / 响应不合法 / 服务端返回的错误码。 */
+export type ApiFailureKind = "network" | "timeout" | "invalid_response" | "api";
+
 export class RunApiError extends Error {
-  constructor(message: string, public runId?: string, public stage?: string) {
+  constructor(
+    message: string,
+    public runId?: string,
+    public stage?: string,
+    public kind: ApiFailureKind = "api",
+  ) {
     super(message);
     this.name = "RunApiError";
   }
@@ -88,18 +96,66 @@ export function apiErrorDetailOf(data: unknown, fallback: string): ApiErrorDetai
   return { code: "INTERNAL_ERROR", message: fallback };
 }
 
+/** §34 客户端超时：一次 Run 可能含多次 Attempt 与 transport 重试，所以给得比
+ *  服务端 LLM_TIMEOUT 宽；超时只是让 UI 不必永远转圈，不影响服务端继续跑完。 */
+const REQUEST_TIMEOUT_MS = 300_000;
+
+function isTimeout(e: unknown): boolean {
+  return e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
+}
+
+/**
+ * §33/§34 唯一的请求出口：Network Error / Timeout / Invalid Response / API Error
+ * 四种失败都在这里变成同一类 RunApiError，消息稳定、可直接 Toast。
+ * 组件不再自己 fetch，也不再各自解释异常。
+ */
+async function requestJson(
+  url: string,
+  init: RequestInit | undefined,
+  fallback: string,
+): Promise<unknown> {
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...init,
+      ...(init?.signal ? {} : { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) }),
+    });
+  } catch (e) {
+    if (isTimeout(e)) {
+      throw new RunApiError(
+        `${fallback}：请求超时（超过 ${Math.round(REQUEST_TIMEOUT_MS / 1000)} 秒无响应）`,
+        undefined,
+        undefined,
+        "timeout",
+      );
+    }
+    throw new RunApiError(`${fallback}：网络错误，请检查连接后重试`, undefined, undefined, "network");
+  }
+
+  // §34 Invalid Response：代理 / 中间层可能返回 HTML，res.json() 会抛 SyntaxError
+  let data: unknown = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+
+  if (!res.ok) {
+    const detail = apiErrorDetailOf(data, `${fallback}（HTTP ${res.status}）`);
+    throw new RunApiError(detail.message, detail.run_id, detail.stage);
+  }
+  if (data === null) {
+    throw new RunApiError(`${fallback}：响应不是合法 JSON`, undefined, undefined, "invalid_response");
+  }
+  return data;
+}
+
 async function postRun(url: string, payload: unknown): Promise<RunApiResult> {
-  const res = await fetch(url, {
+  return (await requestJson(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    const detail = apiErrorDetailOf(data, `生成失败（HTTP ${res.status}）`);
-    throw new RunApiError(detail.message, detail.run_id, detail.stage);
-  }
-  return data as RunApiResult;
+  }, "生成失败")) as RunApiResult;
 }
 
 /** §27/§28 第一阶段：StoryConfig → BeatPlanner → BeatPlan。 */
@@ -107,14 +163,11 @@ export async function planStory(
   config: StoryConfig,
   runtime: { model?: string; baseUrl?: string; temperature?: number },
 ): Promise<BeatPlan> {
-  const res = await fetch("/api/plan", {
+  return (await requestJson("/api/plan", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...config, ...runtime }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(apiErrorDetailOf(data, `规划失败（HTTP ${res.status}）`).message);
-  return data as BeatPlan;
+  }, "规划失败")) as BeatPlan;
 }
 
 /** §37 RetryPolicy 由设置页下发，不属于 StoryConfig。
@@ -207,10 +260,11 @@ export interface AttemptDetailApi {
  * §40 没有全局 Run 历史接口，前端也不做历史列表。
  */
 export async function fetchRun(runId: string): Promise<RunDetailApi> {
-  const res = await fetch(`/api/runs/${encodeURIComponent(runId)}`);
-  const data = await res.json();
-  if (!res.ok) throw new Error(apiErrorDetailOf(data, `读取 Run 失败（HTTP ${res.status}）`).message);
-  return data as RunDetailApi;
+  return (await requestJson(
+    `/api/runs/${encodeURIComponent(runId)}`,
+    undefined,
+    "读取 Run 失败",
+  )) as RunDetailApi;
 }
 
 /**
@@ -218,10 +272,11 @@ export async function fetchRun(runId: string): Promise<RunDetailApi> {
  * §35 只做查看，前端不生成比较表 / Score Delta / 排名。
  */
 export async function fetchRunAttempt(runId: string, attemptNumber: number): Promise<AttemptDetailApi> {
-  const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/attempts/${attemptNumber}`);
-  const data = await res.json();
-  if (!res.ok) throw new Error(apiErrorDetailOf(data, `读取 Attempt 失败（HTTP ${res.status}）`).message);
-  return data as AttemptDetailApi;
+  return (await requestJson(
+    `/api/runs/${encodeURIComponent(runId)}/attempts/${attemptNumber}`,
+    undefined,
+    "读取 Attempt 失败",
+  )) as AttemptDetailApi;
 }
 
 /** §30 Prompt Preview（config 必填，beat_plan 可选）。 */
@@ -229,14 +284,12 @@ export async function previewPrompt(
   config: StoryConfig,
   plan?: BeatPlan,
 ): Promise<string> {
-  const res = await fetch("/api/prompt/preview", {
+  const data = (await requestJson("/api/prompt/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(plan ? { config, beat_plan: plan } : config),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(apiErrorDetailOf(data, `预览失败（HTTP ${res.status}）`).message);
-  return data.prompt as string;
+  }, "预览失败")) as { prompt?: unknown };
+  return String(data.prompt ?? "");
 }
 
 /**
@@ -249,14 +302,11 @@ export async function reviewStory(
   runtime: { model?: string; baseUrl?: string; temperature?: number } = {},
   runId?: string,
 ): Promise<ReviewResult> {
-  const res = await fetch("/api/review", {
+  return (await requestJson("/api/review", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ config, story, ...runtime, ...(runId ? { run_id: runId } : {}) }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(apiErrorDetailOf(data, `审阅失败（HTTP ${res.status}）`).message);
-  return data as ReviewResult;
+  }, "审阅失败")) as ReviewResult;
 }
 
 /**
@@ -268,14 +318,11 @@ export async function validateStory(
   story: string,
   runId?: string,
 ): Promise<ValidationResult> {
-  const res = await fetch("/api/validate", {
+  return (await requestJson("/api/validate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ config, story, ...(runId ? { run_id: runId } : {}) }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(apiErrorDetailOf(data, `校验失败（HTTP ${res.status}）`).message);
-  return data as ValidationResult;
+  }, "校验失败")) as ValidationResult;
 }
 
 /** §38 手动定点修订结果：完整修订后正文 + 类型 + 成败（notes 是失败原因）。 */
@@ -288,10 +335,9 @@ export interface RepairResultApi {
 
 /** §43 版本号集中读取：Shell 与 About 页共用同一个入口，不再各自 fetch、各自兜底一份硬编码版本。 */
 export async function fetchProjectVersion(): Promise<string> {
-  const res = await fetch("/api/version");
-  const data = (await res.json()) as { version?: unknown } | null;
-  const version = typeof data?.version === "string" ? data.version.trim() : "";
-  if (!res.ok || version === "") throw new Error(`读取版本失败（HTTP ${res.status}）`);
+  const data = (await requestJson("/api/version", undefined, "读取版本失败")) as { version?: unknown };
+  const version = typeof data.version === "string" ? data.version.trim() : "";
+  if (version === "") throw new RunApiError("读取版本失败：响应里没有版本号", undefined, undefined, "invalid_response");
   return version;
 }
 
@@ -305,7 +351,7 @@ export async function repairStory(
   issueMessage: string,
   runtime: { model?: string; baseUrl?: string; temperature?: number } = {},
 ): Promise<RepairResultApi> {
-  const res = await fetch("/api/repair", {
+  return (await requestJson("/api/repair", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -316,8 +362,5 @@ export async function repairStory(
       issue_message: issueMessage,
       ...runtime,
     }),
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(apiErrorDetailOf(data, `修订失败（HTTP ${res.status}）`).message);
-  return data as RepairResultApi;
+  }, "修订失败")) as RepairResultApi;
 }

@@ -125,6 +125,9 @@ export function toApiError(e: unknown): ApiError {
     if (inner.name === "ValidatorError") {
       return new ApiError("VALIDATION_FAILED_INTERNAL", `Validation failed. 原因：${inner.message}`, 500, runIdOf(e), stageOf(e));
     }
+    if (inner.name === "ArtifactWriteError") {
+      return new ApiError("ARTIFACT_WRITE_FAILED", inner.message, 500, runIdOf(e), stageOf(e));
+    }
     if (USER_ERROR_NAMES.has(inner.name)) {
       return new ApiError("CONFIG_INVALID", inner.message, 400, runIdOf(e), stageOf(e));
     }
