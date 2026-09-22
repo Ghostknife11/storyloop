@@ -3,7 +3,39 @@
 > 一个具备剧情规划、自动审阅、基础验证、自动重试和定点修订能力的 AI 短篇小说生成器。
 > A pipeline-based AI short-story generator with validation, review, automatic retry, and targeted story repair.
 
-## 功能（当前版本 v0.8.0 真实具备）
+## 功能（当前版本 v0.9.0 真实具备）
+
+> **v0.9.0 是加固版本，不是功能版本。** 它没有新增任何质量智能，能力边界与 v0.8.0 逐字一致；
+> 变化全部落在横切工程能力上——配置收口、错误统一、日志结构化、超时与重试加固、产物更稳、
+> CLI 与 API 共用一套逻辑、前端状态更可靠、测试更全、文档更诚实。
+> 下面先列工程能力，再列故事生成能力。
+
+### 工程能力（v0.9.0 新增 / 收口）
+
+- **统一配置来源**（`src/lib/app-config.ts`）：Application Settings 与 LLM Settings 各自单一来源，
+  优先级固定为「请求覆盖 > 环境变量 > 默认值」；不维护等价别名，也没有第二层配置文件
+- **环境变量收口**：`LLM_BASE_URL` / `LLM_MODEL` / `LLM_TIMEOUT` / `LOG_LEVEL` / `RUNS_DIR` 五个，
+  命名统一 UPPER_SNAKE_CASE，`.env.example` 与当前实现一致
+- **API Key 只在服务端**：它只从服务端环境读取一次，不进请求覆盖、不进任何返回值、不进任何产物
+- **结构化日志**（`src/lib/logger.ts`）：DEBUG / INFO / WARNING / ERROR 四级，缺省 INFO；
+  日志带 `run=` / `attempt=` / `repair=` 上下文前缀，密钥自动脱敏；
+  Pipeline 的散落 `console` 全部改为结构化日志
+- **统一错误响应**（`src/lib/api-error.ts`）：所有失败都是 `{error:{code,message,run_id?,stage?}}`，
+  11 个稳定错误码，用户错误 4xx、运行时错误 5xx，响应里永远不出现堆栈
+- **LLM 超时与 transport retry 加固**：单次请求超时由 `LLM_TIMEOUT` 控制（缺省 180000ms），
+  transport retry 硬上限 2 次（即一次 LLM 调用最多 3 个请求），只重试 timeout / 429 / 临时 5xx
+- **transport retry 与 GenerationAttempt retry 是两件事**：前者是单次 HTTP 请求的重发，
+  后者是 Pipeline 级别的「整篇重新生成」，两者互不计数、互不触发
+- **产物写入加固**：路径被限制在 Run 目录内，`mkdirSync` / `copyFileSync` / `renameSync` 失败统一抛
+  `ArtifactWriteError`（只带 Run 内相对文件名，不带服务器绝对路径），失败时已写出的产物不被删除
+- **统一 metadata schema**：run / attempt / repair 三层 metadata 字段收口，
+  `project_version` 由 VERSION 文件单一真源提供
+- **稳定 CLI**：`--help` / `-h`、退出码 0（业务收尾）/ 1（运行时失败）/ 2（参数或配置不合法）；
+  CLI 只调用 `src/lib/generate-service.ts` 的共享函数，没有自己的重试 / 修订实现
+- **前端状态加固**：API 访问集中在一个客户端层，网络 / 超时 / 非法响应 / API 错误统一呈现，
+  请求进行中禁用重复提交，`review` / `validation` 为 `null` 时不会白屏
+
+### 故事生成能力（与 v0.8.0 一致）
 
 - 现代 Web UI（暗色玻璃风格 · 响应式 · 深浅主题）
 - **可复用 StoryConfig**：保存 / 加载 / 新建，JSON 文件即配置
@@ -64,13 +96,20 @@
 >
 > 本版本仍然没有：多维评审、Best-of-N 择优、PASS / FAIL 质量门禁、
 > 商业审阅（Commercial Review）、实验（Experiment）、基准（Benchmark）、
-> 因果归因（Failure Attribution）、自适应生成（Adaptive Generation）。
+> 因果归因（Failure Attribution）、因果图（Causal Graph）、自适应生成（Adaptive Generation）、
+> 自优化（Self Optimization）、高级可观测性（Advanced Observability / Metrics / Trace）。
 > 定点修订只回答「这篇正文哪里不对、按类别改一次」，不回答「为什么会失败」。
 > 本版本也没有工作流引擎 / DAG / Stage Registry：阶段顺序固定，不能任意跳段。
+> 后端没有任何为上述能力预留的隐藏接口——没有的功能就没有入口。
 
 ## 架构
 
 ```
+┌──────────────────────────────────────────┐
+│  横切：app-config · logger · api-error    │  配置单一来源 · 带 run_id 的结构化日志 · 统一错误形状
+└──────────────────────────────────────────┘
+           │
+           ▼
 ┌──────────────────────┐
 │  UI ／ CLI           │  StoryConfig 表单 + Save / Load / New · generate-cli run
 └──────────┬───────────┘
@@ -78,6 +117,10 @@
 ┌──────────────────────┐
 │   Run API            │  POST /api/runs · POST /api/runs/from-plan · POST /api/validate · POST /api/review
 └──────────┬───────────┘
+           ▼
+┌──────────────────────────────────────────┐
+│  generate-service                        │  CLI 与 API 共用同一批函数，不重复实现业务逻辑
+└──────────┬───────────────────────────────┘
            ▼
 ┌──────────────────────┐
 │  GenerationPipeline  │  固定顺序：Config → Planning →〔Attempt 1..max_attempts: Generate → Save Story → Validate → Review → 重试判定 〕→ Finalize
@@ -100,11 +143,11 @@
 └──────────┬───────────┘
            ▼
 ┌──────────────────────┐
-│      LLM Client      │  OpenAI-compatible（system + user）
+│      LLM Client      │  OpenAI-compatible（system + user）· 单次超时 LLM_TIMEOUT · transport retry 硬上限 2 次
 └──────────┬───────────┘
            ▼
 ┌──────────────────────┐
-│    ArtifactStore     │  原子写入 runs/<run_id>/ 下的产物
+│    ArtifactStore     │  原子写入 runs/<run_id>/ 下的产物，写失败抛 ArtifactWriteError
 └──────────────────────┘
 ```
 
@@ -179,6 +222,58 @@ Attempt 发生过修订时，根目录对应的是修订后重新校验 / 重新
 审阅失败同理，只影响 `review_status`。自动重试达到上限也不是 Run 失败：`status` 仍是 `completed`，
 `quality_status` 为 `exhausted`，所有 Attempt 与修订产物都保留。只有连正文都拿不到时，
 Run 才以 `generating` 阶段失败结束。
+
+## 日志
+
+从 v0.9.0 起 Pipeline 不再散落 `console.log`，统一走 `src/lib/logger.ts`。
+四个等级 `DEBUG` / `INFO` / `WARNING` / `ERROR`，缺省 `INFO`，由 `LOG_LEVEL` 决定；
+无法识别的值回落到 `INFO`（确定性优先于猜测）。
+
+每条日志都带上下文前缀，Run 级带 `run_id`，Attempt 内带 `attempt_number`，修订内带 `repair_number`。
+真实输出长这样（`INFO` 走 stdout，`WARNING` / `ERROR` 走 stderr）：
+
+```text
+[run=20260922_101500_ab12cd] INFO planning started
+[run=20260922_101500_ab12cd] INFO planning completed（3 beats）
+[run=20260922_101500_ab12cd attempt=1] INFO attempt not accepted（validation_failed）
+[run=20260922_101500_ab12cd attempt=1 repair=1] INFO repair completed（length）→ still failing
+[run=20260922_101500_ab12cd attempt=1] ERROR generation failed LLMRequestError: LLM API 返回 500
+[run=20260922_101500_ab12cd attempt=1] ERROR validation failed ValidatorError: 规则执行异常
+[run=20260922_101500_ab12cd attempt=1] ERROR review failed ReviewParseError: score 必须是数字
+[run=20260922_101500_ab12cd] ERROR run failed at generating
+[app] ERROR run failed (LLM_TIMEOUT) LLMTimeoutError: LLM 请求超时
+```
+
+日志只记阶段开始 / 完成与异常，不记正文内容、不记配置全文——
+工程日志要能定位问题，不是要把用户的故事抄一份到磁盘上。
+任何输出都会过一遍脱敏：`sk-…`、`Authorization: Bearer …` 与形如 `api_key` / `token` / `password`
+的键值一律打码，密钥不会落进日志文件。
+
+**只做工程日志**：没有 Metrics / Trace / Prometheus / OpenTelemetry / Dashboard——
+那属于 v0.9.0 明确不做的高级可观测性。
+
+## 超时与重试（两层，互不混淆）
+
+Storyloop 有**两种完全不同的重试**，混在一起谈就会说不清「到底重试了几次」：
+
+| | Transport Retry | GenerationAttempt Retry |
+|---|---|---|
+| 重试什么 | 同一次 HTTP 请求原样重发 | 带着同一份 StoryConfig / BeatPlan 整篇重新生成 |
+| 发生在哪 | `src/lib/llm.ts` 内部 | `GenerationPipeline` + `RetryPolicy` |
+| 触发条件 | timeout / 429 / 临时 5xx（500 / 502 / 503 / 504） | 生成失败且还有次数、校验不通过且策略允许、审阅总分低于阈值 |
+| 上限 | 硬上限 2 次，即一次 LLM 调用最多 3 个请求 | `max_attempts`（默认 2，含第一次生成） |
+| 计数到哪 | 不增加 `attempt_number`，日志里也单独看 | 每次都是一个 `GenerationAttempt` |
+
+Transport Retry 只对「换个时刻再试很可能就好了」的情况重发，其余（400 / 401 / 404 / 模型返回错误内容）
+立即失败，不浪费三次请求。它**绝不无限重试**：上限是常量 `MAX_TRANSPORT_RETRIES = 2`，
+不存在「一直重试直到成功」的路径。
+
+单次请求超时由 `LLM_TIMEOUT` 控制，缺省 `180000` 毫秒；transport retry 的各次请求**各自**
+享这个上限，不是三次加起来。超时耗尽后抛出 `LLMTimeoutError`，
+映射为 `LLM_TIMEOUT` + HTTP 504，Run 以对应阶段失败结束——不会变成无限次 GenerationAttempt。
+
+失败异常收敛为三个类：`LLMError`（基类）、`LLMTimeoutError`（超时）、`LLMRequestError`（请求失败，
+可带 HTTP status）。没有 Provider Registry / Model Router / Fallback——那是 v0.9.0 明确不做的。
 
 ## ValidationResult
 
@@ -331,12 +426,56 @@ Validator 自身异常只作废「校验不通过」这一格判据，不会把�
 `exhausted`（达到上限仍未满足，此时 `selected_attempt` 指向最后一次尝试）。
 系统不会在多次尝试里挑一个「最好的」——没有 Best-of-N 择优，也没有重试统计与归因。
 
+## 运行时版本
+
+本项目是纯 Node.js / TypeScript 工程，**没有任何 Python 组件**（仓库里没有 `.py` 文件、
+没有 `requirements.txt` / `pyproject.toml`），因此也不需要 Python 版本。
+
+| 项 | 版本 |
+|---|---|
+| Node.js | >= 20.9.0（Next.js 16 的硬性要求；开发与测试在 Node 24 上完成） |
+| npm | 随 Node 附带（锁定文件由 npm 11 生成） |
+| Python | 不需要 |
+
+`package.json` 没有写 `engines` 字段——上面的 Node 下限来自 Next.js 本身，不是项目自己加的约束。
+
+## 配置来源
+
+四类配置互不越界，各自只有一个来源，不存在「同一个值从两处读、还不一致」的情况：
+
+| 配置 | 来源 | 说明 |
+|---|---|---|
+| **Application Settings** | 环境变量 + 默认值 | `RUNS_DIR` / `LOG_LEVEL` / `LLM_TIMEOUT`；与模型无关，不是每请求可调的 |
+| **LLM Settings** | 请求覆盖 > 环境变量 > 默认值 | `LLM_BASE_URL` / `LLM_MODEL` / `temperature` / `timeoutMs`，全部非敏感 |
+| **StoryConfig** | 请求体 / `configs/*.json` | 故事内容与创作目标（见下文 StoryConfig） |
+| **RetryPolicy** | 请求体可选 `retry_policy` | `max_attempts` / `min_review_score` / `enable_repair` / …（见下文 RetryPolicy） |
+
+优先级固定为「请求覆盖 > 环境变量 > 默认值」，从高到低不随场景变化；
+不维护等价别名（没有 `OPENAI_API_KEY` 这种第二名字），也没有第二层配置文件。
+
+**API Key 不在这张表里**：`LLM_API_KEY` 只在 `src/lib/llm.ts` 里从服务端环境读取一次，
+不进请求覆盖、不进任何返回值、不进任何产物。浏览器永远拿不到它。
+
+环境变量清单（`.env.example` 与实现一致）：
+
+| 变量 | 缺省 | 说明 |
+|---|---|---|
+| `LLM_BASE_URL` | `https://api.openai.com/v1` | 兼容 OpenAI 的接口地址（含 `/v1`） |
+| `LLM_API_KEY` | 空 | API Key；留空时调用真实 LLM 的接口返回可读错误，而不是静默失败 |
+| `LLM_MODEL` | `gpt-4o-mini` | 模型名 |
+| `LLM_TIMEOUT` | `180000` | 单次 LLM 请求超时（毫秒）；transport retry 共用这一个上限 |
+| `LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR`；无法识别的值回落到 `INFO` |
+| `RUNS_DIR` | `runs` | Run 产物根目录（相对仓库根或绝对路径） |
+
+`.env` 已被 `.gitignore` 忽略，绝不提交；仓库里只有空模板 `.env.example`。
+
 ## 快速开始
 
 ```bash
+node --version       # 需要 >= 20.9.0
 npm install
-cp .env.example .env    # 配置 LLM_BASE_URL / LLM_API_KEY / LLM_MODEL
-npm run dev             # http://localhost:3000
+cp .env.example .env # 配置 LLM_BASE_URL / LLM_API_KEY / LLM_MODEL
+npm run dev          # http://localhost:3000
 ```
 
 命令行生成、校验与审阅（与 UI / API 共用同一条 GenerationPipeline）：
@@ -360,6 +499,10 @@ npx tsx scripts/generate-cli.ts validate --config configs/example_story.json --s
 
 # 只审阅已有正文（不生成；带 --run-id 时覆盖该 Run 的 review.json）
 npx tsx scripts/generate-cli.ts review --config configs/example_story.json --story story.md
+
+# 对一段已有正文定点修订一次（手动入口，不受 enable_repair 影响，改了不写盘）
+npx tsx scripts/generate-cli.ts repair --config configs/example_story.json --beats beats.json \
+  --story story.md --issue-type ending --issue-message "故事缺少明确结局。" --out repaired.md
 ```
 
 `run` 结束时会依次打印 Run ID / Status / 每次 Attempt 的结论（`Attempt 2: review 63 → retry` 这样的单行）、
@@ -389,7 +532,32 @@ Review after repair: —
 Attempt 2: validation failed → retry
 ```
 校验不通过不会让 CLI 以非零码退出——它是一次成功的业务结果，只是结论为不通过；
-`exhausted` 同样正常退出（业务收尾，不是程序失败），只有生成失败或参数非法才返回非零码。
+`exhausted` 同样正常退出（业务收尾，不是程序失败）。
+
+退出码从 v0.9.0 起固定为三个值，可脚本化判断：
+
+| 退出码 | 含义 | 例子 |
+|---|---|---|
+| `0` | 正常结束（含校验不通过与 `exhausted`） | `validate` 结论 FAILED |
+| `1` | 运行时失败 | 模型调用失败、产物写入失败 |
+| `2` | 参数或配置不合法 | 没有子命令、未知 flag、缺 `--config`、配置文件不是合法 JSON、`--max-attempts` 越界 |
+
+`--help` / `-h` 在任何位置都认，列出一层帮助；每个子命令也有自己的 `--help`：
+
+```bash
+npx tsx scripts/generate-cli.ts --help
+npx tsx scripts/generate-cli.ts run --help
+```
+
+也可以用 `npm run` 脚本（等价）：
+
+```bash
+npm run storygen -- --help
+npm run cli -- run --config configs/example_story.json
+```
+
+CLI 与 Web API 共用 `src/lib/generate-service.ts` 里的同一批函数——
+它没有自己的重试实现、没有自己的修订实现、没有自己的校验规则，行为与 API 逐字一致。
 
 ## StoryConfig
 
@@ -486,7 +654,7 @@ Attempt 2: validation failed → retry
 | GET | `/api/runs/<run_id>` | 读回一次 Run 与它的 Attempt 摘要（`<run_id>` 非法或不存在时 400 / 404） |
 | GET | `/api/runs/<run_id>/attempts/<n>` | 读回某一次 Attempt 的详情（`<n>` 非法或不存在时 400 / 404） |
 | GET | `/api/health` | `{status: "ok"}` |
-| GET | `/api/version` | `{version: "0.8.0"}` |
+| GET | `/api/version` | `{version: "0.9.0"}` |
 
 `retry_policy` 可省略，省略时用默认值 `{max_attempts: 2, min_review_score: 70, retry_on_validation_failure: true, enable_repair: true, max_repairs_per_attempt: 1}`。
 它不属于 StoryConfig，因此不会写进 `config.json`，只会记录在 Run 的 `metadata.json` 里。
@@ -526,8 +694,39 @@ v0.8.0 起 Run 响应还带 `repair_count`（本次 Run 做过几次定点修订
 「没修好」是一次诚实的业务结果，不当成 502 报错。
 没有全局 Run 历史接口——读 Run 必须带上 `run_id`。
 
-失败响应形如 `{error: "安全错误信息", run_id?: "...", stage?: "planning"}`，HTTP 状态码：
-`400` 请求体 / 配置 / BeatPlan / 重试策略 / 修订类别非法，`502` LLM 或规划 / 生成失败，`500` 其他内部错误。
+失败响应从 v0.9.0 起统一为一个形状，`code` 是稳定枚举，`message` 是给人看的一句话：
+
+```json
+{
+  "error": {
+    "code": "CONFIG_INVALID",
+    "message": "StoryConfig 校验失败：target_words 必须是整数。",
+    "run_id": "20260922_101500_ab12cd",
+    "stage": "config"
+  }
+}
+```
+
+`run_id` 与 `stage` 有就带，没有就不出现。`stage` 取值与失败阶段一致：
+`config` / `planning` / `generating` / `persistence`。
+
+11 个稳定错误码与 HTTP 状态码：
+
+| code | HTTP | 什么时候出现 |
+|---|---|---|
+| `CONFIG_INVALID` | 400 | 请求体 / StoryConfig / BeatPlan / RetryPolicy / 修订类别非法 |
+| `RUN_NOT_FOUND` | 404 | `run_id` 不存在或格式非法 |
+| `LLM_TIMEOUT` | 504 | 单次请求超时，且 transport retry 已用尽 |
+| `LLM_REQUEST_FAILED` | 502 | 模型接口返回错误（401 / 429 / 5xx 等）或传输层失败 |
+| `PLANNER_INVALID_OUTPUT` | 502 | 规划阶段拿不到合法 BeatPlan |
+| `GENERATION_FAILED` | 502 | 生成阶段失败（含连正文都没拿到的最后一次 Attempt） |
+| `VALIDATION_FAILED_INTERNAL` | 500 | Validator 自身崩溃（不是「校验不通过」） |
+| `REVIEW_FAILED` | 502 | 单独审阅入口的模型输出非法 |
+| `REPAIR_FAILED` | 502 | 单独修订入口的模型输出非法 |
+| `ARTIFACT_WRITE_FAILED` | 500 | 产物写入失败（磁盘 / 权限 / 目录被占用） |
+| `INTERNAL_ERROR` | 500 | 未预期异常 |
+
+响应里永远不出现堆栈，也不出现服务器绝对路径——堆栈只进服务端日志。
 （修订自身的失败不算错误码：拿不到非空正文时返回 200 + `success: false`。）
 
 ### curl 示例
@@ -652,21 +851,55 @@ Run 按重试策略继续走，也不会写下「修订成功」的假结论。
 ## 测试
 
 ```bash
-npm test    # artifact-store / basic-reviewer / beat-parser / beat-plan / beat-planner /
-            # config-loader / generate-api / generation-attempt / generation-pipeline / llm /
-            # plan-api / prompt-builder / repair-api / repair-models / repair-pipeline /
-            # repair-strategy / retry-api / retry-pipeline / retry-policy / review-parser /
-            # review-result / run-api / run-context / story-config / story-generator /
-            # story-repairer / story-validator / template-loading / ui-repair / ui-retry /
-            # ui-review / ui-story-config / ui-two-stage / ui-validation /
-            # validation-api / validation-result / version
+npm test              # 全部测试
+npm run lint          # eslint
+node node_modules/typescript/bin/tsc --noEmit   # 类型检查
+node node_modules/next/dist/bin/next build       # 生产构建
 ```
+
+测试文件覆盖：`api-error` / `app-config` / `artifact-store` / `basic-reviewer` / `beat-parser` /
+`beat-plan` / `beat-planner` / `cli` / `config-loader` / `frontend-hardening` / `generate-api` /
+`generation-attempt` / `generation-pipeline` / `llm` / `logger` /
+`metadata-schema` / `pipeline-integration` / `plan-api` / `prompt-builder` / `repair-api` / `repair-models` /
+`repair-pipeline` / `repair-strategy` / `retry-api` / `retry-pipeline` / `retry-policy` /
+`review-parser` / `review-result` / `run-api` / `run-context` / `story-config` / `story-generator` /
+`story-repairer` / `story-validator` / `template-loading` / `ui-repair` / `ui-retry` / `ui-review` /
+`ui-story-config` / `ui-two-stage` / `ui-validation` / `validation-api` /
+`validation-result` / `version`。
 
 所有测试都不调用真实 LLM：LLM 由注入的桩对象或 `fetch` 桩替代。
 重试相关断言同样只用桩：`GenerationPipeline` 由注入的假 Generator / Validator / Reviewer 驱动，
 用来验证尝试次数、reason 取值与 `quality_status`，从不触发真实模型调用。
 定点修订的断言同样是桩：修订成功、修订返回空、修订抛 `LLMError`、修订后达标 / 仍不达标、
 `enable_repair = false` 时链路与 v0.7.0 逐字一致、`max_repairs_per_attempt = 0` 时不修订。
+
+v0.9.0 起有两组共享基建（`tests/helpers/fixtures.ts`）与一条全链路集成测试：
+
+- **共享 fixtures**：样例 StoryConfig / BeatPlan / 正文 / 审阅结论 / 校验结论，加 `FakeLLM`
+  （可编排回复序列、可注入异常）、`apiErrorOf`、`repoVersion`、`withTmpDir`。新测试直接复用，
+  不再各写一份假 LLM。
+- **全链路集成测试**（`tests/test_pipeline_integration.test.ts`）：只桩掉 HTTP 传输层，
+  其余全部真实——真实 Prompt 模板、真实 JSON 解析、真实校验规则、真实 transport retry、
+  真实 Pipeline 编排、真实产物落盘。覆盖五条路径：一次通过的 happy path、
+  第一次不通过第二次通过的重试路径、修订后达标的修订路径、用尽次数的 `exhausted` 路径，
+  以及产物写入失败、LLM 超时与 transport retry 上限、配置非法三条边界路径。
+
+## 前端（v0.9.0 收口）
+
+Web UI 的能力边界没有变化，变的是「不可靠的地方变可靠了」：
+
+- **API 访问集中**：所有请求走 `src/lib/api.ts` 一个客户端层，组件里不再散落 `fetch('/api/...')`；
+  每个导出函数最终都经过同一个 `requestJson` 出口，新增接口不可能绕过统一错误处理。
+- **四类失败统一呈现**：`network`（连不上 / DNS / 连接被重置）、`timeout`（超过 5 分钟）、
+  `invalid_response`（响应不是合法 JSON 或缺关键字段）、`api`（服务端返回了带 `code` 的错误体）。
+  四类都以 Toast + 面板内联错误呈现，文案说的是「发生了什么、能做什么」，不弹堆栈。
+- **重复提交被挡住**：Generate / Plan / Validate / Review / Repair 五个动作在请求进行中不可再触发。
+  这里用 ref 而不是 state 判断——state 是异步的，快速双击时第二次回调看到的还是旧值，
+  只看 state 挡不住。
+- **禁用态有明确理由**：没有正文时 Review 与 Validate 直接禁用（没有可审阅 / 可校验的对象）；
+  按钮禁用只表达「现在不能做」，不假装功能不存在。
+- **Null 安全**：`review = null`、`validation = null`、修订记录为空都正常渲染，
+  没有正文 / 没有审阅结果时不会白屏。
 
 ## 技术栈
 
@@ -683,3 +916,7 @@ npm test    # artifact-store / basic-reviewer / beat-parser / beat-plan / beat-p
 - `prompts/repair.txt`：定点修订 Prompt 模板
 - `src/core/retry-policy.ts`：重试策略与 RetryDecision 的实现（纯函数，无外部依赖，可直接阅读）
 - `src/lib/validation-rules.ts`：六条硬性校验规则的实现（无外部依赖，可直接阅读）
+- `src/lib/app-config.ts`：四类配置的来源与优先级（v0.9.0 新增，无外部依赖，可直接阅读）
+- `src/lib/api-error.ts`：11 个稳定错误码与状态码映射（v0.9.0 新增，无外部依赖，可直接阅读）
+- `src/lib/logger.ts`：日志等级、上下文前缀与脱敏规则（v0.9.0 新增）
+- `tests/helpers/fixtures.ts`：共享样例数据与 `FakeLLM`（v0.9.0 新增）

@@ -30,6 +30,58 @@ All notable changes to Storyloop.
 
 ---
 
+## [0.9.0] —— 2026-09-22
+
+### Added
+
+- Unified application configuration（`src/lib/app-config.ts`）：Application 与 LLM 两类设置各自单一来源，
+  优先级固定为「请求覆盖 > 环境变量 > 默认值」，API Key 不出现在配置层
+- Consistent runtime error responses（`src/lib/api-error.ts`）：全部 API 失败统一为
+  `{error:{code,message,run_id?,stage?}}`，11 个稳定错误码，用户错误 4xx、运行时错误 5xx，响应不含堆栈
+- Structured logging with Run IDs（`src/lib/logger.ts`）：DEBUG / INFO / WARNING / ERROR 四级，
+  日志带 run / attempt / repair 上下文前缀，密钥自动脱敏；Pipeline 的散落 console 全部改为结构化日志
+- Hardened LLM timeout and transport retry behavior：`LLMTimeoutError` / `LLMRequestError`，
+  transport retry 硬上限 2 次（单次 LLM 调用最多 3 个请求），只重试 timeout / 429 / 临时 5xx
+- Stable CLI behavior：`--help` / `-h`、退出码 0（业务收尾）/ 1（运行时失败）/ 2（参数或配置非法）、
+  `repair` 子命令；CLI 只调用共享服务，不再有自己的重试 / 修订实现
+- Shared test fixtures and FakeLLM support（`tests/helpers/fixtures.ts`）：样例配置 / BeatPlan / 正文 /
+  审阅结论 + `FakeLLM` + `apiErrorOf` + `repoVersion` + `withTmpDir`
+- End-to-end pipeline integration tests（`tests/test_pipeline_integration.test.ts`）：只桩掉 HTTP 传输层，
+  真实跑完 StoryConfig → Plan → Generate → Validate → Review →（可选 Repair / Retry）→ 产物落盘
+- Release-readiness and security checks：CLI 行为、metadata schema、前端加载 / 错误 / 禁用态测试
+
+### Changed
+
+- Standardized run, attempt and repair artifact metadata：run / attempt / repair 三层 metadata 字段收口，
+  `project_version` 改由 VERSION 文件单一真源提供（`src/lib/version.ts`）
+- Standardized artifact filenames and directory structure：选中 Attempt 的产物提升改为按固定文件名集合遍历，
+  路径解析统一走 `resolveInRun`
+- Consolidated frontend API error handling：`src/lib/api.ts` 全部导出函数收敛到单一 `requestJson` 出口，
+  网络 / 超时 / 非法响应 / API 错误统一成 `RunApiError`（含 `kind`）
+- Improved configuration validation：`ConfigValidationError` 与 JSON 解析失败分离，CLI 与 API 共用同一套解析
+- Improved README and environment setup documentation：README 改为只描述当前版本真实具备的能力，
+  `.env.example` 补齐 `LLM_TIMEOUT` / `LOG_LEVEL` / `RUNS_DIR`
+- Reduced duplicate orchestration across API and CLI：CLI 的 run / plan / review / validate / repair
+  全部走 `src/lib/generate-service.ts` 的同一批函数
+
+### Fixed
+
+- Inconsistent error handling across generation stages：各阶段异常统一收敛为带 stage 的安全错误信息，
+  不再让堆栈或服务器绝对路径外泄
+- Potential duplicate request actions in the UI：Generate / Plan / Validate / Review / Repair 的
+  「正在请求」判断改用 ref 同步挡住，快速双击不会发出第二个请求
+- Path and UTF-8 handling inconsistencies：产物读写全部显式 `utf8`，写入失败统一抛 `ArtifactWriteError`
+  （只带 Run 内相对文件名），不再让磁盘错误以裸 `Error` 形式冒出去
+- Run artifact edge cases：`mkdirSync` / `copyFileSync` / `renameSync` 失败与「产物目录不存在」被单独覆盖，
+  失败时已写出的产物不被删除
+
+> **这是一个加固版本，不是功能版本。** v0.9.0 没有新增任何质量智能：没有多维评审、没有 Beat 校验、
+> 没有商业审阅、没有实验、没有基准、没有高级可观测性、没有失败归因、没有因果图、没有自适应生成、
+> 没有自优化。变化全部落在横切工程能力上——已有模块更可靠、已有流程更一致、已有行为更可测试、
+> 已有产物更稳定。能力边界与 v0.8.0 完全一致。
+
+---
+
 ## [0.8.0] —— 2026-09-23
 
 ### Added
