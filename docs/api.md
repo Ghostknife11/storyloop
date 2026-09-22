@@ -97,6 +97,17 @@
 `AttemptSummary`：`attempt_number`、`accepted`、`retry_reason`（`null` 或原因）、
 `review_score`（可为 `null`）、`validation_passed`（可为 `null`）、`repair_count`、`repairs`。
 
+**发生过修订时，这两处的分数来源不同**（与 [run-artifacts.md](./run-artifacts.md) 的产物语义一致）：
+
+- Run 类入口的 `review` / `validation` 与 `attempts[].review_score` / `validation_passed`
+  来自**入选 Attempt 修订后**的结论——也就是这个 Run 最终采用的那一版；
+- `GET /api/runs/<run_id>/attempts/<attempt_number>` 的 `review` / `validation` 读的是
+  attempt 目录下的 `review.json` / `validation.json`，即该次尝试的**首次**结论；
+  修订后的那份要通过 `repairs[].before_review_score` / `after_review_score` 看变化。
+
+所以同一个 Attempt 在「详情」和「Run 摘要」里看到不同分数不是 bug，详见
+[compatibility.md](./compatibility.md) 的「已知的不对称」。
+
 ### `GET /api/runs/<run_id>`
 
 `RunDetail`，与 Run 入口不同：**没有** `beat_plan` 与 `artifacts`，
