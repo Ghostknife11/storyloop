@@ -60,8 +60,14 @@ Git tag 不带 `v` 前缀（`0.9.1`、`1.0.0`）；GitHub Release 标题带 `v` 
 3. `/api/validate` 收到空字符串 `story` 返回 200 且 `passed: false`（交给规则判 `EMPTY_CONTENT`），
    而不是 400；`/api/review` 则是缺 `story` 就 400。
 4. Run 不存在与 Attempt 不存在共用 `RUN_NOT_FOUND` 这个错误码，只能靠 message 区分。
+5. 发生过修订时，「首次结论」与「修订后结论」落在不同地方：各级目录下的
+   `validation.json` / `review.json` 存**首次**结论，修订后的那份在
+   `attempts/NN/repairs/MM/` 里；而 `metadata.json` 的 `validation_passed` /
+   `validation_issue_count` / `review_score`（以及 API 里对应字段）取**修订后**的结论。
+   因此同一层里「metadata 的分数」与「`review.json` 的 score」可能不同——这不是数据损坏，
+   也不在校正范围内：两边各自语义固定，1.x 内都不会改。
 
-以上四条都有合同测试看守，改动它们属于破坏性变更。
+以上五条都有合同测试看守，改动它们属于破坏性变更。
 
 ## 破坏性变更怎么发布
 
