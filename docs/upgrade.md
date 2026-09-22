@@ -20,6 +20,32 @@
 
 升级后跑一遍 `npm test`：新增的 `tests/test_contract_docs_sync.test.ts` 会核对文档与产物一致。
 
+## 从 1.0.1 升级到 1.1.0
+
+**只有一处行为变化**，其余与 1.0.1 逐字一致：产物布局、字段、CLI、错误码都不变。
+
+1. 请求体里的 `baseUrl` 覆盖现在只允许 http/https 的**公网**地址。带本机、环回、私网、
+   链路本地（含 `169.254.169.254` 云元数据地址）或保留段的请求，从「照常执行」变成
+   400 `CONFIG_INVALID`，而且是在发出任何请求之前就拒掉。
+   完整规则见 [api.md](./api.md) 的「`baseUrl` 覆盖的地址限制」。
+2. 只有「在请求体里 `baseUrl` 指向本地假模型」的联调用法受影响。迁移办法是把同一个地址
+   写到服务端的 `LLM_BASE_URL`：那是运维的受信配置，不受这套规则约束，
+   「服务端指向本地假模型」照旧可用：
+
+   ```bash
+   # 之前：请求体 { "baseUrl": "http://127.0.0.1:9999/v1" }
+   # 现在：服务端 .env
+   LLM_BASE_URL=http://127.0.0.1:9999/v1
+   ```
+
+3. 如果你调的是 `/api/plan`、Run 类入口、`/api/review`、`/api/repair`、`/api/prompt/preview`
+   以外的路径，或者从不覆盖 `baseUrl`，这一版对你没有任何影响。
+4. 收紧的理由是凭据外泄：服务端是拿着 `LLM_API_KEY` 作为 Bearer token 去请求这个地址的，
+   地址却是请求方定的。取舍记录在 [compatibility.md](./compatibility.md)。
+
+升级后跑一遍 `npm test`：新增的 `tests/test_url_guard.test.ts` 会核对地址校验与服务层接线
+（含「拒绝时 `fetch` 一次都没被调用」）。域名解析用注入的假解析器，不真的查 DNS。
+
 ## 从 0.9.x 升级到 1.0.0
 
 ### 行为变化（需要注意的两处）
@@ -65,7 +91,7 @@
 ## 升级操作
 
 ```bash
-git fetch && git checkout 1.0.1     # tag 不带 v 前缀；从 0.9.x 升级时 checkout 1.0.0 亦可
+git fetch && git checkout 1.1.0     # tag 不带 v 前缀；从 0.9.x 升级时 checkout 1.0.0 亦可
 npm install
 cp .env.example .env                # 填入 LLM_API_KEY 后即可跑
 npm run dev                         # Web UI
@@ -79,4 +105,5 @@ npx tsx scripts/generate-cli.ts run --config configs/example_story.json
 
 0.9.x 的产物布局与 1.0.0 兼容（只多两个恒定字段），因此回滚到 0.9.x 不会读不到历史 Run；
 反过来，0.9.x 的代码读 1.0.0 / 1.0.1 写的产物时，`error: null` 与 `model` 会被安全忽略。
-从 1.0.1 回滚到 1.0.0 同理：两边产物逐字节同构，代码差异只有文档与测试。
+从 1.1.0 回滚到 1.0.1 同理：两边产物逐字节同构，代码差异只有新增的 URL 校验与测试；
+回滚后请求体 `baseUrl` 又可以指向任意主机（这正是 1.1.0 收紧掉的行为）。
