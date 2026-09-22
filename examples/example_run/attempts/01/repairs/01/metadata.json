@@ -1,0 +1,9 @@
+{
+  "repair_number": 1,
+  "issue_type": "general",
+  "success": true,
+  "before_review_score": 41,
+  "after_review_score": 82,
+  "before_validation_passed": true,
+  "after_validation_passed": true
+}

@@ -1,0 +1,30 @@
+{
+  "run_id": "20260101_120000_example",
+  "project_version": "1.0.0",
+  "status": "completed",
+  "started_at": "2026-01-01T12:00:00.000Z",
+  "model": "gpt-4o-mini",
+  "current_stage": "completed",
+  "max_attempts": 2,
+  "min_review_score": 70,
+  "enable_repair": true,
+  "max_repairs_per_attempt": 1,
+  "repair_count": 1,
+  "attempt_count": 1,
+  "selected_attempt": 1,
+  "quality_status": "accepted",
+  "validation_status": "completed",
+  "validation_passed": true,
+  "validation_issue_count": 0,
+  "review_status": "completed",
+  "review_score": 82,
+  "finished_at": "2026-01-01T12:00:00.000Z",
+  "artifacts": {
+    "config": "config.json",
+    "beat_plan": "beats.json",
+    "story": "story.md",
+    "metadata": "metadata.json",
+    "validation": "validation.json",
+    "review": "review.json"
+  }
+}

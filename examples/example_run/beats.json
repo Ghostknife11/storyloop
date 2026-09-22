@@ -1,0 +1,39 @@
+{
+  "beat_plan_version": "1",
+  "beats": [
+    {
+      "id": 1,
+      "purpose": "建立危机",
+      "event": "证人失踪，陈岚接到电话。",
+      "characters": [
+        "陈岚"
+      ]
+    },
+    {
+      "id": 2,
+      "purpose": "升级冲突",
+      "event": "线索指向嫌疑人律师。",
+      "characters": [
+        "陈岚",
+        "周衡"
+      ]
+    },
+    {
+      "id": 3,
+      "purpose": "高潮对峙",
+      "event": "陈岚在码头截住销毁证据的人。",
+      "characters": [
+        "陈岚",
+        "周衡"
+      ]
+    },
+    {
+      "id": 4,
+      "purpose": "收束",
+      "event": "证人被找到，案件重新开庭。",
+      "characters": [
+        "陈岚"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "attempt_number": 1,
+  "accepted": true,
+  "retry_reason": null,
+  "review_score": 82,
+  "validation_passed": true,
+  "validation_status": "completed",
+  "review_status": "completed",
+  "repair_count": 1,
+  "repairs": [
+    {
+      "repair_number": 1,
+      "issue_type": "general",
+      "issue_message": "高潮缺失",
+      "before_validation": {
+        "passed": true,
+        "issues": []
+      },
+      "after_validation": {
+        "passed": true,
+        "issues": []
+      },
+      "before_review_score": 41,
+      "after_review_score": 82,
+      "success": true
+    }
+  ],
+  "error": null
+}
