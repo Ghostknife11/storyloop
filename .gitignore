@@ -20,6 +20,9 @@
 /dist/
 /build/
 
+# test coverage
+/coverage/
+
 # python (reserved for future backend split)
 __pycache__/
 *.pyc
