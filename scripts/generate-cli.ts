@@ -160,7 +160,7 @@ const USAGES: Record<Command, string> = {
 };
 
 const MAIN_USAGE = [
-  "storyloop —— AI 短篇生成器（v0.9.1 Patch Hardening）",
+  "storyloop —— AI 短篇生成器（v1.0.0 Stable Generation Engine）",
   "",
   "用法：",
   "  storygen <command> [options]",
@@ -243,6 +243,23 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
 function flag(flags: Record<string, string>, name: string): string | undefined {
   return flags[name];
+}
+
+/** 数值型 flag 的字面量清单：解析不出有限数就属于参数错误，不能留到运行时才炸。 */
+const NUMBER_FLAGS = ["--temperature", "--max-attempts", "--min-score", "--max-repairs"] as const;
+
+/**
+ * 参数阶段的数值检查：`--temperature abc` 这种值以前被 Number() 转成 NaN 后静默丢掉，
+ * 调用方以为用了缺省值，直到打模型才以运行时失败（退出码 1）收场。
+ * 参数写错就该是退出码 2，所以在分发前统一拦一次。
+ */
+function unparsableNumberFlag(flags: Record<string, string>): string | undefined {
+  for (const name of NUMBER_FLAGS) {
+    const raw = flag(flags, name);
+    if (raw === undefined) continue;
+    if (!Number.isFinite(Number(raw))) return `${name} 必须是数字（实际 ${raw}）`;
+  }
+  return undefined;
 }
 
 function numberFlag(flags: Record<string, string>, name: string): number | undefined {
@@ -689,6 +706,10 @@ export async function runCli(argv: string[], io: CliIo = consoleIo): Promise<num
   }
   if (!flag(args.flags, "--config")) {
     return usageError(io, `${args.command} 需要 --config <story.json>`, USAGES[args.command]);
+  }
+  const badNumber = unparsableNumberFlag(args.flags);
+  if (badNumber) {
+    return usageError(io, badNumber, USAGES[args.command]);
   }
 
   // §32：API Key 只来自服务端环境。validate 不调模型，是唯一例外。
