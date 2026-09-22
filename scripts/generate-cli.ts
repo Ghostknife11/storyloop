@@ -42,6 +42,7 @@ import {
 import { ArtifactStore } from "@/storage/artifact-store";
 import { REPAIR_ISSUE_TYPES, validateRepairRecord, type RepairRecord } from "@/types/repair";
 import { errorMessageOf } from "@/lib/api-error";
+import { projectVersion } from "@/lib/version";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
 import type { RepairResult } from "@/types/repair";
@@ -160,7 +161,7 @@ const USAGES: Record<Command, string> = {
 };
 
 const MAIN_USAGE = [
-  "storyloop —— AI 短篇生成器（v1.0.0 Stable Generation Engine）",
+  `storyloop —— AI 短篇生成器（v${projectVersion()} Stable Generation Engine）`,
   "",
   "用法：",
   "  storygen <command> [options]",
