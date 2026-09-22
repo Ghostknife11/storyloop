@@ -145,6 +145,28 @@ describe("POST /api/validate（§27/§42）", () => {
     expect(apiErrorOf(await readJson(res)).code).toBe("RUN_NOT_FOUND");
   });
 
+  it("§67 落盘失败 → 500，响应不带服务器绝对路径（真实写失败，不用 mock）", async () => {
+    const dir = withTmpDir();
+    const runId = "20260101_000000_aaaaaa";
+    const runDir = join(dir, "runs", runId);
+    mkdirSync(runDir, { recursive: true });
+    // 原子写是「先写 .validation.json.tmp 再 rename」。把 tmp 那个名字占成目录，
+    // writeFileSync 必然失败——这是真的写失败，不是替身在自洽。
+    mkdirSync(join(runDir, ".validation.json.tmp"), { recursive: true });
+
+    const res = await postValidate(post({ config, story: goodStory, run_id: runId }));
+    expect(res.status).toBe(500);
+    const err = apiErrorOf(await readJson(res));
+    expect(err.code).toBe("ARTIFACT_WRITE_FAILED");
+    // 断言必须落在原始 message 上。v0.9.0 的守卫写的是 JSON.stringify(body) 之后判断，
+    // 而 stringify 会把路径里的 \ 转义成 \\，待匹配的绝对路径没转义，两边永远对不上：
+    // 那条断言恒绿，真实响应里却带着整个 runs/<run_id>/.validation.json.tmp。
+    expect(err.message).not.toContain(dir);
+    expect(err.message).not.toContain(runDir);
+    // 相对文件名要留下，用户才知道是哪个产物写不进去
+    expect(err.message).toContain("validation.json");
+  });
+
   it("请求体不是合法 JSON → 400", async () => {
     withTmpDir();
     const res = await postValidate(post("{oops"));

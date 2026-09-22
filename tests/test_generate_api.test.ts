@@ -158,7 +158,11 @@ describe("POST /api/runs（v0.6.0 Automatic Run）", () => {
     const err = apiErrorOf(r.json);
     expect(err.code).toBe("PLANNER_INVALID_OUTPUT");
     expect(err.stage).toBe("planning");
-    expect(err.message).toContain("planning");
+    // 阶段信息由 stage 字段承载，不靠人类可读消息里恰好出现 "planning" 这个词：
+    // v0.9.0 因为 toApiError 的分支顺序，这里拿到的是 PipelineError 的阶段壳消息，
+    // BeatParseError 的专属前缀（Plan generation failed. 原因：...）反而被吃掉了。
+    expect(err.message).toContain("Plan generation failed");
+    expect(err.message).toContain("Planner 输出不是合法 JSON");
     expect(err.run_id).toMatch(RUN_ID);
     const runDir = runDirOf(dir, err.run_id as string);
     expect(existsSync(join(runDir, "config.json"))).toBe(true);

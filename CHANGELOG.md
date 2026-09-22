@@ -13,6 +13,44 @@ All notable changes to Storyloop.
 
 ---
 
+## [0.9.1] —— 2026-09-22
+
+### Added
+
+- 错误文本净化入口 `src/lib/safe-text.ts`：绝对路径替换为 `<path>`、凭据打码，规则只此一份，
+  `src/lib/api-error.ts` 与 `src/core/pipeline.ts` 共用，不再各写一套正则（v0.9.0 两份正则不一致，
+  其中一份还会误擦除相对文件名）
+- 泄漏回归测试（`tests/test_safe_text.test.ts`、`tests/test_validation_api.test.ts` 等）：
+  用一个真的会失败的写操作（把 `<run>/.validation.json.tmp` 占成目录）验证响应干净，
+  不用 mock；全部断言落在原始 `message` 字符串上
+
+### Fixed
+
+- 【安全】`/api/validate` 与 `/api/review` 的失败响应泄漏服务器绝对路径：v0.9.0 让
+  `ArtifactWriteError` 把 `cause.message` 原样拼进消息，而 node:fs 的异常文本带完整路径。
+  现在这条消息只保留 Run 内相对文件名与 fs 失败码（如 `EACCES open`），不带路径。
+  v0.9.0 的 CHANGELOG 声称「只带 Run 内相对文件名 / 不再让服务器绝对路径外泄」——那两句当时并不成立，
+  本版本才真正做到
+- 【安全】未预期异常的原文透出：`INTERNAL_ERROR` 此前把原始异常 message 拼进响应，
+  现在固定为一句「服务器内部错误」，原始异常只进服务端技术日志
+- 【正确】错误码被上层阶段信息覆盖：`toApiError` 把 `e instanceof PipelineError` 排在具体异常之前，
+  主链路上抛的一切都先命中阶段壳，导致写盘失败报成 `GENERATION_FAILED`（502）而不是
+  `ARTIFACT_WRITE_FAILED`（500），`BeatParseError` / `ReviewParseError` 的专属分支全是死码。
+  分支顺序调整为「具体异常优先，阶段壳兜底」
+- 【正确】错误文本净化误擦除相对文件名：旧正则任何 `x/y/z` 都匹配，
+  `attempts/01/story.md` 被改成 `attempts<path>`。新正则要求绝对路径前面只能是
+  空白 / 引号 / 括号 / 冒号 / 行首，紧跟普通字符的斜杠不再被当成路径分隔符
+- 【测试】两个泄漏守卫测试是瞎的：它们断言 `JSON.stringify(body).not.toContain(path)`，
+  而 stringify 会把路径里的 `\` 转义成 `\\`，待匹配字符串没转义，两边永远对不上——
+  断言恒绿的同时响应里带着完整绝对路径。两处已改为断言原始 `message`
+
+> **这是一个修订版本，不是功能版本。** v0.9.1 没有新增任何质量智能，也没有新增任何用户可见能力：
+> 它只修 v0.9.0 自己引入的两处信息泄漏、一处错误码错判、一处正则误伤，以及一对恒绿的假守卫。
+> 能力边界与 v0.9.0 完全一致，文档里早就写明的承诺（错误响应不带绝对路径、
+> `ArtifactWriteError` 只带相对文件名）从这一版起由测试真正守护。
+
+---
+
 ## [Unreleased]
 
 ### Changed

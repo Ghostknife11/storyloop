@@ -3,14 +3,18 @@
 > 一个具备剧情规划、自动审阅、基础验证、自动重试和定点修订能力的 AI 短篇小说生成器。
 > A pipeline-based AI short-story generator with validation, review, automatic retry, and targeted story repair.
 
-## 功能（当前版本 v0.9.0 真实具备）
+## 功能（当前版本 v0.9.1 真实具备）
 
 > **v0.9.0 是加固版本，不是功能版本。** 它没有新增任何质量智能，能力边界与 v0.8.0 逐字一致；
 > 变化全部落在横切工程能力上——配置收口、错误统一、日志结构化、超时与重试加固、产物更稳、
 > CLI 与 API 共用一套逻辑、前端状态更可靠、测试更全、文档更诚实。
+>
+> **v0.9.1 是同一能力边界下的修订版本**，同样没有新增任何质量智能：修掉 v0.9.0 引入的两处错误信息泄漏、
+> 错误码被上层阶段信息覆盖、未预期异常原文透出，以及路径过滤误擦除相对文件名。
+> 它的行为与本文档此前写明的承诺重新对齐（见「错误响应」与「产物写入」两条）。
 > 下面先列工程能力，再列故事生成能力。
 
-### 工程能力（v0.9.0 新增 / 收口）
+### 工程能力（v0.9.0 新增 / 收口；v0.9.1 修订）
 
 - **统一配置来源**（`src/lib/app-config.ts`）：Application Settings 与 LLM Settings 各自单一来源，
   优先级固定为「请求覆盖 > 环境变量 > 默认值」；不维护等价别名，也没有第二层配置文件
@@ -21,13 +25,19 @@
   日志带 `run=` / `attempt=` / `repair=` 上下文前缀，密钥自动脱敏；
   Pipeline 的散落 `console` 全部改为结构化日志
 - **统一错误响应**（`src/lib/api-error.ts`）：所有失败都是 `{error:{code,message,run_id?,stage?}}`，
-  11 个稳定错误码，用户错误 4xx、运行时错误 5xx，响应里永远不出现堆栈
+  11 个稳定错误码，用户错误 4xx、运行时错误 5xx；响应里永远不出现堆栈、服务器绝对路径、
+  环境变量或凭据。v0.9.1 起错误码按具体异常判定，具体异常优先于阶段信息
+- **错误文本只有一个净化入口**（`src/lib/safe-text.ts`）：绝对路径替换为 `<path>`、凭据打码，
+  规则只此一份，`api-error.ts` 与 `pipeline.ts` 共用，不各写一套正则。
+  这条规则认「前缀是空白或引号」的路径，因此 `attempts/01/story.md` 这类相对文件名不会被误擦除（v0.9.1 修订）
 - **LLM 超时与 transport retry 加固**：单次请求超时由 `LLM_TIMEOUT` 控制（缺省 180000ms），
   transport retry 硬上限 2 次（即一次 LLM 调用最多 3 个请求），只重试 timeout / 429 / 临时 5xx
 - **transport retry 与 GenerationAttempt retry 是两件事**：前者是单次 HTTP 请求的重发，
   后者是 Pipeline 级别的「整篇重新生成」，两者互不计数、互不触发
 - **产物写入加固**：路径被限制在 Run 目录内，`mkdirSync` / `copyFileSync` / `renameSync` 失败统一抛
-  `ArtifactWriteError`（只带 Run 内相对文件名，不带服务器绝对路径），失败时已写出的产物不被删除
+  `ArtifactWriteError`（只带 Run 内相对文件名与 fs 失败码，不带服务器绝对路径），失败时已写出的产物不被删除。
+  v0.9.1 修订：此前异常原文会被拼进这条消息，导致 `/api/validate` 与 `/api/review` 的响应泄漏整个绝对路径；
+  且未预期异常会原文透出到 `INTERNAL_ERROR` 的 message 里，现在统一是一句固定文案，原始异常只进服务端日志
 - **统一 metadata schema**：run / attempt / repair 三层 metadata 字段收口，
   `project_version` 由 VERSION 文件单一真源提供
 - **稳定 CLI**：`--help` / `-h`、退出码 0（业务收尾）/ 1（运行时失败）/ 2（参数或配置不合法）；
@@ -654,7 +664,7 @@ CLI 与 Web API 共用 `src/lib/generate-service.ts` 里的同一批函数——
 | GET | `/api/runs/<run_id>` | 读回一次 Run 与它的 Attempt 摘要（`<run_id>` 非法或不存在时 400 / 404） |
 | GET | `/api/runs/<run_id>/attempts/<n>` | 读回某一次 Attempt 的详情（`<n>` 非法或不存在时 400 / 404） |
 | GET | `/api/health` | `{status: "ok"}` |
-| GET | `/api/version` | `{version: "0.9.0"}` |
+| GET | `/api/version` | `{version: "<VERSION 文件内容>"}`（当前为 `0.9.1`） |
 
 `retry_policy` 可省略，省略时用默认值 `{max_attempts: 2, min_review_score: 70, retry_on_validation_failure: true, enable_repair: true, max_repairs_per_attempt: 1}`。
 它不属于 StoryConfig，因此不会写进 `config.json`，只会记录在 Run 的 `metadata.json` 里。
@@ -727,6 +737,9 @@ v0.8.0 起 Run 响应还带 `repair_count`（本次 Run 做过几次定点修订
 | `INTERNAL_ERROR` | 500 | 未预期异常 |
 
 响应里永远不出现堆栈，也不出现服务器绝对路径——堆栈只进服务端日志。
+v0.9.1 起这条承诺由测试守护，且测试断言的是原始 `message` 字符串本身：
+断言若写成 `JSON.stringify(body)` 会因反斜杠被转义成 `\\` 而恒绿，那种写法曾让 v0.9.0
+真实泄漏了完整路径却全程显示通过。
 （修订自身的失败不算错误码：拿不到非空正文时返回 200 + `success: false`。）
 
 ### curl 示例
@@ -918,5 +931,6 @@ Web UI 的能力边界没有变化，变的是「不可靠的地方变可靠了�
 - `src/lib/validation-rules.ts`：六条硬性校验规则的实现（无外部依赖，可直接阅读）
 - `src/lib/app-config.ts`：四类配置的来源与优先级（v0.9.0 新增，无外部依赖，可直接阅读）
 - `src/lib/api-error.ts`：11 个稳定错误码与状态码映射（v0.9.0 新增，无外部依赖，可直接阅读）
+- `src/lib/safe-text.ts`：错误文本的净化规则——绝对路径替换与凭据打码，只此一份（v0.9.1 新增）
 - `src/lib/logger.ts`：日志等级、上下文前缀与脱敏规则（v0.9.0 新增）
 - `tests/helpers/fixtures.ts`：共享样例数据与 `FakeLLM`（v0.9.0 新增）

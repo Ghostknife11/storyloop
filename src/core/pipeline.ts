@@ -22,7 +22,8 @@ import type { GenerationAttempt } from "@/core/generation-attempt";
 import { RepairStrategy } from "@/core/repair-strategy";
 import type { RepairRecord } from "@/types/repair";
 import { repairRequestOf } from "@/types/repair";
-import { logger, redactSecrets } from "@/lib/logger";
+import { logger } from "@/lib/logger";
+import { safeText } from "@/lib/safe-text";
 import { projectVersion as readProjectVersion } from "@/lib/version";
 
 /**
@@ -73,13 +74,7 @@ export interface GenerationResult {
 
 /** §27/§28/§67 安全错误信息：node:fs 的异常文本带服务器绝对路径，LLM/HTTP 客户端的
  * 异常文本可能带回请求头，两者都不该进用户可见的 message / metadata。
- * 所以每条错误文本都要抹掉绝对路径并脱敏凭据；原始异常只进服务端技术日志。 */
-const ABSOLUTE_PATH = /(?:[A-Za-z]:)?[\\/][^\s'"]*[\\/][^\s'"]*/g;
-
-function safeDetail(raw: string): string {
-  return redactSecrets(raw.replace(ABSOLUTE_PATH, "<path>"));
-}
-
+ * 规则统一放在 src/lib/safe-text.ts，与 toApiError 共用一份，不各写一套正则。 */
 function errorDetail(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
@@ -306,7 +301,7 @@ export class GenerationPipeline {
       };
     } catch (e) {
       // §18/§19/§20：失败阶段可识别，已产出的文件不删除
-      const detail = safeDetail(errorDetail(e));
+      const detail = safeText(errorDetail(e));
       // §28/§9：原始异常只进服务端日志，带 run_id 与失败阶段
       logger.child({ run_id: rid }).error(`run failed at ${ctx.current_stage ?? "unknown"}`, e);
       failRun(ctx, ctx.current_stage ?? "unknown", detail);
@@ -357,7 +352,7 @@ export class GenerationPipeline {
       // §70：重试继续用同一个 StoryConfig / BeatPlan / 温度，不自动调参。
       story = await this.generator.generate(config, plan, runtime?.temperature ?? 0.8);
     } catch (e) {
-      generationError = safeDetail(errorDetail(e));
+      generationError = safeText(errorDetail(e));
       generationFailure = e;
       // §28/§9：原始异常只进服务端日志
       logger.child({ run_id: rid, attempt_number: attemptNumber }).error("generation failed", e);
@@ -511,7 +506,7 @@ export class GenerationPipeline {
       // §12：Validator 自身异常 ≠ Story Failed。
       validation = null;
       validationStatus = "failed";
-      validationError = safeDetail(errorDetail(e));
+      validationError = safeText(errorDetail(e));
       logger.child({ run_id: rid, attempt_number: attemptNumber }).error("validation failed", e);
     }
 
@@ -542,7 +537,7 @@ export class GenerationPipeline {
         // §12：Reviewer 自身异常 ≠ Story Retry Trigger。
         review = null;
         reviewStatus = "failed";
-        reviewError = safeDetail(errorDetail(e));
+        reviewError = safeText(errorDetail(e));
         logger.child({ run_id: rid, attempt_number: attemptNumber }).error("review failed", e);
       }
     }

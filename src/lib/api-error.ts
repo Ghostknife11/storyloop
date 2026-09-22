@@ -1,5 +1,5 @@
 /**
- * v0.9.0 统一 API 错误（TASK §11/§12/§13）。
+ * 统一 API 错误（TASK §11/§12/§13）。
  *
  * 所有失败响应都是同一个形状：
  *   { "error": { "code": "PLANNER_INVALID_OUTPUT", "message": "...", "run_id": "..." } }
@@ -7,10 +7,16 @@
  * code 是稳定枚举（§11），message 是给人看的一句话，run_id / stage 有就带。
  * 用户错误（配置非法、Run 不存在）与运行时错误（超时、写盘失败）分开映射状态码（§12），
  * 不所有错误都返 500；堆栈只进服务端日志，响应里永远不出现（§13）。
+ *
+ * v0.9.1 两条改动：
+ *   - 每条来自异常的 message 都过 safeText：绝对路径换成 <path>、凭据打码。
+ *   - 具体异常的分支排在 PipelineError 之前。此前 PipelineError 抢先命中，
+ *     让 ARTIFACT_WRITE_FAILED 等分支在主链路上成了死码。
  */
 
 import { PipelineError } from "@/core/pipeline";
 import { LLMError, LLMTimeoutError } from "@/lib/llm";
+import { safeText } from "@/lib/safe-text";
 
 /** §11 稳定错误码。新增错误必须复用这里的码，不允许每个路由自造字符串。 */
 export const API_ERROR_CODES = [
@@ -106,35 +112,39 @@ export function toApiError(e: unknown): ApiError {
   const inner = rootCause(e);
 
   if (inner instanceof LLMTimeoutError) {
-    return new ApiError("LLM_TIMEOUT", inner.message, 504, runIdOf(e), stageOf(e));
+    return new ApiError("LLM_TIMEOUT", safeText(inner.message), 504, runIdOf(e), stageOf(e));
   }
   if (inner instanceof LLMError) {
-    return new ApiError("LLM_REQUEST_FAILED", inner.message, 502, runIdOf(e), stageOf(e));
+    return new ApiError("LLM_REQUEST_FAILED", safeText(inner.message), 502, runIdOf(e), stageOf(e));
   }
-  if (e instanceof PipelineError) {
-    const code: ApiErrorCode = e.stage === "planning" ? "PLANNER_INVALID_OUTPUT" : "GENERATION_FAILED";
-    return new ApiError(code, e.message, 502, e.runId, e.stage);
-  }
+  // 接下来这一组按「具体是什么坏了」定位错误码。必须排在 PipelineError 之前：
+  // v0.9.0 把 PipelineError 放在这儿，导致这些分支在主链路上全是死码，
+  // 写盘失败被报成 GENERATION_FAILED/502，而不是 ARTIFACT_WRITE_FAILED/500。
   if (inner instanceof Error) {
     if (inner.name === "BeatParseError") {
-      return new ApiError("PLANNER_INVALID_OUTPUT", `Plan generation failed. 原因：${inner.message}`, 502, runIdOf(e), stageOf(e));
+      return new ApiError("PLANNER_INVALID_OUTPUT", `Plan generation failed. 原因：${safeText(inner.message)}`, 502, runIdOf(e), stageOf(e));
     }
     if (inner.name === "ReviewParseError") {
-      return new ApiError("REVIEW_FAILED", `Review failed. 原因：${inner.message}`, 502, runIdOf(e), stageOf(e));
+      return new ApiError("REVIEW_FAILED", `Review failed. 原因：${safeText(inner.message)}`, 502, runIdOf(e), stageOf(e));
     }
     if (inner.name === "ValidatorError") {
-      return new ApiError("VALIDATION_FAILED_INTERNAL", `Validation failed. 原因：${inner.message}`, 500, runIdOf(e), stageOf(e));
+      return new ApiError("VALIDATION_FAILED_INTERNAL", `Validation failed. 原因：${safeText(inner.message)}`, 500, runIdOf(e), stageOf(e));
     }
     if (inner.name === "ArtifactWriteError") {
-      return new ApiError("ARTIFACT_WRITE_FAILED", inner.message, 500, runIdOf(e), stageOf(e));
+      return new ApiError("ARTIFACT_WRITE_FAILED", safeText(inner.message), 500, runIdOf(e), stageOf(e));
     }
     if (USER_ERROR_NAMES.has(inner.name)) {
-      return new ApiError("CONFIG_INVALID", inner.message, 400, runIdOf(e), stageOf(e));
+      return new ApiError("CONFIG_INVALID", safeText(inner.message), 400, runIdOf(e), stageOf(e));
     }
   }
-  // §13：未预期异常只给一句话，原始异常由调用方记服务端日志。
-  const message = e instanceof Error ? e.message : String(e);
-  return new ApiError("INTERNAL_ERROR", `服务器内部错误：${message}`, 500, runIdOf(e), stageOf(e));
+  // 具体类型都没命中，才退回 PipelineError 的阶段壳：阶段能定位，但不值得单独一个码。
+  if (e instanceof PipelineError) {
+    const code: ApiErrorCode = e.stage === "planning" ? "PLANNER_INVALID_OUTPUT" : "GENERATION_FAILED";
+    return new ApiError(code, safeText(e.message), 502, e.runId, e.stage);
+  }
+  // §13：未预期异常只给这一句。原始异常由调用方记服务端日志——拼进响应既没信息量，
+  // 又把异常文本（可能含绝对路径 / 请求头 / 密钥）送到用户手上。
+  return new ApiError("INTERNAL_ERROR", "服务器内部错误", 500, runIdOf(e), stageOf(e));
 }
 
 function runIdOf(e: unknown): string | undefined {

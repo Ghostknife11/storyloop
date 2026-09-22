@@ -160,7 +160,7 @@ const USAGES: Record<Command, string> = {
 };
 
 const MAIN_USAGE = [
-  "storyloop —— AI 短篇生成器（v0.9.0 Prototype Hardening）",
+  "storyloop —— AI 短篇生成器（v0.9.1 Patch Hardening）",
   "",
   "用法：",
   "  storygen <command> [options]",

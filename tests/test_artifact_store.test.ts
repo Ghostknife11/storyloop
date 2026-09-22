@@ -529,8 +529,18 @@ describe("ArtifactStore — §19 写入失败", () => {
     expect(error).toBeInstanceOf(ArtifactWriteError);
     expect(error?.name).toBe("ArtifactWriteError");
     expect((error as ArtifactWriteError).filename).toBe("story.md");
-    // §67：错误消息不泄露服务器绝对路径
-    expect(JSON.stringify(error?.message)).not.toContain(runDirOf(store, RUN_ID));
+    // §67：错误消息不泄露服务器绝对路径。断言必须落在原始 message 上——
+    // v0.9.0 这里写的是 JSON.stringify(error?.message)：stringify 会把路径里的 \
+    // 转义成 \\，而待匹配的目录字符串没转义，两边永远对不上。那条断言恒绿，
+    // 真实请求里却漏整个路径。所以直接查 message 本身，连 tmp 根一起查。
+    expect(error?.message).not.toContain(runDirOf(store, RUN_ID));
+    expect(error?.message).not.toContain(tmp as string);
+    expect(error?.message).not.toContain("at ");
+    // 相对文件名和失败码要留下：用户得知道是哪个产物、为什么写不进去。
+    // 失败码本身平台相关（Windows 撞 rename 的 EPERM，POSIX 撞 write 的 EISDIR），
+    // 所以只断言"带了一个 errno 码"这个形状，不钉死具体值。
+    expect(error?.message).toContain("story.md");
+    expect(error?.message).toMatch(/（E[A-Z]+ [a-z]+）/);
   });
 
   it("attempt 级写失败同样可识别", () => {

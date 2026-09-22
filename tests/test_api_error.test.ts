@@ -14,6 +14,8 @@ import {
   toApiError,
 } from "@/lib/api-error";
 import { LLMError, LLMRequestError, LLMTimeoutError } from "@/lib/llm";
+import { BeatParseError } from "@/lib/beat-parser";
+import { ReviewParseError } from "@/lib/review-parser";
 import { PipelineError } from "@/core/pipeline";
 import { ArtifactWriteError } from "@/storage/artifact-store";
 
@@ -26,6 +28,16 @@ class LeakyError extends Error {
     this.name = "LeakyError";
     this.stack = "Error: 读不到 D:\\secret\\config.json\n    at readFile (node:internal/fs:whatever)";
   }
+}
+
+/**
+ * 形似 node:fs 的真实异常：除了 message，还带 code / syscall / errno 自有属性。
+ * 拿裸 Error 当夹具会漏掉关键信息——ArtifactWriteError 正是从这几个属性里取失败码的。
+ */
+function fsErrorLike(message: string, code: string, syscall: string): Error {
+  const error = new Error(message);
+  Object.assign(error, { code, syscall, errno: -1, path: message.split("'")[1] ?? "" });
+  return error;
 }
 
 describe("§11 稳定错误码", () => {
@@ -157,12 +169,40 @@ describe("§12 状态码按错误性质分开", () => {
 });
 
 describe("§13 响应不泄漏", () => {
-  it("堆栈与服务器绝对路径都不进 body", () => {
+  // 断言必须落在原始 message 上。v0.9.0 用 JSON.stringify(body) 之后判断，
+  // 而 stringify 会把 \ 转义成 \\，原始路径永远匹配不上——那条断言是绿的，
+  // 响应里却带着完整绝对路径。这里直接查 err.message 本身。
+  it("堆栈与服务器绝对路径都不进 message（断言原始字符串，不绕 JSON.stringify）", () => {
+    const err = toApiError(new LeakyError());
+    expect(err.message).not.toContain("at readFile");
+    expect(err.message).not.toContain("D:\\secret");
+    expect(err.message).not.toContain("C:\\Users\\");
+    // 兜底文案是固定的，不把异常文本拼进来
+    expect(err.message).toBe("服务器内部错误");
+  });
+
+  it("body() 序列化之后同样干净（双重确认）", () => {
     const body = toApiError(new LeakyError()).body();
-    const text = JSON.stringify(body);
-    expect(text).not.toContain("at readFile");
-    expect(text).not.toContain("D:\\secret");
-    expect(text).not.toContain("C:\\Users\\");
+    expect(body.error.message).not.toContain("at readFile");
+    expect(body.error.message).not.toContain("D:\\secret");
+    expect(body.error.message).not.toContain("C:\\Users\\");
+  });
+
+  it("ArtifactWriteError 的绝对路径不进 message（裸抛，validate/review 路由就是这条）", () => {
+    const leaky = new ArtifactWriteError("review.json", fsErrorLike(
+      "EACCES: permission denied, open 'D:\\test\\zhihu\\repo\\runs\\20260922_101500_ab12cd\\review.json'",
+      "EACCES",
+      "open",
+    ));
+    const err = toApiError(leaky);
+    expect(err.code).toBe("ARTIFACT_WRITE_FAILED");
+    expect(err.httpStatus).toBe(500);
+    expect(err.message).not.toContain("D:\\test");
+    expect(err.message).not.toContain("runs\\20260922");
+    // 相对文件名要留下，否则用户不知道是哪个产物写失败
+    expect(err.message).toContain("review.json");
+    // fs 失败码也要留下，够定位是权限还是磁盘
+    expect(err.message).toContain("EACCES");
   });
 
   it("LLMTimeoutError 一路裹在 PipelineError 里也保留专属错误码", () => {
@@ -187,6 +227,58 @@ describe("§13 响应不泄漏", () => {
     for (const status of [400, 401, 429, 500, 503]) {
       expect(toApiError(new LLMRequestError("失败", status)).code).toBe("LLM_REQUEST_FAILED");
     }
+  });
+});
+
+describe("§12 具体异常优先于 PipelineError 阶段壳（v0.9.1 分支顺序）", () => {
+  // v0.9.0 把 `e instanceof PipelineError` 排在具体异常之前，主链路上抛的一切都被
+  // 包在 PipelineError 里，于是 BeatParseError / ArtifactWriteError / 用户错误这几支
+  // 全是死码：写盘失败报成 GENERATION_FAILED/502，配置错误也报成 502 而不是 400。
+  const wrap = (cause: Error, stage = "generating") =>
+    new PipelineError(`Run ${RUN_ID} failed at ${stage}`, RUN_ID, stage, cause);
+
+  it("写盘失败被 PipelineError 包裹 → 仍是 ARTIFACT_WRITE_FAILED + 500", () => {
+    const err = toApiError(wrap(new ArtifactWriteError("attempts/01/story.md", new Error("磁盘满"))));
+    expect(err.code).toBe("ARTIFACT_WRITE_FAILED");
+    expect(err.httpStatus).toBe(500);
+    expect(err.stage).toBe("generating");
+    expect(err.runId).toBe(RUN_ID);
+  });
+
+  it("BeatParseError 被包裹 → 保留专属前缀，不被阶段壳消息吃掉", () => {
+    const err = toApiError(wrap(new BeatParseError("Planner 输出不是合法 JSON"), "planning"));
+    expect(err.code).toBe("PLANNER_INVALID_OUTPUT");
+    expect(err.httpStatus).toBe(502);
+    expect(err.stage).toBe("planning");
+    expect(err.message).toContain("Plan generation failed. 原因：");
+    expect(err.message).not.toContain("failed at planning");
+  });
+
+  it("ReviewParseError 被包裹 → REVIEW_FAILED，不是 GENERATION_FAILED", () => {
+    const err = toApiError(wrap(new ReviewParseError("分数越界"), "reviewing"));
+    expect(err.code).toBe("REVIEW_FAILED");
+    expect(err.httpStatus).toBe(502);
+  });
+
+  it("用户错误被包裹 → 400 CONFIG_INVALID，不因为包了 PipelineError 就升到 502", () => {
+    const bad = new Error("target_words 必须是整数");
+    bad.name = "ConfigValidationError";
+    const err = toApiError(wrap(bad, "config"));
+    expect(err.code).toBe("CONFIG_INVALID");
+    expect(err.httpStatus).toBe(400);
+  });
+
+  it("具体类型都没命中时才退回阶段壳：GENERATION_FAILED + 502", () => {
+    const err = toApiError(wrap(new Error("某种没见过的异常")));
+    expect(err.code).toBe("GENERATION_FAILED");
+    expect(err.httpStatus).toBe(502);
+    expect(err.stage).toBe("generating");
+  });
+
+  it("planning 阶段壳仍是 PLANNER_INVALID_OUTPUT", () => {
+    const err = toApiError(new PipelineError("拿不到 BeatPlan", RUN_ID, "planning", new Error("解析失败")));
+    expect(err.code).toBe("PLANNER_INVALID_OUTPUT");
+    expect(err.httpStatus).toBe(502);
   });
 });
 

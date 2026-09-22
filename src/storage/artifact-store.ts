@@ -30,15 +30,30 @@ const INITIAL_STORY = "initial_story.md";
 /**
  * §19 产物写入失败：磁盘满 / 权限不足 / 目录被占用都归这一类。
  * 消息只带 Run 内的相对文件名，不带服务器绝对路径（§67）。
+ *
+ * v0.9.1：cause 不再整条拼进消息。node:fs 的异常文本形如
+ *   EISDIR: illegal operation on a directory, open 'C:\\...\\runs\\<id>\\story.md'
+ * 路径就在后半截，原样传出去一路会走到 API 响应体里。
+ * 只取 code / syscall（EACCES open、ENOSPC write）——两者都不含路径，也够定位是哪种失败；
+ * 取不到就给固定文案，绝不回退到 cause.message。
  */
 export class ArtifactWriteError extends Error {
   constructor(
     readonly filename: string,
     cause: unknown,
   ) {
-    super(`产物写入失败：${filename}（${cause instanceof Error ? cause.message : String(cause)}）`);
+    super(`产物写入失败：${filename}（${failureCodeOf(cause)}）`);
     this.name = "ArtifactWriteError";
   }
+}
+
+/** 从 node:fs 异常里取不带路径的失败码；没有就用固定文案。 */
+function failureCodeOf(cause: unknown): string {
+  const detail = (cause ?? {}) as { code?: unknown; syscall?: unknown };
+  const parts: string[] = [];
+  if (typeof detail.code === "string" && detail.code.trim()) parts.push(detail.code.trim());
+  if (typeof detail.syscall === "string" && detail.syscall.trim()) parts.push(detail.syscall.trim());
+  return parts.length > 0 ? parts.join(" ") : "未知原因";
 }
 
 export class ArtifactStore {
@@ -242,7 +257,8 @@ export class ArtifactStore {
   promoteAttempt(runId: string, attemptNumber: number): Record<string, string> {
     const promoted: Record<string, string> = {};
     const dir = this.attemptDirPath(runId, attemptNumber);
-    if (!existsSync(dir)) throw new Error(`Attempt ${attemptNumber} 不存在：${dir}`);
+    // §67：绝对路径不进异常消息，调用方本来就知道 runs 根在哪
+    if (!existsSync(dir)) throw new Error(`Attempt ${attemptNumber} 不存在`);
 
     for (const filename of ["story.md", "validation.json", "review.json"]) {
       const source = join(dir, filename);
