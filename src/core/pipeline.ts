@@ -24,6 +24,7 @@ import type { RepairRecord } from "@/types/repair";
 import { repairRequestOf } from "@/types/repair";
 import { logger } from "@/lib/logger";
 import { safeText } from "@/lib/safe-text";
+import { llmSettings } from "@/lib/app-config";
 import { projectVersion as readProjectVersion } from "@/lib/version";
 
 /**
@@ -410,6 +411,8 @@ export class GenerationPipeline {
     const attemptError = generationError ?? check.validation_error ?? check.review_error;
 
     // §24 Attempt metadata：编号 / 是否被接受 / 重试原因 / 分数 / 校验结论 / 修订记录（§17）。
+    // v1.0.0 冻结字段（TASK §10）：error 始终存在，没有错误时是 null——
+    // 有条件出现的字段会让「缺字段」与「没错误」无法区分。
     this.artifactStore.putAttemptMetadata(rid, attemptNumber, {
       attempt_number: attemptNumber,
       accepted,
@@ -420,9 +423,9 @@ export class GenerationPipeline {
       review_status: check.review_status,
       repair_count: repairs.length,
       repairs,
+      error: attemptError ?? null,
       ...(check.validation_error ? { validation_error: check.validation_error } : {}),
       ...(check.review_error ? { review_error: check.review_error } : {}),
-      ...(attemptError ? { error: attemptError } : {}),
     });
 
     return {
@@ -707,10 +710,12 @@ export class GenerationPipeline {
       project_version: ctx.project_version,
       status: ctx.status,
       started_at: ctx.started_at,
+      // v1.0.0 冻结字段（TASK §9）：model 必须存在。取「本次调用真正生效的模型」——
+      // 请求覆盖 → 环境变量 → 默认值，与 LLM 客户端用的是同一个解析结果。
+      model: llmSettings({ model: runtime?.model }).model,
     };
     if (ctx.current_stage) meta.current_stage = ctx.current_stage;
     if (ctx.error) meta.error = ctx.error;
-    if (runtime?.model) meta.model = runtime.model;
     if (patch.max_attempts !== undefined) meta.max_attempts = patch.max_attempts;
     if (patch.min_review_score !== undefined) meta.min_review_score = patch.min_review_score;
     // §18：Repair 策略同样落 metadata，中断后看得出当时允不允许修、最多修几次。
