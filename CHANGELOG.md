@@ -13,6 +13,44 @@ All notable changes to Storyloop.
 
 ---
 
+## [1.0.1] —— 2026-09-23
+
+v1.0.1 是**文档订正版本**：不改任何运行行为，只把 1.0.0 的文档与真实产物对齐，
+并补一道防止再次走样的门禁。能力边界、产物布局、API、CLI 与 1.0.0 逐字一致。
+
+### Fixed
+
+- **`docs/run-artifacts.md` 的三张 metadata 字段表不完整**：运行级只列了 13 个字段，
+  实际落盘 24 个（缺 `current_stage`、四个策略回显字段、`validation_passed` /
+  `validation_issue_count` / `review_score`、`validation_error` / `review_error`、`error`）；
+  attempt 级漏了 `validation_error` / `review_error` 两个条件字段；
+  repair 级多写了一个从不落盘的 `issue_message`（它属于同目录的 `request.json`）
+- **`docs/run-artifacts.md` 对 `validation.json` / `review.json` 的标注不准确**：
+  原文写「最终入选版本的校验 / 审阅结果」，实际这两份文件（各级目录下都是）是
+  **首次**结论，修订后的那份在 `attempts/NN/repairs/MM/` 里；而 metadata 与 API 里的
+  分数取**修订后**的结论。现在文档、README、`docs/api.md`、`docs/compatibility.md`
+  都把这处刻意的不对称写清楚了
+- **README 的运行级字段清单多了一个字段**：`retry_on_validation_failure` 是 RetryPolicy
+  的字段，从不写进运行级 metadata，已从清单删除
+- **`package-lock.json` 的根版本号还停在 `0.0.1`**（`packages[""].version`，v1.0.0 发布时
+  只改了外层 `version`），已同步到 1.0.1
+- **CLI 帮助横幅的版本号是写死的**：`scripts/generate-cli.ts` 现在与其它入口一样从
+  `VERSION` 文件读（`projectVersion()`），改版本号不用再动源码
+
+### Added
+
+- **`tests/test_contract_docs_sync.test.ts`**：文档字段表 ↔ 真实产物的双向对照合同测试。
+  跑五条真实路径的 Pipeline（成功 / 修订后接受 / 重试耗尽 / 生成失败 / 校验与审阅组件自身异常，
+  只有 LLM 和这两个组件是假的），把各层 metadata 实际出现的键与文档表格逐个字段比对：
+  文档多写、漏写、改名都会红，新增 metadata 字段也会因为「没写进文档」而红
+
+### Compatibility
+
+- 1.0.0 → 1.0.1 无破坏性变更，无行为变更；读到 1.0.0 与 1.0.1 产物的代码无需任何改动。
+  详见 [docs/upgrade.md](./docs/upgrade.md)
+
+---
+
 ## [1.0.0] —— 2026-09-22
 
 v1.0.0 是**冻结版本**，不是功能版本：没有新增任何质量智能，能力边界与 v0.9.1 逐字一致。

@@ -5,6 +5,21 @@
 >
 > 版本策略见 [compatibility.md](./compatibility.md)。
 
+## 从 1.0.0 升级到 1.0.1
+
+**没有任何需要改代码的地方。** 1.0.1 不改运行行为，产物布局、字段、API、CLI 与 1.0.0 逐字一致；
+1.0.0 写的产物可以被 1.0.1 直接读，反之亦然。要做的是：
+
+1. 如果你**引用过** `docs/run-artifacts.md` 的字段表或 README 的运行级字段清单，重新拉一份：
+   - 运行级 metadata 实际有 24 个字段（1.0.0 的文档只列了 13 个）；
+   - `retry_on_validation_failure` 不在运行级 metadata 里，它是 RetryPolicy 的字段；
+   - repair 级 metadata 没有 `issue_message`，它在同目录的 `request.json` 里。
+2. 如果你依赖「`validation.json` / `review.json` 就是最终结论」这个假设，现在文档写明了：
+   这两份文件（各级目录下都是）是**首次**结论，修订后的在 `attempts/NN/repairs/MM/` 里，
+   而 metadata 与 API 的分数取**修订后**的结论。1.0.0 的行为本来就是这样，1.0.1 只是把它写清楚。
+
+升级后跑一遍 `npm test`：新增的 `tests/test_contract_docs_sync.test.ts` 会核对文档与产物一致。
+
 ## 从 0.9.x 升级到 1.0.0
 
 ### 行为变化（需要注意的两处）
@@ -50,16 +65,18 @@
 ## 升级操作
 
 ```bash
-git fetch && git checkout 1.0.0     # tag 不带 v 前缀
+git fetch && git checkout 1.0.1     # tag 不带 v 前缀；从 0.9.x 升级时 checkout 1.0.0 亦可
 npm install
 cp .env.example .env                # 填入 LLM_API_KEY 后即可跑
 npm run dev                         # Web UI
 npx tsx scripts/generate-cli.ts run --config configs/example_story.json
 ```
 
-升级后建议跑一遍发布门禁：`npm test`（其中合同测试会校验 README / docs / 版本号一致）。
+升级后建议跑一遍发布门禁：`npm test`（其中合同测试会校验 README / docs / 版本号一致，
+并核对文档字段表与真实产物逐字段一致）。
 
 ## 回滚
 
 0.9.x 的产物布局与 1.0.0 兼容（只多两个恒定字段），因此回滚到 0.9.x 不会读不到历史 Run；
-反过来，0.9.x 的代码读 1.0.0 写的产物时，`error: null` 与 `model` 会被安全忽略。
+反过来，0.9.x 的代码读 1.0.0 / 1.0.1 写的产物时，`error: null` 与 `model` 会被安全忽略。
+从 1.0.1 回滚到 1.0.0 同理：两边产物逐字节同构，代码差异只有文档与测试。
