@@ -1,5 +1,5 @@
 /**
- * v0.9.0 版本号单一来源（TASK §42/§43），v0.9.1 起补一条安全约定。
+ * v0.9.0 版本号单一来源（TASK §42/§43），v0.9.1 起补一条安全约定；v1.0.0 冻结该契约。
  *
  * VERSION 文件是唯一真源；/api/version、About 页、Pipeline metadata 的 project_version
  * 全部从这里读，不再各自硬编码。文件缺失时用内置兜底值，保证接口不 500。
@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** VERSION 文件读不到时的兜底值；与仓库 VERSION 保持一致，由测试守护。 */
-export const FALLBACK_VERSION = "0.9.1";
+export const FALLBACK_VERSION = "1.0.0";
 
 /** src/lib/version.ts → 仓库根目录。 */
 function repoRootFromModule(): string {

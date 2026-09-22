@@ -13,6 +13,42 @@ All notable changes to Storyloop.
 
 ---
 
+## [1.0.0] —— 2026-09-22
+
+v1.0.0 是**冻结版本**，不是功能版本：没有新增任何质量智能，能力边界与 v0.9.1 逐字一致。
+它做的是把已有能力写成公开契约，并用合同测试与文档看守这些契约。
+
+### Added
+
+- **七份契约文档**（`docs/`）：`story-config.md`、`beat-plan.md`、`run-artifacts.md`、
+  `api.md`、`cli.md`、`upgrade.md`、`compatibility.md`
+- **`examples/example_run/`**：用假模型跑出的一次完整 Run 产物（时间戳写死），
+  与线上布局逐字节同构，仓库里唯一入库的 Run 样例
+- **六组合同测试**（合计 80+ 用例）：StoryConfig v1、BeatPlan v1、Run 产物布局与三层 metadata、
+  HTTP API 路由清单与字段集、CLI 命令与退出码、README / docs / 版本一致性发布门禁
+- **README 重定位**为稳定生成引擎：补「已知限制」「升级说明」「兼容性」章节，逐条列出刻意不做的事
+
+### Changed
+
+- 运行级 metadata 的 `model` **始终存在**（此前按请求是否显式传 `model` 而有无），
+  值为「本次真正生效的模型」：请求覆盖 → 环境变量 → 缺省值
+- attempt 级 metadata 的 `error` **始终存在**（此前按条件写），没有错误时是 `null`，
+  让「缺字段」与「没错误」可以区分
+- `src/lib/version.ts` 的 `FALLBACK_VERSION`、`package.json` 版本、CLI 横幅同步到 1.0.0，
+  版本号仍然只有一个真源（`VERSION` 文件）
+
+### Fixed
+
+- CLI 的 `--temperature`（以及 `--max-attempts` / `--min-score` / `--max-repairs`）
+  解析不出有限数时按参数错误处理（退出码 2），不再被静默丢掉后拖成运行时失败（退出码 1）
+
+### Compatibility
+
+- 0.9.x → 1.0.0 无破坏性变更；两条字段语义变化都是「从可能没有变成一定有」，
+  旧读取方只会忽略新出现的字段。详见 [docs/upgrade.md](./docs/upgrade.md)
+
+---
+
 ## [0.9.1] —— 2026-09-22
 
 ### Added
