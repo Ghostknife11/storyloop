@@ -19,7 +19,7 @@
 
 | code | HTTP | 何时出现 |
 |---|---|---|
-| `CONFIG_INVALID` | 400 | StoryConfig / BeatPlan / retry_policy / issue_type 不合法，或请求体不是合法 JSON |
+| `CONFIG_INVALID` | 400 | StoryConfig / BeatPlan / retry_policy / issue_type 不合法，请求体不是合法 JSON，或请求体里的 `baseUrl` 指向不允许的地址 |
 | `RUN_NOT_FOUND` | 404 | Run 或 Attempt 不存在 |
 | `LLM_TIMEOUT` | 504 | 单次 LLM 请求超时 |
 | `LLM_REQUEST_FAILED` | 502 | LLM 请求失败（网络、鉴权、限流） |
@@ -45,6 +45,23 @@
 `retry_policy` 字段：`max_attempts`（整数 1~5，缺省 2）、`min_review_score`（0~100，缺省 70）、
 `retry_on_validation_failure`（boolean，缺省 true）、`enable_repair`（boolean，缺省 true）、
 `max_repairs_per_attempt`（整数 0~3，缺省 1）。越界一律 400。
+
+#### `baseUrl` 覆盖的地址限制
+
+服务端是拿着 `LLM_API_KEY` 去请求 `baseUrl` 的（密钥作为 Bearer token 发出），所以请求体里
+带的值会在**发出任何请求之前**先过一遍地址校验（`src/lib/url-guard.ts`），不合法 → 400
+`CONFIG_INVALID`：
+
+- 只允许 `http` / `https`
+- 不允许指向本机与环回：`localhost`、`*.localhost`、`.local`、`.internal`、`127.0.0.0/8`、`::1`
+- 不允许指向私网、链路本地与保留段：`10/8`、`172.16/12`、`192.168/16`、`169.254/16`（含云元数据
+  地址）、`100.64/10`、组播与广播段等
+- 域名要解析出地址后再判一遍：解析到上面任一非公网地址的域名同样拒绝；解析失败也按拒绝处理
+  （验不了就不放行）
+
+不传 `baseUrl`（或传空串）＝用服务端 `LLM_BASE_URL`，那是运维的受信配置，不受这套规则约束——
+服务端指向本地假模型的联调用法仍然可用。同理，测试里注入假 LLM 时这个字段根本不参与组网，
+也不会被校验。
 
 ## 路由清单
 
