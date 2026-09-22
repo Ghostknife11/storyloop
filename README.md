@@ -446,6 +446,12 @@ storygen repair    对已有正文定点修订一次
 不进请求覆盖、不进任何返回值、不进任何产物、不进浏览器。`.env` 已被 `.gitignore` 忽略，
 仓库里只有空模板 `.env.example`。
 
+请求体里的 `baseUrl` 覆盖会带着这把密钥去请求对应地址，所以它不能指向任意主机：
+只允许 `http` / `https` 的公网地址，本机、环回、私网、链路本地（含云元数据地址）与保留段一律在
+发出请求前按 400 `CONFIG_INVALID` 拒掉，域名还要解析出地址后再判一遍
+（详见 [docs/api.md](docs/api.md) 的「`baseUrl` 覆盖的地址限制」）。
+服务端自己的 `LLM_BASE_URL` 是运维的受信配置，不受这套规则约束。
+
 ## 已知限制
 
 这些是**刻意不做**的，不是待修的缺陷。每一条都有对应说明：
@@ -468,14 +474,14 @@ storygen repair    对已有正文定点修订一次
 
 ## 升级说明
 
-v1.0.1 没有行为变更：只修文档与产物不符的地方，并补一道「文档字段表 ↔ 真实产物」的对照测试。
+v1.1.0 收紧了请求体 `baseUrl` 覆盖的取值，只允许 http/https 的公网地址；其余与 1.0.1 一致。
 从 1.0.0 升到 1.0.1 不需要改任何代码；v1.0.0 相对于 0.9.x 也**几乎没有破坏性变更**，
 需要留意的只有两条：运行级 metadata 的 `model` 现在始终存在（以前按条件写），
 attempt 级 metadata 的 `error` 没有错误时是 `null`（以前按条件写）。
 两者都是「字段从可能没有变成一定有」，不会让旧读取方崩掉。
 
 ```bash
-git fetch && git checkout 1.0.1     # tag 不带 v 前缀
+git fetch && git checkout 1.1.0     # tag 不带 v 前缀
 npm install
 cp .env.example .env
 npx tsx scripts/generate-cli.ts run --config configs/example_story.json
@@ -507,9 +513,11 @@ node node_modules/next/dist/bin/next build       # 生产构建
 | `tests/test_contract_cli.test.ts` | CLI 命令、参数、退出码、帮助输出位置 |
 | `tests/test_contract_docs.test.ts` | README 必备章节、docs/ 完整性、版本号唯一来源、防泄漏守卫 |
 | `tests/test_contract_docs_sync.test.ts` | 文档字段表 ↔ 真实产物逐字段一致（多写、漏写、改名都红） |
+| `tests/test_url_guard.test.ts` | 请求体 `baseUrl` 只允许 http/https 公网地址，私网/环回/保留段在发请求前就被拒 |
 
 所有测试都不调用真实 LLM：LLM 由注入的桩对象或 `FakeLLM` 替代（`tests/helpers/fixtures.ts`），
 `fetch` 也被桩掉。重试相关断言同样只用桩，从不触发真实模型调用。
+URL 校验的用例用注入的假解析器跑，不真的查 DNS，也不碰任何真实主机。
 
 ## 技术栈
 
