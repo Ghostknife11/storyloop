@@ -27,6 +27,20 @@ const REPAIRS_DIR = "repairs";
 /** §30 首次修订前的初始正文：只有真的发生过修订才写，没修订的 Attempt 不需要它。 */
 const INITIAL_STORY = "initial_story.md";
 
+/**
+ * §19 产物写入失败：磁盘满 / 权限不足 / 目录被占用都归这一类。
+ * 消息只带 Run 内的相对文件名，不带服务器绝对路径（§67）。
+ */
+export class ArtifactWriteError extends Error {
+  constructor(
+    readonly filename: string,
+    cause: unknown,
+  ) {
+    super(`产物写入失败：${filename}（${cause instanceof Error ? cause.message : String(cause)}）`);
+    this.name = "ArtifactWriteError";
+  }
+}
+
 export class ArtifactStore {
   private runsRoot: string;
 
@@ -51,7 +65,11 @@ export class ArtifactStore {
 
   createRunDirectory(runId: string): string {
     const dir = this.runDir(runId);
-    mkdirSync(dir, { recursive: true });
+    try {
+      mkdirSync(dir, { recursive: true });
+    } catch (e) {
+      throw new ArtifactWriteError(runId, e);
+    }
     return dir;
   }
 
@@ -226,20 +244,16 @@ export class ArtifactStore {
     const dir = this.attemptDirPath(runId, attemptNumber);
     if (!existsSync(dir)) throw new Error(`Attempt ${attemptNumber} 不存在：${dir}`);
 
-    const storyPath = join(dir, "story.md");
-    if (existsSync(storyPath)) {
-      promoted["story.md"] = this.rootFile(runId, "story.md");
-      copyFileSync(storyPath, promoted["story.md"]);
-    }
-    const validationPath = join(dir, "validation.json");
-    if (existsSync(validationPath)) {
-      promoted["validation.json"] = this.rootFile(runId, "validation.json");
-      copyFileSync(validationPath, promoted["validation.json"]);
-    }
-    const reviewPath = join(dir, "review.json");
-    if (existsSync(reviewPath)) {
-      promoted["review.json"] = this.rootFile(runId, "review.json");
-      copyFileSync(reviewPath, promoted["review.json"]);
+    for (const filename of ["story.md", "validation.json", "review.json"]) {
+      const source = join(dir, filename);
+      if (!existsSync(source)) continue;
+      const target = this.rootFile(runId, filename);
+      try {
+        copyFileSync(source, target);
+      } catch (e) {
+        throw new ArtifactWriteError(filename, e);
+      }
+      promoted[filename] = target;
     }
     return promoted;
   }
@@ -288,10 +302,14 @@ export class ArtifactStore {
     const dir = this.runDir(runId);
     const finalPath = this.resolveInRun(dir, filename);
     const tmpPath = join(dir, `.${filename.split("/").join("_")}.tmp`);
-    // §23：attempts/NN 由首次写入惰性创建
-    mkdirSync(join(finalPath, ".."), { recursive: true });
-    writeFileSync(tmpPath, content, "utf8");
-    renameSync(tmpPath, finalPath);
+    try {
+      // §23：attempts/NN 由首次写入惰性创建
+      mkdirSync(join(finalPath, ".."), { recursive: true });
+      writeFileSync(tmpPath, content, "utf8");
+      renameSync(tmpPath, finalPath);
+    } catch (e) {
+      throw new ArtifactWriteError(filename, e);
+    }
     return finalPath;
   }
 

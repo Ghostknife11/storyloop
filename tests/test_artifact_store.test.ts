@@ -1,8 +1,8 @@
-import { mkdtempSync, existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ArtifactStore } from "@/storage/artifact-store";
+import { ArtifactStore, ArtifactWriteError } from "@/storage/artifact-store";
 import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
@@ -61,6 +61,10 @@ function withStore() {
 
 function runDir(root: string, runId: string) {
   return join(root, runId);
+}
+
+function runDirOf(store: ArtifactStore, runId: string) {
+  return store.resolveRunDir(runId);
 }
 
 describe("ArtifactStore（§13/§14/§63）", () => {
@@ -501,5 +505,128 @@ describe("ArtifactStore — path traversal（§50）", () => {
     writeFileSync(join(tmp as string, "runs"), "not a directory", "utf8");
     const store = new ArtifactStore(join(tmp as string, "runs"));
     expect(() => store.createRunDirectory(RUN_ID)).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §19/§20/§21/§22 写入加固：写失败可识别、UTF-8、重复 Run ID、路径安全
+// ---------------------------------------------------------------------------
+
+describe("ArtifactStore — §19 写入失败", () => {
+  it("磁盘/权限错误包成 ArtifactWriteError，消息只带相对文件名", () => {
+    const { store } = withStore();
+    store.createRunDirectory(RUN_ID);
+    // 把 story.md 占成一个目录：writeFileSync 必然失败
+    mkdirSync(join(runDirOf(store, RUN_ID), "story.md"), { recursive: true });
+    const error = (() => {
+      try {
+        store.putStory(RUN_ID, "标题", "正文");
+        return null;
+      } catch (e) {
+        return e as Error;
+      }
+    })();
+    expect(error).toBeInstanceOf(ArtifactWriteError);
+    expect(error?.name).toBe("ArtifactWriteError");
+    expect((error as ArtifactWriteError).filename).toBe("story.md");
+    // §67：错误消息不泄露服务器绝对路径
+    expect(JSON.stringify(error?.message)).not.toContain(runDirOf(store, RUN_ID));
+  });
+
+  it("attempt 级写失败同样可识别", () => {
+    const { store } = withStore();
+    store.createRunDirectory(RUN_ID);
+    mkdirSync(join(runDirOf(store, RUN_ID), "attempts", "01", "story.md"), { recursive: true });
+    expect(() => store.putAttemptStory(RUN_ID, 1, "标题", "正文")).toThrow(ArtifactWriteError);
+  });
+
+  it("repair 级写失败同样可识别", () => {
+    const { store } = withStore();
+    store.createRunDirectory(RUN_ID);
+    mkdirSync(join(runDirOf(store, RUN_ID), "attempts", "01", "repairs", "01", "story.md"), { recursive: true });
+    expect(() => store.putRepairStory(RUN_ID, 1, 1, "标题", "正文")).toThrow(ArtifactWriteError);
+  });
+
+  it("runs 根目录被文件占用时 createRunDirectory 报的是 ArtifactWriteError", () => {
+    tmp = mkdtempSync(join(tmpdir(), "storyloop-blocked2-"));
+    writeFileSync(join(tmp as string, "runs"), "not a directory", "utf8");
+    const store = new ArtifactStore(join(tmp as string, "runs"));
+    expect(() => store.createRunDirectory(RUN_ID)).toThrow(ArtifactWriteError);
+  });
+
+  it("promote 时目标不可写也报 ArtifactWriteError", () => {
+    const { store } = withStore();
+    store.createRunDirectory(RUN_ID);
+    store.putAttemptStory(RUN_ID, 1, "标题", "正文");
+    mkdirSync(join(runDirOf(store, RUN_ID), "story.md"), { recursive: true });
+    expect(() => store.promoteAttempt(RUN_ID, 1)).toThrow(ArtifactWriteError);
+  });
+});
+
+describe("ArtifactStore — §19 重复 Run ID", () => {
+  it("同一个 run_id 再写一遍是覆盖，不是报错，也不产生第二个目录", () => {
+    const { store, root } = withStore();
+    store.createRunDirectory(RUN_ID);
+    store.putStory(RUN_ID, "第一版标题", "第一版正文");
+    store.createRunDirectory(RUN_ID);
+    store.putStory(RUN_ID, "第二版标题", "第二版正文");
+    expect(readdirSync(runDir(root, RUN_ID))).toContain("story.md");
+    expect(readFileSync(join(runDir(root, RUN_ID), "story.md"), "utf8")).toContain("第二版正文");
+    expect(readFileSync(join(runDir(root, RUN_ID), "story.md"), "utf8")).not.toContain("第一版正文");
+  });
+
+  it("runExists 对已存在 / 不存在的 run_id 都给确定答案", () => {
+    const { store } = withStore();
+    expect(store.runExists(RUN_ID)).toBe(false);
+    store.createRunDirectory(RUN_ID);
+    expect(store.runExists(RUN_ID)).toBe(true);
+    expect(() => store.runExists("../evil")).toThrow(/越界/);
+  });
+
+  it("重复 attempt 编号覆盖同一份产物，不新建 01_1 之类目录", () => {
+    const { store, root } = withStore();
+    store.createRunDirectory(RUN_ID);
+    store.putAttemptStory(RUN_ID, 1, "标题", "第一次");
+    store.putAttemptStory(RUN_ID, 1, "标题", "第二次");
+    expect(readdirSync(join(runDir(root, RUN_ID), "attempts"))).toEqual(["01"]);
+    expect(readFileSync(join(runDir(root, RUN_ID), "attempts", "01", "story.md"), "utf8")).toContain("第二次");
+  });
+});
+
+describe("ArtifactStore — §22 UTF-8", () => {
+  it("中文标题 / 人物名 / 正文 / Validation / Review / Repair 全部原样落盘", () => {
+    const { store, root } = withStore();
+    store.createRunDirectory(RUN_ID);
+    store.putConfig(RUN_ID, config);
+    store.putBeatPlan(RUN_ID, plan);
+    store.putStory(RUN_ID, config.title, "陈岚推开派出所的玻璃门，雨水顺着屋檐砸在台阶上。");
+    store.putValidation(RUN_ID, failed);
+    store.putReview(RUN_ID, review);
+    store.putAttemptInitialStory(RUN_ID, 1, config.title, "修订前：陈岚走进雨夜。");
+    store.putRepairRequest(RUN_ID, 1, { repair_number: 1, issue_type: "ending", issue_message: "故事缺少明确结局。" });
+    store.putRepairStory(RUN_ID, 1, 1, config.title, "修订后：陈岚走出了派出所。");
+
+    const read = (rel: string) => readFileSync(join(runDir(root, RUN_ID), rel), "utf8");
+    expect(read("config.json")).toContain("消失的目击者");
+    expect(read("beats.json")).toContain("陈岚");
+    expect(read("story.md")).toContain("陈岚推开派出所的玻璃门");
+    expect(read("validation.json")).toContain("正文长度 12 低于下限 750。");
+    expect(read("review.json")).toContain("故事整体完整");
+    expect(read("attempts/01/initial_story.md")).toContain("修订前：陈岚走进雨夜。");
+    expect(read("attempts/01/repairs/01/request.json")).toContain("故事缺少明确结局。");
+    expect(read("attempts/01/repairs/01/story.md")).toContain("修订后：陈岚走出了派出所。");
+    // 读回接口与磁盘内容一致，没有 mojibake
+    expect(store.readFinalStory(RUN_ID)).toContain("陈岚推开派出所的玻璃门");
+    expect(store.readFinalValidation(RUN_ID)).toEqual(failed);
+    expect(store.readFinalReview(RUN_ID)).toEqual(review);
+  });
+
+  it("写进去的文件是 UTF-8 字节（中文三字节，无 BOM）", () => {
+    const { store, root } = withStore();
+    store.createRunDirectory(RUN_ID);
+    store.putStory(RUN_ID, "标题", "陈岚");
+    const bytes = readFileSync(join(runDir(root, RUN_ID), "story.md"));
+    expect(bytes[0]).not.toBe(0xef);
+    expect(bytes.toString("utf8")).toContain("陈岚");
   });
 });
