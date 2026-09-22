@@ -6,6 +6,7 @@ import { NextRequest } from "next/server";
 import { POST as postValidate } from "@/app/api/validate/route";
 import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
 import type { ValidationResult } from "@/types/validation-result";
+import { apiErrorOf } from "./helpers/fixtures";
 
 /**
  * §27/§42 POST /api/validate HTTP 路由层与服务层：只验证「JSON 解析 → 委托 service → 响应形状」。
@@ -73,14 +74,14 @@ describe("POST /api/validate（§27/§42）", () => {
     withTmpDir();
     const res = await postValidate(post({ config }));
     expect(res.status).toBe(400);
-    expect((await readJson(res)).error).toContain("story is required");
+    expect(apiErrorOf(await readJson(res)).message).toContain("story is required");
   });
 
   it("story 不是字符串 → 400", async () => {
     withTmpDir();
     const res = await postValidate(post({ config, story: 42 }));
     expect(res.status).toBe(400);
-    expect((await readJson(res)).error).toContain("story is required");
+    expect(apiErrorOf(await readJson(res)).message).toContain("story is required");
   });
 
   it("§10/§16 空白正文是内容层面的硬失败 → 200 + EMPTY_CONTENT（不是请求错误）", async () => {
@@ -102,7 +103,7 @@ describe("POST /api/validate（§27/§42）", () => {
       story: goodStory,
     }));
     expect(res.status).toBe(400);
-    expect((await readJson(res)).error).toContain("标题");
+    expect(apiErrorOf(await readJson(res)).message).toContain("标题");
   });
 
   it("§26 legacy {title, prompt} 请求体同样可用", async () => {
@@ -133,22 +134,22 @@ describe("POST /api/validate（§27/§42）", () => {
     withTmpDir();
     const res = await postValidate(post({ config, story: goodStory, run_id: "../../evil" }));
     expect(res.status).toBe(400);
-    expect((await readJson(res)).error).toContain("run_id 非法");
+    expect(apiErrorOf(await readJson(res)).message).toContain("run_id 非法");
     expect(existsSync(join(tmp as string, "evil"))).toBe(false);
   });
 
   it("run_id 不存在 → 400（不静默丢弃）", async () => {
     withTmpDir();
     const res = await postValidate(post({ config, story: goodStory, run_id: "20260101_000000_zzzzzz" }));
-    expect(res.status).toBe(400);
-    expect((await readJson(res)).error).toContain("run_id 不存在");
+    expect(res.status).toBe(404);
+    expect(apiErrorOf(await readJson(res)).code).toBe("RUN_NOT_FOUND");
   });
 
   it("请求体不是合法 JSON → 400", async () => {
     withTmpDir();
     const res = await postValidate(post("{oops"));
     expect(res.status).toBe(400);
-    expect((await readJson(res)).error).toContain("JSON");
+    expect(apiErrorOf(await readJson(res)).message).toContain("JSON");
   });
 
   it("§2/§59 不调用 Reviewer：响应里没有 score / summary 等评价字段", async () => {

@@ -30,6 +30,7 @@ import { PipelineError } from "@/core/pipeline";
 import { ArtifactStore } from "@/storage/artifact-store";
 import { validateStoryConfig } from "@/types/story-config";
 import { validateRepairRecord, type RepairRecord } from "@/types/repair";
+import { errorMessageOf } from "@/lib/api-error";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
 import 'dotenv/config';
@@ -258,7 +259,7 @@ async function main() {
       ...(runId ? { run_id: runId } : {}),
     });
     if (status !== 200) {
-      console.error(`失败：${(json as { error: string }).error}`);
+      console.error(`失败：${errorMessageOf(json)}`);
       process.exit(1);
     }
     reportValidation(json as ValidationResult);
@@ -282,7 +283,7 @@ async function main() {
     console.log("[cli] 审阅正文……");
     const { status, json } = await reviewStory({ config, story, ...runtime });
     if (status !== 200) {
-      console.error(`失败：${(json as { error: string }).error}`);
+      console.error(`失败：${errorMessageOf(json)}`);
       process.exit(1);
     }
     reportReview(json as ReviewResult);
@@ -339,7 +340,7 @@ async function main() {
 
   if (status !== 200) {
     // PipelineError 已带 run_id 与失败阶段（§28）
-    console.error(`失败：${(json as { error: string }).error}`);
+    console.error(`失败：${errorMessageOf(json)}`);
     process.exit(1);
   }
   reportRun(json as RunOk, started);

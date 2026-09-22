@@ -11,6 +11,7 @@ import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
 import type { AttemptSummaryApi } from "@/lib/api";
+import { apiErrorOf } from "./helpers/fixtures";
 
 /**
  * §31~§33/§46 HTTP 路由层：只验证「JSON 解析 → 委托 service → 响应形状」，
@@ -144,7 +145,7 @@ describe("POST /api/runs（§32/§46）", () => {
     withTmpDir();
     const res = await postRuns(post("/api/runs", "{not json"));
     expect(res.status).toBe(400);
-    expect((await readJson(res)).error).toContain("JSON");
+    expect(apiErrorOf(await readJson(res)).message).toContain("JSON");
   });
 
   it("config 非法 → 400（不创建 Run 目录）", async () => {
@@ -204,8 +205,8 @@ describe("POST /api/runs — validation failed（§26/§42/§44）", () => {
       const res = await postRuns(post("/api/runs", { config }));
       expect(res.status).toBe(502);
       const body = await readJson(res);
-      expect(body.stage).toBe("generating");
-      expect(String(body.error)).toContain("LLM 返回内容为空");
+      expect(apiErrorOf(body).stage).toBe("generating");
+      expect(apiErrorOf(body).message).toContain("LLM 返回内容为空");
       // 没有进入 Validate 阶段，因此不产生 validation.json
       expect(existsSync(join(dir, "runs", String(body.run_id), "validation.json"))).toBe(false);
       expect(existsSync(join(dir, "runs", String(body.run_id), "story.md"))).toBe(false);
@@ -340,7 +341,7 @@ describe("POST /api/runs/from-plan（§33）", () => {
     stubLLM();
     const res = await postRunsFromPlan(post("/api/runs/from-plan", { config }));
     expect(res.status).toBe(400);
-    expect((await readJson(res)).error).toContain("beat_plan is required");
+    expect(apiErrorOf(await readJson(res)).message).toContain("beat_plan is required");
   });
 
   it("beat_plan 非法 → 400", async () => {
@@ -354,7 +355,7 @@ describe("POST /api/runs/from-plan（§33）", () => {
     withTmpDir();
     const res = await postRunsFromPlan(post("/api/runs/from-plan", "nope"));
     expect(res.status).toBe(400);
-    expect((await readJson(res)).error).toContain("JSON");
+    expect(apiErrorOf(await readJson(res)).message).toContain("JSON");
   });
 
   it("LLM 失败 → 502，body 带 run_id 与 stage（§28）", async () => {
@@ -363,11 +364,11 @@ describe("POST /api/runs/from-plan（§33）", () => {
     const res = await postRunsFromPlan(post("/api/runs/from-plan", { config, beat_plan: plan }));
     expect(res.status).toBe(502);
     const body = await readJson(res);
-    expect(String(body.error)).toContain("500");
-    expect(String(body.run_id)).toMatch(RUN_ID);
-    expect(body.stage).toBe("generating");
+    expect(apiErrorOf(body).code).toBe("LLM_REQUEST_FAILED");
+    expect(String(apiErrorOf(body).run_id)).toMatch(RUN_ID);
+    expect(apiErrorOf(body).stage).toBe("generating");
     // §19：失败也留下 metadata
-    const meta = JSON.parse(readFileSync(join(dir, "runs", String(body.run_id), "metadata.json"), "utf8"));
+    const meta = JSON.parse(readFileSync(join(dir, "runs", String(apiErrorOf(body).run_id), "metadata.json"), "utf8"));
     expect(meta.status).toBe("failed");
     expect(meta.current_stage).toBe("generating");
   });
@@ -405,7 +406,7 @@ describe("POST /api/review（§29/§46）", () => {
     stubLLM();
     const res = await postReview(post("/api/review", { config }));
     expect(res.status).toBe(400);
-    expect((await readJson(res)).error).toContain("story is required");
+    expect(apiErrorOf(await readJson(res)).message).toContain("story is required");
   });
 
   it("config 非法 → 400", async () => {
@@ -423,14 +424,14 @@ describe("POST /api/review（§29/§46）", () => {
     stubLLM("这不是 JSON");
     const res = await postReview(post("/api/review", { config, story: "正文" }));
     expect(res.status).toBe(502);
-    expect((await readJson(res)).error).toContain("Reviewer 输出不是合法 JSON");
+    expect(apiErrorOf(await readJson(res)).message).toContain("Reviewer 输出不是合法 JSON");
   });
 
   it("请求体不是合法 JSON → 400", async () => {
     withTmpDir();
     const res = await postReview(post("/api/review", "{oops"));
     expect(res.status).toBe(400);
-    expect((await readJson(res)).error).toContain("JSON");
+    expect(apiErrorOf(await readJson(res)).message).toContain("JSON");
   });
 
   it("run_id 越界（..）被拒绝，不会写到 runs 之外", async () => {
@@ -438,7 +439,7 @@ describe("POST /api/review（§29/§46）", () => {
     stubLLM();
     const res = await postReview(post("/api/review", { config, story: "正文", run_id: "../../evil" }));
     expect(res.status).toBe(400);
-    expect((await readJson(res)).error).toContain("run_id 非法");
+    expect(apiErrorOf(await readJson(res)).message).toContain("run_id 非法");
     expect(existsSync(join(tmp as string, "evil"))).toBe(false);
     expect(existsSync(join(tmp as string, "..", "evil"))).toBe(false);
   });
@@ -447,7 +448,7 @@ describe("POST /api/review（§29/§46）", () => {
     withTmpDir();
     stubLLM();
     const res = await postReview(post("/api/review", { config, story: "正文", run_id: "20260101_000000_zzzzzz" }));
-    expect(res.status).toBe(400);
-    expect((await readJson(res)).error).toContain("run_id 不存在");
+    expect(res.status).toBe(404);
+    expect(apiErrorOf(await readJson(res)).code).toBe("RUN_NOT_FOUND");
   });
 });

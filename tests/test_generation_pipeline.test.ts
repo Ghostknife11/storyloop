@@ -10,6 +10,7 @@ import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
+import { repoVersion } from "./helpers/fixtures";
 
 /**
  * §3/§5~§7/§16~§30/§38~§40/§43~§45/§59~§62 GenerationPipeline。
@@ -159,7 +160,7 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
     expect(meta.run_id).toBe(result.run_id);
     expect(meta.status).toBe("completed");
     expect(meta.current_stage).toBe("completed");
-    expect(meta.project_version).toBe("0.8.0");
+    expect(meta.project_version).toBe(repoVersion());
     expect(meta.finished_at).toBeTruthy();
     // §17/§24：metadata 单独记录校验与审阅状态
     expect(meta.validation_status).toBe("completed");

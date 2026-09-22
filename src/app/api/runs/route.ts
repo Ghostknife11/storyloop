@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { startRun } from "@/lib/generate-service";
+import { errorBody } from "@/lib/api-error";
 
 /**
  * §27 POST /api/runs —— Automatic Run。
@@ -11,7 +12,7 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: "请求体不是合法 JSON" }, { status: 400 });
+    return NextResponse.json(errorBody("CONFIG_INVALID", "请求体不是合法 JSON"), { status: 400 });
   }
   const { status, json } = await startRun(body);
   return NextResponse.json(json, { status });

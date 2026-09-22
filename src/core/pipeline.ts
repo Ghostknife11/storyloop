@@ -22,13 +22,21 @@ import type { GenerationAttempt } from "@/core/generation-attempt";
 import { RepairStrategy } from "@/core/repair-strategy";
 import type { RepairRecord } from "@/types/repair";
 import { repairRequestOf } from "@/types/repair";
+import { logger } from "@/lib/logger";
+import { projectVersion as readProjectVersion } from "@/lib/version";
 
 /**
  * §28 PipelineError：不吞异常，带 run_id / stage / message。
  * 技术日志记原始异常，用户 API 只拿这里的 message。
+ * cause 保留被包裹的原始异常，供错误码映射区分 LLM 失败与其它生成失败（§11）。
  */
 export class PipelineError extends Error {
-  constructor(message: string, public runId: string, public stage: string) {
+  constructor(
+    message: string,
+    public runId: string,
+    public stage: string,
+    public readonly cause?: unknown,
+  ) {
     super(message);
     this.name = "PipelineError";
   }
@@ -150,6 +158,8 @@ interface AttemptRecord {
   validation_error: string | null;
   review_status: ReviewStatus;
   review_error: string | null;
+  /** 生成阶段原始异常：只用于错误码映射（§11），绝不写入任何产物或响应。 */
+  failure?: unknown;
 }
 
 /**
@@ -175,7 +185,8 @@ export class GenerationPipeline {
     private repairer?: StoryRepairer,
     /** §12 固定规则策略；不注入时用默认实例，仍然不学习、不调 LLM。 */
     private repairStrategy: RepairStrategy = new RepairStrategy(),
-    private projectVersion = "0.8.0",
+    /** §42 版本号单一来源：VERSION 文件（§43），不在代码里硬编码。 */
+    private projectVersion: string = readProjectVersion(),
   ) {}
 
   /** §6 Automatic：StoryConfig → Plan → 若干 Attempt → 选中的那一个。 */
@@ -216,7 +227,9 @@ export class GenerationPipeline {
       this.artifactStore.putMetadata(rid, this.metaFor(ctx, runtime, { ...policyPatch(policy) }));
       // §8：Plan once——不要每次 Retry 都重新规划。
       if (!beatPlan) {
+        logger.child({ run_id: rid }).info("planning started");
         beatPlan = await this.planner.plan(config, runtime?.temperature ?? 0.7);
+        logger.child({ run_id: rid }).info(`planning completed（${beatPlan.beats.length} beats）`);
       }
       this.artifactStore.putBeatPlan(rid, beatPlan);
 
@@ -225,6 +238,10 @@ export class GenerationPipeline {
       for (let attemptNumber = 1; attemptNumber <= policy.max_attempts; attemptNumber++) {
         const record = await this.runAttempt(ctx, rid, config, beatPlan, runtime, policy, attemptNumber);
         records.push(record);
+        // §9：Attempt 结束时记一条 run/attempt 级日志，重试与采纳在日志里可定位
+        logger
+          .child({ run_id: rid, attempt_number: attemptNumber })
+          .info(record.attempt.accepted ? "attempt accepted" : `attempt not accepted（${record.attempt.retry_reason ?? "unknown"}）`);
         if (record.attempt.accepted) break;
         // §11.1/§20：生成失败也按策略再试（continue_if_allowed）；
         // 只有最后一次允许的 Attempt 仍拿不到正文 → Run 失败，
@@ -234,6 +251,7 @@ export class GenerationPipeline {
             `Run ${rid} failed at generating: ${record.attempt.error ?? "未知错误"}`,
             rid,
             "generating",
+            record.failure,
           );
         }
       }
@@ -288,8 +306,8 @@ export class GenerationPipeline {
     } catch (e) {
       // §18/§19/§20：失败阶段可识别，已产出的文件不删除
       const detail = safeDetail(errorDetail(e));
-      // §28：原始异常只进服务端技术日志
-      console.error(`[pipeline] run ${rid} failed at ${ctx.current_stage ?? "unknown"}:`, e);
+      // §28/§9：原始异常只进服务端日志，带 run_id 与失败阶段
+      logger.child({ run_id: rid }).error(`run failed at ${ctx.current_stage ?? "unknown"}`, e);
       failRun(ctx, ctx.current_stage ?? "unknown", detail);
       try {
         this.artifactStore.putMetadata(rid, this.metaFor(ctx, runtime));
@@ -300,6 +318,7 @@ export class GenerationPipeline {
         ["Run", rid, "failed at", ctx.current_stage ?? "unknown", ":", detail].join(" "),
         rid,
         ctx.current_stage ?? "unknown",
+        e,
       );
     }
   }
@@ -323,6 +342,7 @@ export class GenerationPipeline {
   ): Promise<AttemptRecord> {
     let story: string | null = null;
     let generationError: string | null = null;
+    let generationFailure: unknown = null;
 
     transitionStage(ctx, "generating", "generating");
     this.artifactStore.putMetadata(
@@ -337,8 +357,9 @@ export class GenerationPipeline {
       story = await this.generator.generate(config, plan, runtime?.temperature ?? 0.8);
     } catch (e) {
       generationError = safeDetail(errorDetail(e));
-      // §28：原始异常只进服务端技术日志
-      console.error(`[pipeline] run ${rid} attempt ${attemptNumber} generation failed:`, e);
+      generationFailure = e;
+      // §28/§9：原始异常只进服务端日志
+      logger.child({ run_id: rid, attempt_number: attemptNumber }).error("generation failed", e);
     }
 
     // §17：先保存 Story，再 Validate / Review。
@@ -423,6 +444,7 @@ export class GenerationPipeline {
       validation_error: check.validation_error,
       review_status: check.review_status,
       review_error: check.review_error,
+      failure: generationFailure,
     };
   }
 
@@ -489,7 +511,7 @@ export class GenerationPipeline {
       validation = null;
       validationStatus = "failed";
       validationError = safeDetail(errorDetail(e));
-      console.error(`[pipeline] run ${rid} attempt ${attemptNumber} validation failed:`, e);
+      logger.child({ run_id: rid, attempt_number: attemptNumber }).error("validation failed", e);
     }
 
     let review: ReviewResult | null = null;
@@ -520,7 +542,7 @@ export class GenerationPipeline {
         review = null;
         reviewStatus = "failed";
         reviewError = safeDetail(errorDetail(e));
-        console.error(`[pipeline] run ${rid} attempt ${attemptNumber} review failed:`, e);
+        logger.child({ run_id: rid, attempt_number: attemptNumber }).error("review failed", e);
       }
     }
 
@@ -629,10 +651,9 @@ export class GenerationPipeline {
           before_validation_passed: beforeValidation ? beforeValidation.passed : null,
           after_validation_passed: null,
         });
-        console.error(
-          `[pipeline] run ${rid} attempt ${attemptNumber} repair ${repairNumber} failed:`,
-          outcome.notes,
-        );
+        logger
+          .child({ run_id: rid, attempt_number: attemptNumber, repair_number: repairNumber })
+          .error("repair failed", outcome.notes ?? "未给出原因");
         break;
       }
 
@@ -646,6 +667,10 @@ export class GenerationPipeline {
       check = after;
       decision = this.decide(policy, attemptNumber, null, check);
       const success = decision.reason === null;
+      // §9：修订结束记一条 run/attempt/repair 级日志，成没成都能定位到第几次修订
+      logger
+        .child({ run_id: rid, attempt_number: attemptNumber, repair_number: repairNumber })
+        .info(`repair completed（${target.issue_type}）→ ${success ? "accepted" : "still failing"}`);
 
       repairs.push({
         repair_number: repairNumber,

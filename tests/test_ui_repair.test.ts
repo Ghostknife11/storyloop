@@ -241,7 +241,7 @@ describe("§38/§50 手动修订客户端", () => {
   });
 
   it("§15 失败时抛出可读错误，不静默、不自动重试", async () => {
-    stubJson({ error: "Repair failed. 原因：上游模型超时" }, false, 502);
+    stubJson({ error: { code: "REPAIR_FAILED", message: "Repair failed. 原因：上游模型超时" } }, false, 502);
     await expect(
       repairStory(config, plan, "原正文。", "ending", "缺结局。"),
     ).rejects.toThrow("上游模型超时");

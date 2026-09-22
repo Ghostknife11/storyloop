@@ -70,12 +70,12 @@ describe("Review Again：reviewStory（§29/§47）", () => {
   });
 
   it("§15 Reviewer 返回非法 JSON（502）→ 抛出可读错误，不自动重试", async () => {
-    stubJson({ error: "Review failed. 原因：Reviewer 输出不是合法 JSON" }, false, 502);
+    stubJson({ error: { code: "REVIEW_FAILED", message: "Review failed. 原因：Reviewer 输出不是合法 JSON" } }, false, 502);
     await expect(reviewStory(config, "正文", {})).rejects.toThrow(/Reviewer 输出不是合法 JSON/);
   });
 
   it("§29 story 缺失（400）→ 抛出明确错误", async () => {
-    stubJson({ error: "story is required——提供需要审阅的小说正文" }, false, 400);
+    stubJson({ error: { code: "CONFIG_INVALID", message: "story is required——提供需要审阅的小说正文" } }, false, 400);
     await expect(reviewStory(config, "正文", {})).rejects.toThrow(/story is required/);
   });
 });

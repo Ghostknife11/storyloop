@@ -89,7 +89,7 @@ describe("Validate Again：validateStory（§27/§28）", () => {
   });
 
   it("请求非法（400）→ 抛出可读错误，不自动重试", async () => {
-    stubJson({ error: "story is required——提供需要校验的小说正文" }, false, 400);
+    stubJson({ error: { code: "CONFIG_INVALID", message: "story is required——提供需要校验的小说正文" } }, false, 400);
     await expect(validateStory(config, "")).rejects.toThrow(/story is required/);
   });
 

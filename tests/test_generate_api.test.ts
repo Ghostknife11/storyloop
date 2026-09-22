@@ -8,6 +8,7 @@ import { BeatParseError } from "@/lib/beat-parser";
 import { StoryGenerator } from "@/lib/story-generator";
 import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
+import { apiErrorOf, repoVersion } from "./helpers/fixtures";
 
 const config: StoryConfig = validateStoryConfig({
   title: "消失的目击者",
@@ -51,11 +52,6 @@ function withTmpDir() {
 
 function runDirOf(dir: string, runId: string) {
   return join(dir, "runs", runId);
-}
-
-/** PipelineError 形如 "Run <run_id> failed at <stage>: <detail>"。 */
-function runIdFromError(message: string): string {
-  return message.split(" ")[1] ?? "";
 }
 
 describe("POST /api/runs（v0.6.0 Automatic Run）", () => {
@@ -109,7 +105,7 @@ describe("POST /api/runs（v0.6.0 Automatic Run）", () => {
     expect(meta.run_id).toBe(ok.run_id);
     expect(meta.status).toBe("completed");
     expect(meta.current_stage).toBe("completed");
-    expect(meta.project_version).toBe("0.8.0");
+    expect(meta.project_version).toBe(repoVersion());
     // §25：metadata 记录当时生效的策略与 Attempt 结论
     expect(meta.max_attempts).toBe(2);
     expect(meta.min_review_score).toBe(70);
@@ -159,9 +155,12 @@ describe("POST /api/runs（v0.6.0 Automatic Run）", () => {
       { planner: { plan: async () => { throw new BeatParseError("Planner 输出不是合法 JSON"); } } as never, generator },
     );
     expect(r.status).toBe(502);
-    const err = r.json as { error: string };
-    expect(err.error).toContain("planning");
-    const runDir = runDirOf(dir, runIdFromError(err.error));
+    const err = apiErrorOf(r.json);
+    expect(err.code).toBe("PLANNER_INVALID_OUTPUT");
+    expect(err.stage).toBe("planning");
+    expect(err.message).toContain("planning");
+    expect(err.run_id).toMatch(RUN_ID);
+    const runDir = runDirOf(dir, err.run_id as string);
     expect(existsSync(join(runDir, "config.json"))).toBe(true);
     expect(existsSync(join(runDir, "story.md"))).toBe(false);
     const meta = JSON.parse(readFileSync(join(runDir, "metadata.json"), "utf8"));
@@ -173,11 +172,13 @@ describe("POST /api/runs（v0.6.0 Automatic Run）", () => {
     const dir = withTmpDir();
     const r = await startRun({ config }, { llm: failLLM as never, planner: fakePlanner(plan) as never });
     expect(r.status).toBe(502);
-    const err = r.json as { error: string };
-    expect(err.error).toContain("401");
-    expect(err.error).toContain("generating");
-    const runId = runIdFromError(err.error);
-    expect(runId).toMatch(RUN_ID);
+    const err = apiErrorOf(r.json);
+    // §11：LLM 层失败保留专属错误码，不退化成 GENERATION_FAILED
+    expect(err.code).toBe("LLM_REQUEST_FAILED");
+    expect(err.stage).toBe("generating");
+    expect(err.message).toContain("401");
+    expect(err.run_id).toMatch(RUN_ID);
+    const runId = err.run_id as string;
     const meta = JSON.parse(readFileSync(join(runDirOf(dir, runId), "metadata.json"), "utf8"));
     expect(meta.status).toBe("failed");
     expect(meta.error).toContain("401");
@@ -225,7 +226,7 @@ describe("POST /api/runs/from-plan（v0.6.0 Manual Run）", () => {
   it("§29 missing beat_plan → 400 beat_plan is required", async () => {
     const r = await startRunFromPlan({ config }, { generator });
     expect(r.status).toBe(400);
-    expect((r.json as { error: string }).error).toContain("beat_plan is required");
+    expect(apiErrorOf(r.json).message).toContain("beat_plan is required");
   });
 
   it("§47 invalid beat_plan → 400", async () => {
@@ -256,7 +257,7 @@ describe("POST /api/generate（§35 兼容入口）", () => {
   it("§26 legacy {title, prompt} 无 beat_plan → 400（两阶段为必须）", async () => {
     const r = await handleGenerate({ title: "旧版请求", prompt: "旧版自由文本需求。" }, fakeLLM as never, generator);
     expect(r.status).toBe(400);
-    expect((r.json as { error: string }).error).toContain("beat_plan is required");
+    expect(apiErrorOf(r.json).message).toContain("beat_plan is required");
   });
 
   it("§67 响应不含本地绝对路径", async () => {

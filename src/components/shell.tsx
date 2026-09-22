@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTheme } from "@/components/theme-provider";
+import { fetchProjectVersion } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { Button } from "@/components/ui/button";
@@ -35,11 +36,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [version, setVersion] = useState("v0.8.0");
+  // §43：初值不写死版本号，取到 /api/version 再显示
+  const [version, setVersion] = useState("");
   const { resolvedTheme, setTheme } = useTheme();
   useEffect(() => { setMounted(true); }, []);
   useEffect(() => {
-    fetch("/api/version").then(r => r.json()).then(d => { if (d?.version) setVersion(`v${d.version}`); }).catch(() => {});
+    fetchProjectVersion().then((v) => setVersion(`v${v}`)).catch(() => setVersion(""));
   }, []);
 
   return (

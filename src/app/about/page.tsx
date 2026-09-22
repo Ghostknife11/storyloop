@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ExternalLink, ScrollText } from "lucide-react";
+import { fetchProjectVersion } from "@/lib/api";
 
 /**
  * `/about`（TASK §6）：Version / Project / License / Repository。
@@ -10,7 +11,8 @@ import { ExternalLink, ScrollText } from "lucide-react";
 export default function AboutPage() {
   const [version, setVersion] = useState("…");
   useEffect(() => {
-    fetch("/api/version").then(r => r.json()).then(d => { if (d?.version) setVersion(d.version); }).catch(() => setVersion("0.8.0"));
+    // §43：版本号只有一个入口，取不到就明说读不到，不在这里放第二份硬编码版本
+    fetchProjectVersion().then(setVersion).catch(() => setVersion("未知"));
   }, []);
 
   const rows = [

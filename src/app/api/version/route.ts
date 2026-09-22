@@ -1,13 +1,7 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { NextResponse } from "next/server";
+import { projectVersion } from "@/lib/version";
 
+/** §42/§43 版本号唯一真源是仓库 VERSION 文件，这里只转发，不自己维护第二份。 */
 export async function GET() {
-  let version = "0.8.0";
-  try {
-    version = readFileSync(join(process.cwd(), "VERSION"), "utf8").trim() || version;
-  } catch {
-    /* VERSION 文件缺失时使用内置版本号 */
-  }
-  return NextResponse.json({ version });
+  return NextResponse.json({ version: projectVersion() });
 }

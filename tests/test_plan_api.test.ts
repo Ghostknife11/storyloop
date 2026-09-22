@@ -4,6 +4,7 @@ import { BeatParseError } from "@/lib/beat-parser";
 import { LLMError } from "@/lib/llm";
 import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
 import type { BeatPlan } from "@/types/beat-plan";
+import { apiErrorOf } from "./helpers/fixtures";
 
 /** §28 POST /api/plan 服务层：StoryConfig → BeatPlanner → BeatPlan。 */
 
@@ -63,7 +64,7 @@ describe("planStory（/api/plan 服务层）", () => {
   it("非法 StoryConfig → 400 且带具体原因", async () => {
     const r = await planStory({ title: "", genre: "悬疑", premise: "有设定。" }, undefined, fakePlanner(planJson) as never);
     expect(r.status).toBe(400);
-    expect((r.json as { error: string }).error).toContain("标题");
+    expect(apiErrorOf(r.json).message).toContain("标题");
   });
 
   it("不支持的 config_version → 400", async () => {
@@ -73,7 +74,7 @@ describe("planStory（/api/plan 服务层）", () => {
       fakePlanner(planJson) as never,
     );
     expect(r.status).toBe(400);
-    expect((r.json as { error: string }).error).toContain("config_version");
+    expect(apiErrorOf(r.json).message).toContain("config_version");
   });
 
   it("§26 legacy {title, prompt} → 归一化为 premise 后正常规划", async () => {
@@ -92,8 +93,9 @@ describe("planStory（/api/plan 服务层）", () => {
       fakePlanner(new BeatParseError("Planner 输出不是合法 JSON")) as never,
     );
     expect(r.status).toBe(502);
-    expect((r.json as { error: string }).error).toContain("Plan generation failed");
-    expect((r.json as { error: string }).error).toContain("不是合法 JSON");
+    expect(apiErrorOf(r.json).code).toBe("PLANNER_INVALID_OUTPUT");
+    expect(apiErrorOf(r.json).message).toContain("Plan generation failed");
+    expect(apiErrorOf(r.json).message).toContain("不是合法 JSON");
   });
 
   it("LLM 失败 → LLMError → 502", async () => {
@@ -103,7 +105,8 @@ describe("planStory（/api/plan 服务层）", () => {
       fakePlanner(new LLMError("LLM API 返回 401")) as never,
     );
     expect(r.status).toBe(502);
-    expect((r.json as { error: string }).error).toContain("401");
+    expect(apiErrorOf(r.json).code).toBe("LLM_REQUEST_FAILED");
+    expect(apiErrorOf(r.json).message).toContain("401");
   });
 
   it("§2 没有 Pipeline：planStory 只返回 BeatPlan，不含正文字段", async () => {

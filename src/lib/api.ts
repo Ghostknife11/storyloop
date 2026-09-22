@@ -58,6 +58,36 @@ export class RunApiError extends Error {
   }
 }
 
+/** §11 统一错误响应：{error:{code,message,run_id?,stage?}}。
+ *  code 是稳定枚举，message 是给人看的一句话；run_id / stage 有就带。 */
+export interface ApiErrorDetail {
+  code: string;
+  message: string;
+  run_id?: string;
+  stage?: string;
+}
+
+export interface ApiErrorBody {
+  error: ApiErrorDetail;
+}
+
+/** 从响应体里取统一错误细节；形状不认识时给一句兜底话，绝不把堆栈透到前端。 */
+export function apiErrorDetailOf(data: unknown, fallback: string): ApiErrorDetail {
+  if (data && typeof data === "object" && "error" in data) {
+    const err = (data as { error: unknown }).error;
+    if (err && typeof err === "object" && "message" in err) {
+      const detail = err as ApiErrorDetail;
+      return {
+        code: typeof detail.code === "string" ? detail.code : "INTERNAL_ERROR",
+        message: String(detail.message ?? fallback),
+        ...(detail.run_id ? { run_id: detail.run_id } : {}),
+        ...(detail.stage ? { stage: detail.stage } : {}),
+      };
+    }
+  }
+  return { code: "INTERNAL_ERROR", message: fallback };
+}
+
 async function postRun(url: string, payload: unknown): Promise<RunApiResult> {
   const res = await fetch(url, {
     method: "POST",
@@ -66,8 +96,8 @@ async function postRun(url: string, payload: unknown): Promise<RunApiResult> {
   });
   const data = await res.json();
   if (!res.ok) {
-    const err = data as { error?: string; run_id?: string; stage?: string };
-    throw new RunApiError(err?.error || `生成失败（HTTP ${res.status}）`, err?.run_id, err?.stage);
+    const detail = apiErrorDetailOf(data, `生成失败（HTTP ${res.status}）`);
+    throw new RunApiError(detail.message, detail.run_id, detail.stage);
   }
   return data as RunApiResult;
 }
@@ -83,7 +113,7 @@ export async function planStory(
     body: JSON.stringify({ ...config, ...runtime }),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || `规划失败（HTTP ${res.status}）`);
+  if (!res.ok) throw new Error(apiErrorDetailOf(data, `规划失败（HTTP ${res.status}）`).message);
   return data as BeatPlan;
 }
 
@@ -179,7 +209,7 @@ export interface AttemptDetailApi {
 export async function fetchRun(runId: string): Promise<RunDetailApi> {
   const res = await fetch(`/api/runs/${encodeURIComponent(runId)}`);
   const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || `读取 Run 失败（HTTP ${res.status}）`);
+  if (!res.ok) throw new Error(apiErrorDetailOf(data, `读取 Run 失败（HTTP ${res.status}）`).message);
   return data as RunDetailApi;
 }
 
@@ -190,7 +220,7 @@ export async function fetchRun(runId: string): Promise<RunDetailApi> {
 export async function fetchRunAttempt(runId: string, attemptNumber: number): Promise<AttemptDetailApi> {
   const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/attempts/${attemptNumber}`);
   const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || `读取 Attempt 失败（HTTP ${res.status}）`);
+  if (!res.ok) throw new Error(apiErrorDetailOf(data, `读取 Attempt 失败（HTTP ${res.status}）`).message);
   return data as AttemptDetailApi;
 }
 
@@ -205,7 +235,7 @@ export async function previewPrompt(
     body: JSON.stringify(plan ? { config, beat_plan: plan } : config),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || `预览失败（HTTP ${res.status}）`);
+  if (!res.ok) throw new Error(apiErrorDetailOf(data, `预览失败（HTTP ${res.status}）`).message);
   return data.prompt as string;
 }
 
@@ -225,7 +255,7 @@ export async function reviewStory(
     body: JSON.stringify({ config, story, ...runtime, ...(runId ? { run_id: runId } : {}) }),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || `审阅失败（HTTP ${res.status}）`);
+  if (!res.ok) throw new Error(apiErrorDetailOf(data, `审阅失败（HTTP ${res.status}）`).message);
   return data as ReviewResult;
 }
 
@@ -244,7 +274,7 @@ export async function validateStory(
     body: JSON.stringify({ config, story, ...(runId ? { run_id: runId } : {}) }),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || `校验失败（HTTP ${res.status}）`);
+  if (!res.ok) throw new Error(apiErrorDetailOf(data, `校验失败（HTTP ${res.status}）`).message);
   return data as ValidationResult;
 }
 
@@ -254,6 +284,15 @@ export interface RepairResultApi {
   issue_type: string;
   success: boolean;
   notes: string | null;
+}
+
+/** §43 版本号集中读取：Shell 与 About 页共用同一个入口，不再各自 fetch、各自兜底一份硬编码版本。 */
+export async function fetchProjectVersion(): Promise<string> {
+  const res = await fetch("/api/version");
+  const data = (await res.json()) as { version?: unknown } | null;
+  const version = typeof data?.version === "string" ? data.version.trim() : "";
+  if (!res.ok || version === "") throw new Error(`读取版本失败（HTTP ${res.status}）`);
+  return version;
 }
 
 /** §38/§50 手动 Repair：针对一条明确问题修订当前正文。
@@ -279,6 +318,6 @@ export async function repairStory(
     }),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || `修订失败（HTTP ${res.status}）`);
+  if (!res.ok) throw new Error(apiErrorDetailOf(data, `修订失败（HTTP ${res.status}）`).message);
   return data as RepairResultApi;
 }

@@ -137,7 +137,7 @@ describe("UI → API 契约：存取后的 StoryConfig 原样进入生成请求"
     const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => ({
       ok: false,
       status: 400,
-      json: async () => ({ error: "标题不能为空" }),
+      json: async () => ({ error: { code: "CONFIG_INVALID", message: "标题不能为空" } }),
     }));
     vi.stubGlobal("fetch", fetchMock);
     await expect(previewPrompt(loaded)).rejects.toThrow("标题不能为空");

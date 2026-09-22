@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { clientFromEnv, LLMClient, LLMError } from "@/lib/llm";
+import { clientFromEnv, LLMClient } from "@/lib/llm";
 import { validateStoryConfig } from "@/types/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
 import { BeatPlanner } from "@/lib/beat-planner";
@@ -8,8 +8,11 @@ import { StoryValidator } from "@/lib/story-validator";
 import { BasicReviewer } from "@/lib/basic-reviewer";
 import { StoryRepairer } from "@/lib/story-repairer";
 import { RepairStrategy } from "@/core/repair-strategy";
-import { GenerationPipeline, PipelineError, type GenerationResult } from "@/core/pipeline";
+import { GenerationPipeline, type GenerationResult } from "@/core/pipeline";
 import { ArtifactStore } from "@/storage/artifact-store";
+import { logger } from "@/lib/logger";
+import { appSettings } from "@/lib/app-config";
+import { errorBody, toApiError, type ApiErrorBody } from "@/lib/api-error";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
 import type { RepairDetail, RepairIssueType, RepairResult, RepairSummary } from "@/types/repair";
@@ -19,12 +22,10 @@ import {
   repairSummary,
   validateRepairIssueType,
   validateRepairRecord,
-  RepairValidationError,
 } from "@/types/repair";
 import {
   DEFAULT_RETRY_POLICY,
   RETRY_REASONS,
-  RetryPolicyError,
   validateRetryPolicy,
   type RetryPolicy,
   type RetryReason,
@@ -85,7 +86,7 @@ export async function planStory(
   body: unknown,
   llm?: LLMClient,
   planner?: BeatPlanner,
-): Promise<{ status: number; json: BeatPlan | { error: string } }> {
+): Promise<{ status: number; json: BeatPlan | ApiErrorBody }> {
   try {
     const raw = normalizeLegacy((body ?? {}) as Record<string, unknown>);
     const config = validateStoryConfig(raw);
@@ -97,22 +98,10 @@ export async function planStory(
     const plan = await p.plan(config, runtime.temperature ?? 0.7);
     return { status: 200, json: plan };
   } catch (e) {
-    if (e instanceof Error && (
-      e.name === "ConfigValidationError" ||
-      e.name === "RequestValidationError" ||
-      e.name === "UnsupportedConfigVersionError"
-    )) {
-      return { status: 400, json: { error: e.message } };
-    }
-    if (e instanceof Error && e.name === "BeatParseError") {
-      // §13：明确错误，用户手动 Regenerate，禁止业务层自动重试
-      return { status: 502, json: { error: `Plan generation failed. 原因：${e.message}` } };
-    }
-    if (e instanceof LLMError) {
-      return { status: 502, json: { error: `Plan generation failed. 原因：${e.message}` } };
-    }
-    console.error("[plan] unexpected error:", e);
-    return { status: 500, json: { error: "Plan generation failed. 原因：服务器内部错误" } };
+    // §11/§12/§13：统一错误形状；堆栈只进服务端日志，响应里只有一句话
+    const err = toApiError(e);
+    logger.error(`plan failed (${err.code})`, e);
+    return { status: err.httpStatus, json: err.body() };
   }
 }
 
@@ -146,11 +135,8 @@ export interface RunOk {
   attempts: AttemptSummary[];
 }
 
-export interface RunError {
-  error: string;
-  run_id?: string;
-  stage?: string;
-}
+/** §11 统一错误响应体：{error:{code,message,run_id?,stage?}}。 */
+export type RunError = ApiErrorBody;
 
 export type RunResult = { status: number; json: RunOk | RunError };
 
@@ -188,7 +174,7 @@ export function buildPipeline(runtime: GenerateRuntime, deps: RunDeps = {}): Gen
     llm,
     join(PROJECT_ROOT, "prompts", "reviewer.txt"),
   );
-  const artifactStore = deps.artifactStore ?? new ArtifactStore();
+  const artifactStore = deps.artifactStore ?? new ArtifactStore(appSettings().runsDir);
   const repairer = deps.repairer ?? new StoryRepairer(
     llm,
     join(PROJECT_ROOT, "prompts", "repair.txt"),
@@ -228,32 +214,11 @@ function retryPolicyOf(raw: Record<string, unknown>): RetryPolicy {
   return validateRetryPolicy(raw.retry_policy ?? DEFAULT_RETRY_POLICY);
 }
 
-/** §28 错误映射：阶段来自 PipelineError，用户拿得到失败阶段与 run_id。 */
+/** §28/§11 错误映射：阶段来自 PipelineError，用户拿得到失败阶段与 run_id。 */
 function runFail(e: unknown): RunResult {
-  if (e instanceof PipelineError) {
-    return { status: 502, json: { error: e.message, run_id: e.runId, stage: e.stage } };
-  }
-  if (e instanceof RetryPolicyError) {
-    // §31：策略越界是调用方错误，不是服务器故障
-    return { status: 400, json: { error: e.message } };
-  }
-  if (e instanceof Error && (
-    e.name === "ConfigValidationError" ||
-    e.name === "RequestValidationError" ||
-    e.name === "UnsupportedConfigVersionError" ||
-    e.name === "BeatPlanValidationError" ||
-    e.name === "ReviewValidationError"
-  )) {
-    return { status: 400, json: { error: e.message } };
-  }
-  if (
-    e instanceof LLMError ||
-    (e instanceof Error && (e.name === "BeatParseError" || e.name === "ReviewParseError"))
-  ) {
-    return { status: 502, json: { error: `Generation failed. 原因：${e.message}` } };
-  }
-  console.error("[runs] unexpected error:", e);
-  return { status: 500, json: { error: "Generation failed. 原因：服务器内部错误" } };
+  const err = toApiError(e);
+  logger.error(`run failed (${err.code})`, e);
+  return { status: err.httpStatus, json: err.body() };
 }
 
 /** §6/§32 Automatic Run：StoryConfig → Config → Planning → Generation → Persistence。 */
@@ -277,7 +242,13 @@ export async function startRunFromPlan(body: unknown, deps: RunDeps = {}): Promi
     const config = validateStoryConfig(raw.config ?? normalizeLegacy(raw));
 
     if (raw.beat_plan === undefined || raw.beat_plan === null) {
-      return { status: 400, json: { error: "beat_plan is required——先生成剧情骨架（Generate Plan），再生成正文" } };
+      return {
+        status: 400,
+        json: errorBody(
+          "CONFIG_INVALID",
+          "beat_plan is required——先生成剧情骨架（Generate Plan），再生成正文",
+        ),
+      };
     }
     const plan = validateBeatPlan(raw.beat_plan);
 
@@ -306,7 +277,7 @@ export async function handleGenerate(
 export async function previewPrompt(
   body: unknown,
   generator?: StoryGenerator,
-): Promise<{ status: number; json: { prompt: string } | { error: string } }> {
+): Promise<{ status: number; json: { prompt: string } | ApiErrorBody }> {
   try {
     const raw = (body ?? {}) as Record<string, unknown>;
     const config = validateStoryConfig(raw.config ?? normalizeLegacy(raw));
@@ -324,24 +295,16 @@ export async function previewPrompt(
       });
     return { status: 200, json: { prompt } };
   } catch (e) {
-    if (
-      e instanceof Error &&
-      (
-        e.name === "ConfigValidationError" ||
-        e.name === "RequestValidationError" ||
-        e.name === "UnsupportedConfigVersionError"
-      )
-    ) {
-      return { status: 400, json: { error: e.message } };
-    }
-    return { status: 500, json: { error: "服务器内部错误" } };
+    const err = toApiError(e);
+    logger.error(`prompt preview failed (${err.code})`, e);
+    return { status: err.httpStatus, json: err.body() };
   }
 }
 
-/** §29/§30 手动审阅结果：成功回 ReviewResult；失败回安全错误信息。 */
+/** §29/§30 手动审阅结果：成功回 ReviewResult；失败回统一错误体。 */
 export type ReviewOutcome =
   | { status: number; json: ReviewResult }
-  | { status: number; json: { error: string } };
+  | { status: number; json: ApiErrorBody };
 
 /**
  * §29 POST /api/review 的服务层：{config, story}（可选 run_id）→ BasicReviewer → ReviewResult。
@@ -355,7 +318,7 @@ export async function reviewStory(body: unknown, deps: RunDeps = {}): Promise<Re
 
     const story = typeof raw.story === "string" ? raw.story.trim() : "";
     if (!story) {
-      return { status: 400, json: { error: "story is required——提供需要审阅的小说正文" } };
+      return { status: 400, json: errorBody("CONFIG_INVALID", "story is required——提供需要审阅的小说正文") };
     }
 
     const runtime = runtimeOf(raw);
@@ -368,17 +331,18 @@ export async function reviewStory(body: unknown, deps: RunDeps = {}): Promise<Re
     // §30：re-review 覆盖当前 review.json（run_id 越界由 ArtifactStore 拦截）
     const runId = typeof raw.run_id === "string" ? raw.run_id.trim() : "";
     if (runId) {
-      const store = deps.artifactStore ?? new ArtifactStore();
+      const store = deps.artifactStore ?? new ArtifactStore(appSettings().runsDir);
       let exists: boolean;
       try {
         exists = store.runExists(runId);
       } catch {
-        return { status: 400, json: { error: `run_id 非法：${runId}` } };
+        return { status: 400, json: errorBody("CONFIG_INVALID", `run_id 非法：${runId}`) };
       }
       if (!exists) {
+        // §12：Run 不存在是用户错误，用 404 而不是 500
         return {
-          status: 400,
-          json: { error: `run_id 不存在：${runId}（只能覆盖已存在 Run 的 review.json）` },
+          status: 404,
+          json: errorBody("RUN_NOT_FOUND", `run_id 不存在：${runId}（只能覆盖已存在 Run 的 review.json）`),
         };
       }
       store.putReview(runId, review);
@@ -386,30 +350,16 @@ export async function reviewStory(body: unknown, deps: RunDeps = {}): Promise<Re
 
     return { status: 200, json: review };
   } catch (e) {
-    if (e instanceof Error && (
-      e.name === "ConfigValidationError" ||
-      e.name === "RequestValidationError" ||
-      e.name === "UnsupportedConfigVersionError" ||
-      e.name === "ReviewValidationError"
-    )) {
-      return { status: 400, json: { error: e.message } };
-    }
-    if (
-      e instanceof LLMError ||
-      (e instanceof Error && (e.name === "BeatParseError" || e.name === "ReviewParseError"))
-    ) {
-      // §15：明确错误，用户手动 Review Again，禁止业务层自动重试
-      return { status: 502, json: { error: `Review failed. 原因：${e.message}` } };
-    }
-    console.error("[review] unexpected error:", e);
-    return { status: 500, json: { error: "Review failed. 原因：服务器内部错误" } };
+    const err = toApiError(e);
+    logger.error(`review failed (${err.code})`, e);
+    return { status: err.httpStatus, json: err.body() };
   }
 }
 
-/** §27 手动校验结果：成功回 ValidationResult；失败回安全错误信息。 */
+/** §27 手动校验结果：成功回 ValidationResult；失败回统一错误体。 */
 export type ValidationOutcome =
   | { status: number; json: ValidationResult }
-  | { status: number; json: { error: string } };
+  | { status: number; json: ApiErrorBody };
 
 /**
  * §27 POST /api/validate 的服务层：{config, story}（可选 run_id）→ StoryValidator → ValidationResult。
@@ -424,7 +374,7 @@ export async function validateStory(body: unknown, deps: RunDeps = {}): Promise<
     // §27：story 字段缺失或类型不对属于请求格式错误（400）；
     // 而「有值却全是空白」是内容层面的硬失败，交给 EMPTY_CONTENT 规则报告（§10/§16）。
     if (typeof raw.story !== "string") {
-      return { status: 400, json: { error: "story is required——提供需要校验的小说正文" } };
+      return { status: 400, json: errorBody("CONFIG_INVALID", "story is required——提供需要校验的小说正文") };
     }
     const story = raw.story;
 
@@ -434,17 +384,18 @@ export async function validateStory(body: unknown, deps: RunDeps = {}): Promise<
     // §27：re-validate 覆盖当前 validation.json（run_id 越界由 ArtifactStore 拦截）
     const runId = typeof raw.run_id === "string" ? raw.run_id.trim() : "";
     if (runId) {
-      const store = deps.artifactStore ?? new ArtifactStore();
+      const store = deps.artifactStore ?? new ArtifactStore(appSettings().runsDir);
       let exists: boolean;
       try {
         exists = store.runExists(runId);
       } catch {
-        return { status: 400, json: { error: `run_id 非法：${runId}` } };
+        return { status: 400, json: errorBody("CONFIG_INVALID", `run_id 非法：${runId}`) };
       }
       if (!exists) {
+        // §12：Run 不存在是用户错误，用 404 而不是 500
         return {
-          status: 400,
-          json: { error: `run_id 不存在：${runId}（只能覆盖已存在 Run 的 validation.json）` },
+          status: 404,
+          json: errorBody("RUN_NOT_FOUND", `run_id 不存在：${runId}（只能覆盖已存在 Run 的 validation.json）`),
         };
       }
       store.putValidation(runId, validation);
@@ -452,20 +403,9 @@ export async function validateStory(body: unknown, deps: RunDeps = {}): Promise<
 
     return { status: 200, json: validation };
   } catch (e) {
-    if (e instanceof Error && (
-      e.name === "ConfigValidationError" ||
-      e.name === "RequestValidationError" ||
-      e.name === "UnsupportedConfigVersionError" ||
-      e.name === "ValidationValidationError"
-    )) {
-      return { status: 400, json: { error: e.message } };
-    }
-    if (e instanceof Error && e.name === "ValidatorError") {
-      console.error("[validate] validator error:", e);
-      return { status: 500, json: { error: `Validation failed. 原因：${e.message}` } };
-    }
-    console.error("[validate] unexpected error:", e);
-    return { status: 500, json: { error: "Validation failed. 原因：服务器内部错误" } };
+    const err = toApiError(e);
+    logger.error(`validate failed (${err.code})`, e);
+    return { status: err.httpStatus, json: err.body() };
   }
 }
 
@@ -475,12 +415,10 @@ export async function validateStory(body: unknown, deps: RunDeps = {}): Promise<
 // StoryRepairer + RepairStrategy，不引入第二套修订实现（§62 只新增不重写）。
 // ---------------------------------------------------------------------------
 
-/** §38 RepairOutcome：成功回 repaired_story + issue_type + success。 */
+/** §38 RepairOutcome：成功回 repaired_story + issue_type + success；失败回统一错误体。 */
 export type RepairOutcome =
   | { status: 200; json: RepairResult }
-  | { status: 400; json: { error: string } }
-  | { status: 500; json: { error: string } }
-  | { status: 502; json: { error: string } };
+  | { status: number; json: ApiErrorBody };
 
 /**
  * §38 POST /api/repair 的服务层：
@@ -495,12 +433,12 @@ export async function repairStory(body: unknown, deps: RunDeps = {}): Promise<Re
     const plan = validateBeatPlan(raw.beat_plan);
 
     if (typeof raw.story !== "string" || !raw.story.trim()) {
-      return { status: 400, json: { error: "story is required——提供需要修订的小说正文" } };
+      return { status: 400, json: errorBody("CONFIG_INVALID", "story is required——提供需要修订的小说正文") };
     }
     const issueType: RepairIssueType = validateRepairIssueType(raw.issue_type);
     const issueMessage = typeof raw.issue_message === "string" ? raw.issue_message.trim() : "";
     if (!issueMessage) {
-      return { status: 400, json: { error: "issue_message is required——说明要修的问题" } };
+      return { status: 400, json: errorBody("CONFIG_INVALID", "issue_message is required——说明要修的问题") };
     }
 
     const runtime = runtimeOf(raw);
@@ -513,23 +451,9 @@ export async function repairStory(body: unknown, deps: RunDeps = {}): Promise<Re
     );
     return { status: 200, json: result };
   } catch (e) {
-    if (e instanceof RepairValidationError) {
-      return { status: 400, json: { error: e.message } };
-    }
-    if (e instanceof Error && (
-      e.name === "ConfigValidationError" ||
-      e.name === "RequestValidationError" ||
-      e.name === "UnsupportedConfigVersionError" ||
-      e.name === "BeatPlanValidationError"
-    )) {
-      return { status: 400, json: { error: e.message } };
-    }
-    if (e instanceof LLMError) {
-      // §15：明确错误，用户手动 Repair Again，禁止业务层自动重试
-      return { status: 502, json: { error: `Repair failed. 原因：${e.message}` } };
-    }
-    console.error("[repair] unexpected error:", e);
-    return { status: 500, json: { error: "Repair failed. 原因：服务器内部错误" } };
+    const err = toApiError(e);
+    logger.error(`repair failed (${err.code})`, e);
+    return { status: err.httpStatus, json: err.body() };
   }
 }
 
@@ -669,20 +593,20 @@ function attemptSummaryFromDisk(
  */
 export async function getRun(
   runIdRaw: unknown,
-  store: ArtifactStore = new ArtifactStore(),
+  store: ArtifactStore = new ArtifactStore(appSettings().runsDir),
 ): Promise<RunLookupResult> {
   const runId = runIdOf(runIdRaw);
   if (runId === null) {
-    return { status: 400, json: { error: "run_id 非法：必须是单个目录名" } };
+    return { status: 400, json: errorBody("CONFIG_INVALID", "run_id 非法：必须是单个目录名") };
   }
   let exists: boolean;
   try {
     exists = store.runExists(runId);
   } catch {
-    return { status: 400, json: { error: `run_id 非法：${runId}` } };
+    return { status: 400, json: errorBody("CONFIG_INVALID", `run_id 非法：${runId}`) };
   }
   if (!exists) {
-    return { status: 404, json: { error: `run_id 不存在：${runId}` } };
+    return { status: 404, json: errorBody("RUN_NOT_FOUND", `run_id 不存在：${runId}`) };
   }
 
   const meta = store.readRunMetadata(runId);
@@ -722,39 +646,39 @@ export async function getRun(
 export async function getRunAttempt(
   runIdRaw: unknown,
   attemptNumberRaw: unknown,
-  store: ArtifactStore = new ArtifactStore(),
+  store: ArtifactStore = new ArtifactStore(appSettings().runsDir),
 ): Promise<AttemptLookupResult> {
   const runId = runIdOf(runIdRaw);
   if (runId === null) {
-    return { status: 400, json: { error: "run_id 非法：必须是单个目录名" } };
+    return { status: 400, json: errorBody("CONFIG_INVALID", "run_id 非法：必须是单个目录名") };
   }
   let attemptNumber: number;
   try {
     attemptNumber = validateAttemptNumber(intOf(attemptNumberRaw) ?? 0);
   } catch {
-    return { status: 400, json: { error: "attempt_number 必须是大于 0 的整数" } };
+    return { status: 400, json: errorBody("CONFIG_INVALID", "attempt_number 必须是大于 0 的整数") };
   }
   if (attemptNumber > 99) {
-    return { status: 400, json: { error: "attempt_number 不能超过 99" } };
+    return { status: 400, json: errorBody("CONFIG_INVALID", "attempt_number 不能超过 99") };
   }
 
   let exists: boolean;
   try {
     exists = store.runExists(runId);
   } catch {
-    return { status: 400, json: { error: `run_id 非法：${runId}` } };
+    return { status: 400, json: errorBody("CONFIG_INVALID", `run_id 非法：${runId}`) };
   }
   if (!exists) {
-    return { status: 404, json: { error: `run_id 不存在：${runId}` } };
+    return { status: 404, json: errorBody("RUN_NOT_FOUND", `run_id 不存在：${runId}`) };
   }
   let attemptExists: boolean;
   try {
     attemptExists = store.attemptExists(runId, attemptNumber);
   } catch {
-    return { status: 400, json: { error: `attempt_number 非法：${attemptNumber}` } };
+    return { status: 400, json: errorBody("CONFIG_INVALID", `attempt_number 非法：${attemptNumber}`) };
   }
   if (!attemptExists) {
-    return { status: 404, json: { error: `Attempt ${attemptNumber} 不存在于 Run ${runId}` } };
+    return { status: 404, json: errorBody("RUN_NOT_FOUND", `Attempt ${attemptNumber} 不存在于 Run ${runId}`) };
   }
 
   const meta = store.readRunMetadata(runId);

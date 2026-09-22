@@ -11,6 +11,7 @@ import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
+import { apiErrorOf } from "./helpers/fixtures";
 
 /**
  * §37~§39/§51 Retry API：请求体带 retry_policy、响应带 Attempt 摘要、
@@ -130,7 +131,7 @@ describe("POST /api/runs — retry policy（§37/§51）", () => {
     for (const bad of [0, 6, 2.5, "2"]) {
       const r = await runWith({ config, retry_policy: { max_attempts: bad } }, [STORY], [passed], [review]);
       expect(r.status).toBe(400);
-      expect(String((r.json as unknown as { error?: string }).error)).toContain("max_attempts");
+      expect(apiErrorOf(r.json).message).toContain("max_attempts");
     }
     expect(existsSync(join(dir, "runs"))).toBe(false);
   });
@@ -140,7 +141,7 @@ describe("POST /api/runs — retry policy（§37/§51）", () => {
     for (const bad of [-1, 101, "70", NaN]) {
       const r = await runWith({ config, retry_policy: { min_review_score: bad } }, [STORY], [passed], [review]);
       expect(r.status).toBe(400);
-      expect(String((r.json as unknown as { error?: string }).error)).toContain("min_review_score");
+      expect(apiErrorOf(r.json).message).toContain("min_review_score");
     }
   });
 
@@ -359,7 +360,7 @@ describe("HTTP 路由本身（§37）", () => {
     const res = await postRuns(req);
     // 没有注入假组件 → 不会走到真实 LLM：策略在校验阶段就被拒
     expect(res.status).toBe(400);
-    expect(String((await readJson(res)).error)).toContain("max_attempts");
+    expect(apiErrorOf(await readJson(res)).message).toContain("max_attempts");
   });
 
   it("POST /api/runs/from-plan 的 beat_plan 缺失仍优先报 400", async () => {
@@ -371,7 +372,7 @@ describe("HTTP 路由本身（§37）", () => {
     });
     const res = await postRunsFromPlan(req);
     expect(res.status).toBe(400);
-    expect(String((await readJson(res)).error)).toContain("beat_plan");
+    expect(apiErrorOf(await readJson(res)).message).toContain("beat_plan");
   });
 
   it("fetch 注入只被使用一次也能跑通（无真实网络）", async () => {

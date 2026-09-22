@@ -6,13 +6,14 @@ import { NextRequest } from "next/server";
 import { POST as postRepair } from "@/app/api/repair/route";
 import { GET as getRun } from "@/app/api/runs/[run_id]/route";
 import { GET as getRunAttempt } from "@/app/api/runs/[run_id]/attempts/[attempt_number]/route";
-import { repairStory, startRun } from "@/lib/generate-service";
+import { repairStory, startRun, type RunOk } from "@/lib/generate-service";
 import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
 import type { RepairIssueType, RepairRequest, RepairResult } from "@/types/repair";
 import { LLMError } from "@/lib/llm";
+import { apiErrorOf } from "./helpers/fixtures";
 
 /**
  * §38/§40/§68 Repair API：POST /api/repair 的手动修订契约 +
@@ -176,7 +177,7 @@ describe("POST /api/repair —— 手动定点修订（§38）", () => {
       { repairer: rep as never } as never,
     );
     expect(result.status).toBe(400);
-    expect(String((result.json as { error?: string }).error)).toContain("issue_type");
+    expect(apiErrorOf(result.json).message).toContain("issue_type");
     expect(rep.requests).toHaveLength(0);
   });
 
@@ -189,7 +190,7 @@ describe("POST /api/repair —— 手动定点修订（§38）", () => {
         { repairer: rep as never } as never,
       );
       expect(result.status).toBe(400);
-      expect(String((result.json as { error?: string }).error)).toContain("story");
+      expect(apiErrorOf(result.json).message).toContain("story");
       expect(rep.requests).toHaveLength(0);
     }
   });
@@ -203,7 +204,7 @@ describe("POST /api/repair —— 手动定点修订（§38）", () => {
         { repairer: rep as never } as never,
       );
       expect(result.status).toBe(400);
-      expect(String((result.json as { error?: string }).error)).toContain("issue_message");
+      expect(apiErrorOf(result.json).message).toContain("issue_message");
       expect(rep.requests).toHaveLength(0);
     }
   });
@@ -231,7 +232,7 @@ describe("POST /api/repair —— 手动定点修订（§38）", () => {
       { repairer: { repair: async () => { throw new LLMError("上游模型超时"); } } as never } as never,
     );
     expect(result.status).toBe(502);
-    expect(String((result.json as { error?: string }).error)).toContain("上游模型超时");
+    expect(apiErrorOf(result.json).message).toContain("上游模型超时");
   });
 
   it("§15 修不好也如实返回：repaired_story 为空 + success=false，没有假装成功", async () => {
@@ -256,7 +257,7 @@ describe("POST /api/repair —— 手动定点修订（§38）", () => {
     });
     const res = await postRepair(req);
     expect(res.status).toBe(400);
-    expect(String((await readJson(res)).error)).toContain("JSON");
+    expect(apiErrorOf(await readJson(res)).message).toContain("JSON");
   });
 
   it("§38 路由转发的缺字段请求 → 400，不会走到真实 LLM", async () => {
@@ -268,7 +269,7 @@ describe("POST /api/repair —— 手动定点修订（§38）", () => {
     });
     const res = await postRepair(req);
     expect(res.status).toBe(400);
-    expect(String((await readJson(res)).error)).toContain("issue_type");
+    expect(apiErrorOf(await readJson(res)).message).toContain("issue_type");
   });
 });
 
@@ -327,7 +328,7 @@ describe("§40 Run 响应与详情里的修复摘要", () => {
       [review, { ...review, score: 82 }],
       rep,
     );
-    const runId = String(created.json.run_id);
+    const runId = String((created.json as RunOk).run_id);
     const res = await getRun({} as never, { params: Promise.resolve({ run_id: runId }) } as never);
     expect(res.status).toBe(200);
     const body = await readJson(res);
@@ -350,7 +351,7 @@ describe("§40 Run 响应与详情里的修复摘要", () => {
       [review, { ...review, score: 82 }],
       rep,
     );
-    const runId = String(created.json.run_id);
+    const runId = String((created.json as RunOk).run_id);
 
     const res = await getRunAttempt({} as never, {
       params: Promise.resolve({ run_id: runId, attempt_number: "1" }),
@@ -392,7 +393,7 @@ describe("§40 Run 响应与详情里的修复摘要", () => {
       [{ ...review, score: 80 }],
       rep,
     );
-    const runId = String(created.json.run_id);
+    const runId = String((created.json as RunOk).run_id);
     const res = await getRunAttempt({} as never, {
       params: Promise.resolve({ run_id: runId, attempt_number: "1" }),
     } as never);
@@ -413,7 +414,7 @@ describe("§40 Run 响应与详情里的修复摘要", () => {
       [review, review, { ...review, score: 88 }],
       rep,
     );
-    const runId = String(created.json.run_id);
+    const runId = String((created.json as RunOk).run_id);
     const attemptDir = join(dir, "runs", runId, "attempts", "01");
     // §29：修了两次 → repairs/01 与 repairs/02，attempt 目录本身还是 01
     expect(existsSync(join(attemptDir, "repairs", "01", "story.md"))).toBe(true);

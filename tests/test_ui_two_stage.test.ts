@@ -50,7 +50,7 @@ describe("Step 1：planStory（Generate Plan）", () => {
   });
 
   it("§13 规划失败（502）→ 抛出可读错误，StoryConfig 侧不自动重试", async () => {
-    stubJson({ error: "Plan generation failed. 原因：Planner 输出不是合法 JSON" }, false, 502);
+    stubJson({ error: { code: "PLANNER_INVALID_OUTPUT", message: "Plan generation failed. 原因：Planner 输出不是合法 JSON" } }, false, 502);
     await expect(planStory(config, {})).rejects.toThrow(/Planner 输出不是合法 JSON/);
   });
 });
@@ -79,14 +79,14 @@ describe("Step 2：generateFromPlan（Generate Story → Manual Run）", () => {
   });
 
   it("§29 缺 beat_plan 时服务端 400，错误信息指引先规划", async () => {
-    stubJson({ error: "beat_plan is required——先生成剧情骨架（Generate Plan），再生成正文" }, false, 400);
+    stubJson({ error: { code: "CONFIG_INVALID", message: "beat_plan is required——先生成剧情骨架（Generate Plan），再生成正文" } }, false, 400);
     await expect(
       generateFromPlan(config, plan, {}).catch((e: Error) => { throw e; }),
     ).rejects.toThrow(/beat_plan is required/);
   });
 
   it("生成失败（502）→ 抛出可读错误，并带上 run_id 与 stage（§28）", async () => {
-    stubJson({ error: "Run 20260920_101500_ab12cd failed at generating : LLM API 返回 401", run_id: "20260920_101500_ab12cd", stage: "generating" }, false, 502);
+    stubJson({ error: { code: "LLM_REQUEST_FAILED", message: "Run 20260920_101500_ab12cd failed at generating : LLM API 返回 401", run_id: "20260920_101500_ab12cd", stage: "generating" } }, false, 502);
     const err = await generateFromPlan(config, plan, {}).catch((e: Error) => e);
     expect(err).toBeInstanceOf(RunApiError);
     expect((err as RunApiError).message).toMatch(/401/);
