@@ -32,6 +32,7 @@ export const SAMPLE_CONFIG: StoryConfig = validateStoryConfig({
   setting: "现代一线城市，商业贿赂案庭审前夜。",
   conflict: "女主必须在嫌疑人销毁证据之前找到失踪证人。",
   stakes: "证人缺席将导致案件失败。",
+  ending: "陈岚在雨夜找到证人，但选择说出自己那三分钟的去向。",
   target_words: 5000,
   protagonist: { name: "陈岚", identity: "刑警", goal: "在开庭前找到证人" },
   style: "冷峻、节奏紧凑",
@@ -80,8 +81,12 @@ export function reviewOf(score: number, problems: string[] = []): ReviewResult {
 
 /** 仓库 VERSION 文件内容：project_version 的唯一真源（§42），与 src/lib/version.ts 同源。 */
 export function repoVersion(): string {
-  const root = fileURLToPath(new URL("../..", import.meta.url));
-  return readFileSync(join(root, "VERSION"), "utf8").trim();
+  return readFileSync(join(repoRoot(), "VERSION"), "utf8").trim();
+}
+
+/** 仓库根目录：tests/helpers/ 上溯两级。供合同测试读 configs/、docs/、examples/ 等入库资产。 */
+export function repoRoot(): string {
+  return fileURLToPath(new URL("../..", import.meta.url));
 }
 
 /** 把 v0.9.0 的 {error:{code,message,run_id?,stage?}} 解析成可断言的细节对象。 */
