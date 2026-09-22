@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { clientFromEnv, LLMClient } from "@/lib/llm";
+import { assertPublicBaseUrl } from "@/lib/url-guard";
 import { validateStoryConfig } from "@/types/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
 import { BeatPlanner } from "@/lib/beat-planner";
@@ -79,6 +80,21 @@ function runtimeOf(raw: Record<string, unknown>): GenerateRuntime {
 }
 
 /**
+ * 请求体里的 baseUrl 覆盖决定服务端把 LLM_API_KEY 发到哪里（clientFromEnv 把它作为
+ * Bearer token 发出），所以真要建客户端之前先校验那个地址：不是 http/https，或指向
+ * 本机 / 环回 / 私网 / 保留段的，一律按 400 CONFIG_INVALID 拒掉，一个字节都还没发。
+ *
+ * 注入了 llm（测试的假模型、调用方自带客户端）时这个地址根本用不到，也就不必校验——
+ * 否则「服务端指向本地假模型」的联调用法会被自己挡掉。同理，运维在 LLM_BASE_URL
+ * 里配的地址是受信配置，不走这里（它不来自请求体）。
+ */
+async function clientFor(runtime: GenerateRuntime, injected?: LLMClient): Promise<LLMClient> {
+  if (injected) return injected;
+  await assertPublicBaseUrl(runtime.baseUrl);
+  return clientFromEnv(runtime);
+}
+
+/**
  * §28 POST /api/plan 的服务层：StoryConfig → BeatPlanner → BeatPlan。
  * §2：两个明确函数顺序工作，不是 GenerationPipeline。
  */
@@ -92,7 +108,7 @@ export async function planStory(
     const config = validateStoryConfig(raw);
     const runtime = runtimeOf(raw);
     const p = planner ?? new BeatPlanner(
-      llm ?? clientFromEnv(runtime),
+      await clientFor(runtime, llm),
       join(PROJECT_ROOT, "prompts", "beat_planner.txt"),
     );
     const plan = await p.plan(config, runtime.temperature ?? 0.7);
@@ -159,8 +175,8 @@ export interface RunDeps {
  * §3 Validator 是纯规则，不需要 LLM。
  * §9 Repairer 用同一个 LLMClient；不注入 Repairer 时 Pipeline 完全不修（§51-E）。
  */
-export function buildPipeline(runtime: GenerateRuntime, deps: RunDeps = {}): GenerationPipeline {
-  const llm = deps.llm ?? clientFromEnv(runtime);
+export async function buildPipeline(runtime: GenerateRuntime, deps: RunDeps = {}): Promise<GenerationPipeline> {
+  const llm = await clientFor(runtime, deps.llm);
   const planner = deps.planner ?? new BeatPlanner(
     llm,
     join(PROJECT_ROOT, "prompts", "beat_planner.txt"),
@@ -228,7 +244,7 @@ export async function startRun(body: unknown, deps: RunDeps = {}): Promise<RunRe
     const config = validateStoryConfig(raw.config ?? normalizeLegacy(raw));
     const runtime = runtimeOf(raw);
     const policy = retryPolicyOf(raw);
-    const result = await buildPipeline(runtime, deps).run(config, runtime, policy);
+    const result = await (await buildPipeline(runtime, deps)).run(config, runtime, policy);
     return { status: 200, json: runOkOf(result) };
   } catch (e) {
     return runFail(e);
@@ -254,7 +270,7 @@ export async function startRunFromPlan(body: unknown, deps: RunDeps = {}): Promi
 
     const runtime = runtimeOf(raw);
     const policy = retryPolicyOf(raw);
-    const result = await buildPipeline(runtime, deps).runWithPlan(config, plan, runtime, policy);
+    const result = await (await buildPipeline(runtime, deps)).runWithPlan(config, plan, runtime, policy);
     return { status: 200, json: runOkOf(result) };
   } catch (e) {
     return runFail(e);
@@ -282,7 +298,7 @@ export async function previewPrompt(
     const raw = (body ?? {}) as Record<string, unknown>;
     const config = validateStoryConfig(raw.config ?? normalizeLegacy(raw));
     const gen = generator ?? new StoryGenerator(
-      clientFromEnv(runtimeOf(raw)),
+      await clientFor(runtimeOf(raw)),
       join(PROJECT_ROOT, "prompts", "story.txt"),
     );
     const planPart = raw.beat_plan;
@@ -323,7 +339,7 @@ export async function reviewStory(body: unknown, deps: RunDeps = {}): Promise<Re
 
     const runtime = runtimeOf(raw);
     const reviewer = deps.reviewer ?? new BasicReviewer(
-      deps.llm ?? clientFromEnv(runtime),
+      await clientFor(runtime, deps.llm),
       join(PROJECT_ROOT, "prompts", "reviewer.txt"),
     );
     const review = await reviewer.review(config, story);
@@ -443,7 +459,7 @@ export async function repairStory(body: unknown, deps: RunDeps = {}): Promise<Re
 
     const runtime = runtimeOf(raw);
     const repairer = deps.repairer ?? new StoryRepairer(
-      deps.llm ?? clientFromEnv(runtime),
+      await clientFor(runtime, deps.llm),
       join(PROJECT_ROOT, "prompts", "repair.txt"),
     );
     const result = await repairer.repair(
