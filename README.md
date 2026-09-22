@@ -194,9 +194,9 @@ runs/
 └── <run_id>/
     ├── config.json      # 本次运行使用的 StoryConfig
     ├── beats.json       # 实际采用的 BeatPlan（多次 Attempt 复用同一份）
-    ├── story.md         # 被选中那一次 Attempt 的正文（selected_attempt）
-    ├── validation.json  # 被选中那一次 Attempt 的硬性校验结果
-    ├── review.json      # 被选中那一次 Attempt 的审阅结果
+    ├── story.md         # 被选中那一次 Attempt 的正文（发生过修订时为修订后的版本）
+    ├── validation.json  # 被选中那一次 Attempt 的首次硬性校验结果
+    ├── review.json      # 被选中那一次 Attempt 的首次审阅结果
     ├── metadata.json    # 运行级 metadata
     └── attempts/
         ├── 01/
@@ -222,11 +222,16 @@ runs/
 运行级 `metadata.json` 的字段：`run_id`、`project_version`、`status`、`current_stage`、
 `started_at`、`finished_at`、`model`、`error`、`artifacts`、`validation_status`、
 `validation_passed`、`validation_issue_count`、`validation_error`、`review_status`、
-`review_score`、`review_error`、`max_attempts`、`min_review_score`、`retry_on_validation_failure`、
+`review_score`、`review_error`、`max_attempts`、`min_review_score`、
 `attempt_count`、`selected_attempt`、`quality_status`、`enable_repair`、
 `max_repairs_per_attempt`、`repair_count`。
 `model` 始终是「本次真正生效的模型」（请求覆盖 → 环境变量 → 缺省值），attempt 级的 `error`
 没有错误时是 `null`——这两条是 v1.0.0 固定下来的字段语义。
+
+发生过修订时有一处**刻意的不对称**：运行级 `metadata.json` 里的 `validation_*` / `review_score`
+取自入选 Attempt **修订后**的结论，而同目录的 `validation.json` / `review.json`（以及
+`attempts/NN/` 下的同名文件）是**首次**结论，修订后的那份在 `attempts/NN/repairs/MM/` 里。
+因此两处分数可能不同（`examples/example_run/` 就是这个样子）。1.x 内保持这个语义不变。
 
 **校验不通过不是 Run 失败**：`status` 仍为 `completed`，`validation_passed` 为 `false`，
 此时会按策略定点修订或自动重试。**校验器自身崩溃也不是 Run 失败**：`validation_status` 为 `failed`，
@@ -463,12 +468,14 @@ storygen repair    对已有正文定点修订一次
 
 ## 升级说明
 
-v1.0.0 相对于 0.9.x **几乎没有破坏性变更**，需要留意的只有两条：
-运行级 metadata 的 `model` 现在始终存在（以前按条件写），attempt 级 metadata 的 `error`
-没有错误时是 `null`（以前按条件写）。两者都是「字段从可能没有变成一定有」，不会让旧读取方崩掉。
+v1.0.1 没有行为变更：只修文档与产物不符的地方，并补一道「文档字段表 ↔ 真实产物」的对照测试。
+从 1.0.0 升到 1.0.1 不需要改任何代码；v1.0.0 相对于 0.9.x 也**几乎没有破坏性变更**，
+需要留意的只有两条：运行级 metadata 的 `model` 现在始终存在（以前按条件写），
+attempt 级 metadata 的 `error` 没有错误时是 `null`（以前按条件写）。
+两者都是「字段从可能没有变成一定有」，不会让旧读取方崩掉。
 
 ```bash
-git fetch && git checkout 1.0.0     # tag 不带 v 前缀
+git fetch && git checkout 1.0.1     # tag 不带 v 前缀
 npm install
 cp .env.example .env
 npx tsx scripts/generate-cli.ts run --config configs/example_story.json
@@ -489,7 +496,7 @@ node node_modules/next/dist/bin/next build       # 生产构建
 
 测试分两类。**行为测试**用注入的假 Generator / Validator / Reviewer 驱动 Pipeline，
 覆盖重试路径、修订路径、`exhausted` 路径与各条边界路径。
-**合同测试**（v1.0.0 新增）把公开契约钉死，改一个字段名就红：
+**合同测试**（v1.0.0 新增，v1.0.1 补了产物对照）把公开契约钉死，改一个字段名就红：
 
 | 合同测试 | 钉住什么 |
 |---|---|
@@ -499,6 +506,7 @@ node node_modules/next/dist/bin/next build       # 生产构建
 | `tests/test_contract_api.test.ts` | 路由清单、请求/响应字段、错误码与状态码映射 |
 | `tests/test_contract_cli.test.ts` | CLI 命令、参数、退出码、帮助输出位置 |
 | `tests/test_contract_docs.test.ts` | README 必备章节、docs/ 完整性、版本号唯一来源、防泄漏守卫 |
+| `tests/test_contract_docs_sync.test.ts` | 文档字段表 ↔ 真实产物逐字段一致（多写、漏写、改名都红） |
 
 所有测试都不调用真实 LLM：LLM 由注入的桩对象或 `FakeLLM` 替代（`tests/helpers/fixtures.ts`），
 `fetch` 也被桩掉。重试相关断言同样只用桩，从不触发真实模型调用。
@@ -519,7 +527,7 @@ node node_modules/next/dist/bin/next build       # 生产构建
 | [docs/run-artifacts.md](docs/run-artifacts.md) | Run 产物布局与 metadata 字段集 |
 | [docs/api.md](docs/api.md) | HTTP API 路由、字段、错误码 |
 | [docs/cli.md](docs/cli.md) | CLI 命令、参数、退出码 |
-| [docs/upgrade.md](docs/upgrade.md) | 从 0.9.x 升级到 1.0.0 |
+| [docs/upgrade.md](docs/upgrade.md) | 从 0.9.x / 1.0.0 升级到当前版本 |
 | [docs/compatibility.md](docs/compatibility.md) | 兼容性策略与扩展方式 |
 | [examples/example_run/](examples/example_run/) | 一次完整 Run 的合成样例产物 |
 | [configs/example_story.json](configs/example_story.json) | 覆盖全部可选字段的示例配置 |
