@@ -369,7 +369,8 @@ Validator 只回答「基本可用吗」，不回答「写得好不好」。
 快照出现在三个地方，内容一致：Run 根与 `attempts/NN/` 下的 `quality.json`、
 Run 类入口与两个读回接口响应里的 `quality`、前端 Quality Summary 面板。
 修订目录 `attempts/NN/repairs/MM/` 里**没有** `quality.json`。v1.2.0 之前的 Run 没有这个文件，
-读取时按同一套规则临时装配，不会因此失败。
+读取时按同一套规则临时装配，不会因此失败。装配取的是这次尝试**最终留下的那一版**结论
+（发生过修订时是修订后那一轮，与 `metadata.json` 同口径，v1.2.1 起如此）。
 
 ## 定点修订（Targeted Repair）
 
@@ -531,6 +532,8 @@ mapped / NAT64 地址按内嵌的那个地址判
 v1.2.0 建立了统一质量工程层（`QualityResult` / `quality.json` / API 的 `quality` 字段 /
 前端 Quality Summary 面板），纯 additive：从 1.1.x 升到 1.2.0 **不需要改任何代码**，
 1.1.1 写的产物可以直接读，1.2.0 写的 Run 回落到 1.1.x 也只是多一个被忽略的文件。
+v1.2.1 修的是旧 Run 质量兜底的口径（读取时临时装配改取修订后的那一版结论，
+与落盘的 `quality.json`、与 `metadata.json` 对齐），从 1.2.0 升到 1.2.1 不需要改任何代码。
 v1.1.1 修的是 v1.1.0 那道地址关卡自身的问题（CLI 的 `--base-url` 不再被自己挡、
 IPv4-mapped / NAT64 地址改判），约束方向不变；从 1.1.0 升到 1.1.1 不需要改任何代码。
 v1.1.0 收紧了请求体 `baseUrl` 覆盖的取值，只允许 http/https 的公网地址；其余与 1.0.1 一致。
@@ -540,7 +543,7 @@ attempt 级 metadata 的 `error` 没有错误时是 `null`（以前按条件写�
 两者都是「字段从可能没有变成一定有」，不会让旧读取方崩掉。
 
 ```bash
-git fetch && git checkout 1.2.0     # tag 不带 v 前缀
+git fetch && git checkout 1.2.1     # tag 不带 v 前缀
 npm install
 cp .env.example .env
 npx tsx scripts/generate-cli.ts run --config configs/example_story.json
@@ -573,8 +576,9 @@ node node_modules/next/dist/bin/next build       # 生产构建
 | `tests/test_contract_docs_sync.test.ts` | 文档字段表 ↔ 真实产物逐字段一致（多写、漏写、改名都红） |
 | `tests/test_url_guard.test.ts` | 请求体 `baseUrl` 只允许 http/https 公网地址，私网/环回/保留段在发请求前就被拒 |
 
-v1.2.0 的质量快照另有五个测试文件（同样只用假组件，不调真实接口）：
+v1.2.0 的质量快照另有六个测试文件（同样只用假组件，不调真实接口）：
 `test_quality_assembler`（装配规则与确定性）、`test_quality_models`（快照解析容错）、
+`test_quality_compat`（旧 `review.json` 解析、无快照的旧 Run、修订后口径兜底）、
 `test_quality_pipeline`（落盘与内存一致）、`test_quality_api`（三处口径一致、旧 Run 兼容、
 `quality.json` 损坏后的降级、地址关卡回归）、`test_quality_ui`（面板状态推导）。
 

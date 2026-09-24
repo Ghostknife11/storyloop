@@ -144,8 +144,9 @@ runs/
 ### 统一质量快照（v1.2.0）
 
 `quality.json` 是**新增的统一层**，不是 `review.json` 改名，也不替代任何已有产物。它由
-`QualityAssembler` 从已有的「首次校验结论 + 首次审阅结论 + 采纳结论」确定性装配，不调用
-LLM、不读文件系统、不引入新阈值——同一个输入永远得到同一份快照。字段为
+`QualityAssembler` 从已有的「最终校验结论 + 最终审阅结论 + 采纳结论」确定性装配（「最终」=
+这次尝试最后留下的那一版：发生过修订时取修订目录里的那份，见下面「快照取哪一轮的结论」），
+不调用 LLM、不读文件系统、不引入新阈值——同一个输入永远得到同一份快照。字段为
 `overall_score` / `validation_passed` / `accepted` / `issues` / `suggestions` / `summary`，
 详见 [api.md](./api.md) 的 `quality` 字段。
 
@@ -161,8 +162,10 @@ LLM、不读文件系统、不引入新阈值——同一个输入永远得到�
 - `repairs/NN/` 不写 `quality.json`：attempt 级那份已经是修订后的快照，再写一份内容相同
   的历史文件没有读者。
 
-1.2.0 之前产生的 Run 没有 `quality.json`，读接口按内存装配的结果兜底（
-[compatibility.md](./compatibility.md)），磁盘上不会补写。
+1.2.0 之前产生的 Run 没有 `quality.json`，读接口按同一套规则临时装配兜底（
+[compatibility.md](./compatibility.md)），磁盘上不会补写。v1.2.0 的这个兜底原先取的是
+attempt 目录下的**首次**结论，于是旧 Run 装配出的分数描述的是修订前那版正文；1.2.1 起改成
+与落盘口径一致的「最终那一版」，读到的 `quality` 与同一次尝试的 `metadata.json` 对齐。
 
 ## 安全约定
 

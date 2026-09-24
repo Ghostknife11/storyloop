@@ -93,9 +93,42 @@
   这是刻意保留的不对称（[compatibility.md](./compatibility.md) 已知不对称第 5 条）。
 
 升级后跑一遍 `npm test`：新增的 `tests/test_quality_assembler.test.ts`（装配规则）、
-`tests/test_quality_models.test.ts`（快照解析容错）、`tests/test_quality_pipeline.test.ts`
+`tests/test_quality_models.test.ts`（快照解析容错）、`tests/test_quality_compat.test.ts`
+（旧 `review.json` / 无快照的旧 Run 原样可读）、`tests/test_quality_pipeline.test.ts`
 （落盘与内存一致）、`tests/test_quality_api.test.ts`（读回一致、旧 Run 兼容）、
 `tests/test_quality_ui.test.ts`（面板状态推导）覆盖这一层，且都用假模型，不调真实接口。
+
+## 从 1.2.0 升级到 1.2.1
+
+**没有任何需要改代码的地方。** 1.2.1 是一次修订版本：没有新能力、没有新文件、没有改字段、
+没有改路由，只修 v1.2.0 一处「同一口径没走到底」的问题，顺带订正几处文档。
+
+1. **旧 Run 的 `quality` 兜底装配改取修订后的结论。** v1.2.0 落盘的 `quality.json` 取的是
+   修订后那一轮（与 `metadata.json` 的 `overall_score`、与最终采用的 `story.md` 同口径），
+   但没有这个文件的旧 Run 在读取时临时装配读的却是 attempt 目录下的**首次**结论。于是同一个
+   发生过修订的旧 Run：`metadata.json` 说 82、`repairs[].after_review_score` 说 82、
+   接口给的 `quality.overall_score` 是 41。v1.2.1 起按三级兜底取，每级都是「这次尝试最终留下
+   的那一版正文」（明细见 [api.md](./api.md) 与
+   [compatibility.md](./compatibility.md) 的「v1.2.1 对同一条口径的修正」）。
+2. **文档订正。** `docs/run-artifacts.md` 里一处把快照写成「首次校验 + 首次审阅」装配，
+   与同文件下一段的实际口径相反；README、`CHANGELOG.md` 与 1.2.0 Release 的质量测试文件数
+   写的都是五个，实际是六个（漏了 `tests/test_quality_compat.test.ts`）。
+
+如果你在读 1.2.0 之前生成的 Run，升级后会看到 `quality.overall_score` / `summary` /
+`suggestions` 与同一次尝试的 `metadata.json` 对齐（描述修订后那一版正文）。这是**修回**
+v1.2.0 承诺的口径，不是新行为：v1.2.0 之后生成的 Run 读取结果一个字节都没变，
+读接口依旧不写盘、不 500。
+
+```bash
+git fetch && git checkout 1.2.1     # tag 不带 v 前缀
+npm install
+```
+
+回滚到 1.2.0 没有任何代价（纯 additive 的差别只影响旧 Run 的兜底口径）：
+
+```bash
+git checkout 1.2.0
+```
 
 ## 从 0.9.x 升级到 1.0.0
 

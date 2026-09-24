@@ -137,6 +137,32 @@ v1.2.0 新增的是「怎么把已有的质量结论汇到一起」，不是新�
 三者同口径（`overall_score` 就是那一版正文的审阅分）。代价是同一层里两个文件的分数可能不同
 ——这与上方第 5 条已有的「metadata vs `review.json`」不对称同源，刻意保留，1.x 内不改。
 
+## v1.2.1 对同一条口径的修正（仍然纯 additive）
+
+v1.2.0 落盘的 `quality.json` 取修订后的结论，可**临时装配**那条路（v1.2.0 之前没有这个文件的
+Run）读的却是 attempt 目录下的**首次**结论。于是同一个发生过修订的旧 Run 会自相矛盾：
+
+- `metadata.json` 的 `review_score` 是 82、`repairs[].after_review_score` 是 82，
+  读接口给的 `quality.overall_score` 却是 41（修订前那版正文的审阅分）；
+- Run 根目录那份 `quality.json` 丢了、而 attempt 那份还在时，Run 详情与 Attempt 详情
+  还会给出两个不同分数。
+
+v1.2.1 把临时装配改成与落盘同口径，三级兜底，每一级都是「这次尝试最终留下的那一版正文」：
+
+1. `runs/<run_id>/quality.json`
+2. 入选 Attempt 自己的 `attempts/<NN>/quality.json`
+3. 前两级缺失或形状不认识时，从最终结论装配：发生过修订时取最后一次**真正跑过校验 / 审阅**
+   的 `repairs/<MM>/` 里的那两份（修订调用本身失败时不会写这两个文件，所以继续往前找），
+   一次修订都没跑通才回落到 attempt 目录下的首次结论
+
+这仍然是一条纯 additive 的修正：
+
+- 没有新增文件、没有改字段、没有改路由、没有改错误码；
+- v1.2.0 落盘过 `quality.json` 的 Run 读取结果一个字节都没变（第 1 / 2 级优先）；
+- 受影响的是 v1.2.0 之前生成的 Run 的 `quality` 字段，与同一次尝试的
+  `metadata.json` / `repairs[]` 对齐——修的是 v1.2.0 自己引入的口径不一致；
+- 读接口依旧不写盘、依旧不 500，`quality` 最差是 `null`。
+
 ## 破坏性变更怎么发布
 
 1. 在 `CHANGELOG.md` 里单独开一个条目，写清楚「旧行为 → 新行为 → 怎么改」

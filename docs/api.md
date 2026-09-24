@@ -147,15 +147,16 @@
 
 **发生过修订时，这几处的分数来源不同**（与 [run-artifacts.md](./run-artifacts.md) 的产物语义一致）：
 
-- Run 类入口的 `review` / `validation` 与 `attempts[].review_score` / `validation_passed`
-  来自**入选 Attempt 修订后**的结论——也就是这个 Run 最终采用的那一版；
-- `GET /api/runs/<run_id>/attempts/<attempt_number>` 的 `review` / `validation` 读的是
-  attempt 目录下的 `review.json` / `validation.json`，即该次尝试的**首次**结论；
-  修订后的那份要通过 `repairs[].before_review_score` / `after_review_score` 看变化。
-- 而三处响应的 `quality` 一律取**修订后**的结论（与最终采用的 `story` 对齐），
-  旧 Run 没有 `quality.json` 时按同一套规则临时装配。
+- Run 类入口（`/api/runs`、`/api/runs/from-plan`、`/api/generate`）的 `review` / `validation`
+  是内存返回值，取**最终**结论（修订后重新校验 / 审阅过的那一轮），与 `quality` 同口径；
+- 读接口的 `review` / `validation` 来自磁盘：Run 详情读 Run 根目录那两份（由入选 Attempt 提升
+  而来），Attempt 详情与 Run 摘要的 `attempts[]` 读 attempt 目录那两份——都是**首次**结论，
+  修订后的分数看 `repairs[].before_review_score` / `after_review_score` 的变化；
+- 而三处响应的 `quality` 一律取**最终**结论（与最终采用的 `story` 对齐）：v1.2.0 之后读
+  `quality.json`，旧 Run 没有这个文件（或被手改坏）时按同一套规则临时装配。
 
-所以同一个 Attempt 在「详情」和「Run 摘要」里看到不同分数不是 bug，详见
+所以同一个 Attempt 在不同接口看到不同分数不是 bug：写盘的那两份结论与内存返回值本来就不同源，
+这是 v1.0.0 冻结产物布局时定下的不对称，详见
 [compatibility.md](./compatibility.md) 的「已知的不对称」。
 
 ### `GET /api/runs/<run_id>`
@@ -163,8 +164,18 @@
 `RunDetail`，与 Run 入口不同：**没有** `beat_plan` 与 `artifacts`，
 多了策略回显字段 `max_attempts` / `min_review_score` / `enable_repair` / `max_repairs_per_attempt`。
 `run_id` 为 `""`、`.`、`..` 或含路径分隔符时 400；Run 不存在 404 `RUN_NOT_FOUND`。
-`quality` 与 Run 入口同结构：优先读 `runs/<run_id>/quality.json`，v1.2.0 之前的 Run 没有
-这个文件（或被手改坏）时按同一套确定性规则临时装配——读取不会因此失败。
+
+`quality` 按三级兜底取，三级都是同一版正文（入选 Attempt 最终留下的那一版）：
+
+1. `runs/<run_id>/quality.json`（运行根那份，v1.2.0 起由 promote 流程写入）
+2. 入选 Attempt 自己的 `attempts/<NN>/quality.json`
+3. 前两级都没有或形状不认识时，用同一套确定性规则从**最终结论**临时装配——发生过修订时取
+   最后一次真正跑过校验 / 审阅的 `repairs/<MM>/` 里的那两份，一次修订都没跑通才回落到
+   attempt 目录下的首次结论
+
+读取在任何一级都不失败：`quality` 最差是 `null`，不是 500，磁盘上也不会被补写。
+第 3 级这套「往前找最后一次真正跑过校验 / 审阅的修订目录」是 v1.2.1 定的口径，
+v1.2.0 直接读 attempt 目录，于是旧 Run 装配出的分数描述的是修订前那版正文。
 
 ### `GET /api/runs/<run_id>/attempts/<attempt_number>`
 
@@ -173,6 +184,7 @@
 `validation`、`review`、`quality`（v1.2.0 新增，取该次尝试修订后的快照）。
 Run 不存在与 Attempt 不存在共用 `RUN_NOT_FOUND` 这个 code，只能靠 message 区分；
 `attempt_number` 不是 1~99 的整数时 400。
+`quality` 先读 `attempts/<NN>/quality.json`，缺失或被改坏时按上面第 3 级同一套规则装配。
 
 ### `POST /api/review` 与 `POST /api/validate`
 
