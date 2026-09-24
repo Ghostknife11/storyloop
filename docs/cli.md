@@ -43,7 +43,7 @@ storygen run --config <story.json> [--beats <beats.json>] [--model M] [--tempera
 |---|---|---|
 | `--config` | 是 | StoryConfig JSON 文件 |
 | `--beats` | 否 | 给了就是手动模式：用编辑过的 BeatPlan 直接生成 |
-| `--model` / `--base-url` / `--temperature` | 否 | 覆盖服务端 LLM 设置 |
+| `--model` / `--base-url` / `--temperature` | 否 | 覆盖服务端 LLM 设置（见下方「`--base-url` 的信任级」） |
 | `--max-attempts` | 否 | 1~5，缺省 2 |
 | `--min-score` | 否 | 0~100，缺省 70 |
 | `--no-retry-on-validation-failure` | 否 | 硬性规则不过也继续，不整篇重生 |
@@ -51,6 +51,22 @@ storygen run --config <story.json> [--beats <beats.json>] [--model M] [--tempera
 | `--max-repairs` | 否 | 0~3，缺省 1；0 等于关闭修订 |
 
 开启自动重试或修订时，CLI 会先打一行提示说明这会增加 API 调用与费用。
+
+### `--base-url` 的信任级（v1.1.1 起明确）
+
+四个走模型子命令（`run` / `plan` / `review` / `repair`）的 `--base-url` 都是**本机受信配置**，
+信任级与服务端 `LLM_BASE_URL` 相同：能跑这条命令的人本来就读得到本机 `.env`，
+所以它**不经过**请求体那套「只允许公网地址」的限制（[api.md](./api.md) §26）。
+
+差别在于入口，不在于地址本身：
+
+- **HTTP 请求体里的 `baseUrl`** 来自不受信的调用方，服务端拿着 `LLM_API_KEY` 去请求它，
+  所以只允许 http/https 公网地址，本机 / 环回 / 私网 / 保留段一律 400。
+- **CLI 的 `--base-url`** 是操作者在本机输入的，与 `LLM_BASE_URL` 同级，
+  因此可以指向本地假模型（联调用法）；四个子命令表现一致。
+
+CLI 只把 `--model` / `--temperature` 放进请求体，`--base-url` 由 `cliClient` 构建成注入客户端。
+回归测试：`tests/test_cli.test.ts`「v1.1.1 CLI 入口的 baseUrl 信任级」。
 
 ### plan
 

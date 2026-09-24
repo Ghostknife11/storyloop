@@ -46,6 +46,27 @@
 升级后跑一遍 `npm test`：新增的 `tests/test_url_guard.test.ts` 会核对地址校验与服务层接线
 （含「拒绝时 `fetch` 一次都没被调用」）。域名解析用注入的假解析器，不真的查 DNS。
 
+## 从 1.1.0 升级到 1.1.1
+
+**没有任何需要改代码的地方。** 1.1.1 修的是 v1.1.0 那道地址关卡自身的问题：
+请求体 `baseUrl` 的约束方向不变，公网为主、内网一律拒绝的判定一条都没放松；产物布局、
+字段、错误码与 1.1.0 逐字一致。具体三项：
+
+1. **CLI 的 `--base-url` 恢复可用。** v1.1.0 把关卡接到了服务层，CLI 的 `plan` 因为没走
+   服务层而绕过了它，`run` / `review` / `repair` 却都被拦住——三个子命令拦、一个不拦，
+   而且文档没说 `--base-url` 也受影响。v1.1.1 明确 CLI 与 `LLM_BASE_URL` 同级（都是本机
+   受信配置）：四个子命令统一按受信输入处理，ClI 指向本地假模型不再被拒。
+   走 HTTP 的调用方行为完全不变。
+2. **内嵌 IPv4 的 IPv6 地址改判。** v1.1.0 匹配点分文本的分支永远走不到（URL 会先把
+   `[::ffff:127.0.0.1]` 规范化成 `[::ffff:7f00:1]`），于是合法的公网 mapped 地址被误拒。
+   v1.1.1 从地址最后两段取内嵌 IPv4，`::ffff:0:0/96` 与 NAT64 `64:ff9b::/96` 都按它判，
+   另补 `fec0::/10`、`2002::/16` 两段。禁令清单只增不减。
+3. **错误名与类名一致。** `UnsafeRequestUrlError` 不再借用 `RequestValidationError`。
+   对外的 `error.code`（`CONFIG_INVALID`）与 400 状态码不变。
+
+升级后跑一遍 `npm test`：`tests/test_cli.test.ts` 新增了「v1.1.1 CLI 入口的 baseUrl 信任级」，
+`tests/test_url_guard.test.ts` 补了 mapped / NAT64 / 站点本地 / 6to4 四类地址的判定。
+
 ## 从 0.9.x 升级到 1.0.0
 
 ### 行为变化（需要注意的两处）
@@ -91,7 +112,7 @@
 ## 升级操作
 
 ```bash
-git fetch && git checkout 1.1.0     # tag 不带 v 前缀；从 0.9.x 升级时 checkout 1.0.0 亦可
+git fetch && git checkout 1.1.1     # tag 不带 v 前缀；从 0.9.x 升级时 checkout 1.0.0 亦可
 npm install
 cp .env.example .env                # 填入 LLM_API_KEY 后即可跑
 npm run dev                         # Web UI
@@ -107,3 +128,5 @@ npx tsx scripts/generate-cli.ts run --config configs/example_story.json
 反过来，0.9.x 的代码读 1.0.0 / 1.0.1 写的产物时，`error: null` 与 `model` 会被安全忽略。
 从 1.1.0 回滚到 1.0.1 同理：两边产物逐字节同构，代码差异只有新增的 URL 校验与测试；
 回滚后请求体 `baseUrl` 又可以指向任意主机（这正是 1.1.0 收紧掉的行为）。
+从 1.1.1 回滚到 1.1.0 也不需要迁移：CLI 会重新开始拦 `--base-url` 指向本机的请求，
+HTTP 行为与 1.1.0 相同；合法的公网 IPv4-mapped 地址会再次被误拒（只影响少数 IPv6 部署）。
