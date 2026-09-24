@@ -146,11 +146,13 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
     expect(result.artifacts).toEqual({
       config: "config.json", beat_plan: "beats.json", story: "story.md",
       validation: "validation.json", metadata: "metadata.json", review: "review.json",
+      quality: "quality.json",
     });
 
     const runDir = join(dir, "runs", result.run_id);
     expect(readdirSync(runDir).sort()).toEqual([
-      "attempts", "beats.json", "config.json", "metadata.json", "review.json", "story.md", "validation.json",
+      "attempts", "beats.json", "config.json", "metadata.json", "quality.json",
+      "review.json", "story.md", "validation.json",
     ]);
     expect(readFileSync(join(runDir, "story.md"), "utf8")).toContain("# 消失的目击者");
     expect(JSON.parse(readFileSync(join(runDir, "review.json"), "utf8"))).toEqual(review);
@@ -236,7 +238,7 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
     const result = await pipeline.run(config);
     expect(Object.keys(result).sort()).toEqual([
       "artifacts", "attempt_count", "attempts", "beat_plan", "config", "finished_at",
-      "quality_status", "review", "review_error", "review_status", "run_id",
+      "quality", "quality_status", "review", "review_error", "review_status", "run_id",
       "selected_attempt", "started_at", "status", "story",
       "validation", "validation_error", "validation_status",
     ]);

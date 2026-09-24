@@ -146,10 +146,12 @@ describe("§47 Pipeline Test — Validation Retry", () => {
     expect(result.quality_status).toBe("accepted");
     expect(result.attempts.map((a) => a.retry_reason)).toEqual(["validation_failed", null]);
     expect(result.attempts.map((a) => a.accepted)).toEqual([false, true]);
-    // §23：每个 attempt 目录四件产物都在
+    // §23：每个 attempt 目录五件产物都在
     for (const n of [1, 2]) {
       const d = attemptDir(dir, result.run_id, n);
-      expect(readdirSync(d).sort()).toEqual(["metadata.json", "review.json", "story.md", "validation.json"]);
+      expect(readdirSync(d).sort()).toEqual([
+        "metadata.json", "quality.json", "review.json", "story.md", "validation.json",
+      ]);
     }
     // §17：select 的是 attempt 2 的正文
     expect(readFileSync(join(dir, "runs", result.run_id, "story.md"), "utf8")).toBe(

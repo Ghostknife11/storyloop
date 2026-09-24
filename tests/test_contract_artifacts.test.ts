@@ -36,11 +36,20 @@ const PLAN_REPLY = JSON.stringify(SAMPLE_BEAT_PLAN);
 const GOOD_REVIEW = JSON.stringify(SAMPLE_REVIEW);
 const LOW_REVIEW = JSON.stringify({ score: 41, summary: "正文冲突没有展开。", strengths: ["开头有画面"], problems: ["高潮缺失"] });
 
-/** v1.0.0 冻结的运行级文件名。 */
-const RUN_FILES = ["beats.json", "config.json", "metadata.json", "review.json", "story.md", "validation.json"] as const;
+/** v1.0.0 冻结的运行级文件名；v1.2.0 追加 quality.json（§20，纯新增不替换）。 */
+const RUN_FILES = [
+  "beats.json",
+  "config.json",
+  "metadata.json",
+  "quality.json",
+  "review.json",
+  "story.md",
+  "validation.json",
+] as const;
 
-/** v1.0.0 冻结的 attempt 级文件名（initial_story.md 只在发生过修订时出现）。 */
-const ATTEMPT_FILES = ["metadata.json", "review.json", "story.md", "validation.json"] as const;
+/** v1.0.0 冻结的 attempt 级文件名（initial_story.md 只在发生过修订时出现）；
+ *  v1.2.0 追加 quality.json（§21）。 */
+const ATTEMPT_FILES = ["metadata.json", "quality.json", "review.json", "story.md", "validation.json"] as const;
 
 /** v1.0.0 冻结的 repair 级文件名。 */
 const REPAIR_FILES = ["metadata.json", "request.json", "review.json", "story.md", "validation.json"] as const;
@@ -117,7 +126,7 @@ function expectHasAll(actual: string[], required: readonly string[], label: stri
 }
 
 describe("v1.0.0 产物布局冻结 — Happy Path", () => {
-  it("运行级目录只含 attempts/ 与冻结的六个文件", async () => {
+  it("运行级目录只含 attempts/ 与冻结的七个文件", async () => {
     const dir = withTmpDir();
     const llm = new FakeLLM([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW]);
     const result = await pipelineWith(llm, new ArtifactStore()).run(SAMPLE_CONFIG);
@@ -141,7 +150,7 @@ describe("v1.0.0 产物布局冻结 — Happy Path", () => {
     }
   });
 
-  it("attempt/01 落四个冻结文件，metadata 带齐 TASK §10 全部必备字段", async () => {
+  it("attempt/01 落五个冻结文件，metadata 带齐 TASK §10 全部必备字段", async () => {
     const dir = withTmpDir();
     const llm = new FakeLLM([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW]);
     const result = await pipelineWith(llm, new ArtifactStore()).run(SAMPLE_CONFIG);

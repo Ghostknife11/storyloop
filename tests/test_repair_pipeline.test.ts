@@ -488,6 +488,7 @@ describe("§51-E Repair Disabled", () => {
     expect(result.attempt_count).toBe(2);
     expect(listArtifacts(dir, result.run_id, "attempts/01")).toEqual([
       "metadata.json",
+      "quality.json",
       "review.json",
       "story.md",
       "validation.json",

@@ -173,7 +173,7 @@ function fullPipeline(store: ArtifactStore, llm: LLMClient) {
 }
 
 describe("§49 Happy Path：Attempt 1 直接 accepted，产物完整", () => {
-  it("Plan → Generate → Validate → Review → Accept，六个产物全部落盘", async () => {
+  it("Plan → Generate → Validate → Review → Quality → Accept，七个产物全部落盘", async () => {
     const dir = withTmpDir();
     const transport = withFakeTransport([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW_REPLY]);
     const pipeline = fullPipeline(new ArtifactStore(), fakeLlm());
@@ -204,7 +204,8 @@ describe("§49 Happy Path：Attempt 1 直接 accepted，产物完整", () => {
 
     const runDir = join(dir, "runs", result.run_id);
     expect(readdirSync(runDir).sort()).toEqual([
-      "attempts", "beats.json", "config.json", "metadata.json", "review.json", "story.md", "validation.json",
+      "attempts", "beats.json", "config.json", "metadata.json", "quality.json",
+      "review.json", "story.md", "validation.json",
     ]);
     expect(readFileSync(join(runDir, "beats.json"), "utf8")).toContain("证人失踪");
     expect(readFileSync(join(runDir, "story.md"), "utf8")).toContain("# 消失的目击者");

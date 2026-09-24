@@ -72,6 +72,8 @@ const RUN_OK_KEYS = [
   "validation_status",
   "review",
   "review_status",
+  // v1.2.0 §25：统一质量层是新增字段，原有字段一个不动
+  "quality",
   "artifacts",
   "quality_status",
   "attempt_count",
@@ -359,7 +361,7 @@ describe("v1.0.0 API 冻结 — Run 入口", () => {
     expect(Object.keys(run).sort()).toEqual(RUN_OK_KEYS);
     // validation / review 都成功：六个 artifact 键齐
     expect(Object.keys(run.artifacts as object).sort()).toEqual(
-      ["beat_plan", "config", "metadata", "review", "story", "validation"],
+      ["beat_plan", "config", "metadata", "quality", "review", "story", "validation"],
     );
     expect(run.quality_status).toBe("accepted");
     expect(run.attempt_count).toBe(1);
@@ -435,6 +437,8 @@ describe("v1.0.0 API 冻结 — Run 入口", () => {
       "max_attempts",
       "max_repairs_per_attempt",
       "min_review_score",
+      // v1.2.0 §26：新增字段；旧 Run 没有 quality.json 时由服务端临时装配后照样返回
+      "quality",
       "quality_status",
       "repair_count",
       "review",
@@ -491,6 +495,8 @@ describe("v1.0.0 API 冻结 — Run 入口", () => {
       "accepted",
       "attempt_number",
       "initial_story",
+      // v1.2.0 §26：这一次 Attempt 的质量快照
+      "quality",
       "repair_count",
       "repairs",
       "retry_reason",

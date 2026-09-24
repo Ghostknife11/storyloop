@@ -167,7 +167,7 @@ describe("§23 Run Metadata", () => {
     expect(meta.review_status).toBe("completed");
     expect(meta.validation_status).toBe("completed");
     expect(meta.repair_count).toBe(0);
-    // artifacts 是「名字 → 文件名」的清单，成功 Run 五项齐全
+    // artifacts 是「名字 → 文件名」的清单，成功 Run 七项齐全
     expect(meta.artifacts).toEqual({
       config: "config.json",
       beat_plan: "beats.json",
@@ -175,6 +175,7 @@ describe("§23 Run Metadata", () => {
       validation: "validation.json",
       review: "review.json",
       metadata: "metadata.json",
+      quality: "quality.json",
     });
     expect(typeof meta.started_at).toBe("string");
     expect(typeof meta.finished_at).toBe("string");
@@ -368,10 +369,14 @@ describe("§23 metadata 与磁盘产物一致", () => {
       "validation.json",
       "review.json",
       "metadata.json",
+      // v1.2.0 §20：统一质量快照同样落在 Run 根目录，artifacts 索引里有它
+      "quality.json",
     ]) {
       expect(hasArtifact(dir, result.run_id, name), `缺少产物 ${name}`).toBe(true);
     }
     expect(hasArtifact(dir, result.run_id, "attempts/01/story.md")).toBe(true);
     expect(hasArtifact(dir, result.run_id, "attempts/01/metadata.json")).toBe(true);
+    // v1.2.0 §21：Attempt 级也各有一份快照
+    expect(hasArtifact(dir, result.run_id, "attempts/01/quality.json")).toBe(true);
   });
 });

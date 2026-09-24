@@ -108,7 +108,7 @@ async function readJson(res: Response) {
 }
 
 describe("POST /api/runs（§32/§46）", () => {
-  it("完整 Automatic Run：200 + run_id + validation + review + runs/<run_id>/ 六件产物", async () => {
+  it("完整 Automatic Run：200 + run_id + validation + review + quality + runs/<run_id>/ 七件产物", async () => {
     const dir = withTmpDir();
     stubLLM();
     const res = await postRuns(post("/api/runs", { config }));
@@ -127,7 +127,8 @@ describe("POST /api/runs（§32/§46）", () => {
 
     const runDir = join(dir, "runs", String(body.run_id));
     expect(readdirSync(runDir).sort()).toEqual([
-      "attempts", "beats.json", "config.json", "metadata.json", "review.json", "story.md", "validation.json",
+      "attempts", "beats.json", "config.json", "metadata.json", "quality.json",
+      "review.json", "story.md", "validation.json",
     ]);
     expect(JSON.parse(readFileSync(join(runDir, "validation.json"), "utf8"))).toEqual({ passed: true, issues: [] });
     // §16/§17/§24 metadata 与响应一致
@@ -283,8 +284,10 @@ describe("POST /api/runs — review failure（§28/§34/§46）", () => {
     expect(existsSync(join(runDir, "metadata.json"))).toBe(true);
     expect(existsSync(join(runDir, "validation.json"))).toBe(true);
     expect(existsSync(join(runDir, "review.json"))).toBe(false);
+    // §25：quality 只依赖 validation + 采纳结论，Review 失败也照样装配并落盘
+    expect(existsSync(join(runDir, "quality.json"))).toBe(true);
     expect(readdirSync(runDir).sort()).toEqual([
-      "attempts", "beats.json", "config.json", "metadata.json", "story.md", "validation.json",
+      "attempts", "beats.json", "config.json", "metadata.json", "quality.json", "story.md", "validation.json",
     ]);
     const meta = JSON.parse(readFileSync(join(runDir, "metadata.json"), "utf8"));
     expect(meta.status).toBe("completed");
