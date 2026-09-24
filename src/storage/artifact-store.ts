@@ -5,6 +5,7 @@ import type { BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
 import type { QualityResult } from "@/types/quality";
+import type { BeatValidationResult } from "@/types/beat-validation";
 import { attemptDirectoryName } from "@/core/generation-attempt";
 import {
   repairDirectoryName,
@@ -116,6 +117,11 @@ export class ArtifactStore {
   /** v1.2.0 §20 运行级质量快照：由 QualityAssembler 装配，覆盖写（同一次 Run 只保留最终结论）。 */
   putQuality(runId: string, quality: QualityResult): string {
     return this.putJson(runId, "quality.json", quality);
+  }
+
+  /** v1.4.0 §20 BeatPlan 结构校验结论：运行级产物，对 config / beats 唯一，不随 Attempt 变化。 */
+  putBeatValidation(runId: string, beatValidation: BeatValidationResult): string {
+    return this.putJson(runId, "beat-validation.json", beatValidation);
   }
 
   putMetadata(runId: string, metadata: Record<string, unknown>): string {
@@ -282,6 +288,11 @@ export class ArtifactStore {
   /** v1.2.0 §26：v1.2.0 之前的 Run 没有这个文件，读到 null 由调用方临时装配。 */
   readFinalQuality(runId: string): QualityResult | null {
     return this.readJson(runId, "quality.json") as QualityResult | null;
+  }
+
+  /** v1.4.0 §26：v1.4.0 之前的 Run 没有这个文件，读到 null 由界面整段隐藏。 */
+  readFinalBeatValidation(runId: string): BeatValidationResult | null {
+    return this.readJson(runId, "beat-validation.json") as BeatValidationResult | null;
   }
 
   readAttemptQuality(runId: string, attemptNumber: number): QualityResult | null {
