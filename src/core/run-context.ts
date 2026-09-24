@@ -5,6 +5,7 @@
  * v0.6.0 新增 validating（§17）：Story 落盘之后、审阅之前的硬性有效性检查阶段。
  * v0.8.0 新增 repairing / revalidating / rereviewing（§35）：同一次 Attempt 内部的
  * 定点修订阶段。Repair 不新增 Attempt，所以这三个阶段都挂在同一个 attempt_number 下。
+ * v1.4.0 新增 validating_beat_plan：BeatPlan 落盘之后、任何 Attempt 之前的结构校验阶段。
  */
 
 import { randomBytes } from "node:crypto";
@@ -12,6 +13,7 @@ import { randomBytes } from "node:crypto";
 export type RunStatus =
   | "created"
   | "planning"
+  | "validating_beat_plan"
   | "generating"
   | "saving"
   | "validating"

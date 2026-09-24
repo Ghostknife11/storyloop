@@ -1,5 +1,9 @@
 import type { StoryConfig } from "@/types/story-config";
 import type { BeatPlan } from "@/types/beat-plan";
+import type {
+  BeatValidationResult,
+  BeatValidationStatus,
+} from "@/types/beat-validation";
 import { reviewOverallScore, type ReviewResult, type ReviewStatus } from "@/types/review-result";
 import type { ValidationResult, ValidationStatus } from "@/types/validation-result";
 import type { RunContext, RunStatus } from "@/core/run-context";
@@ -8,6 +12,7 @@ import { BeatPlanner } from "@/lib/beat-planner";
 import { StoryGenerator } from "@/lib/story-generator";
 import { StoryValidator } from "@/lib/story-validator";
 import { BasicReviewer } from "@/lib/basic-reviewer";
+import { BeatValidator } from "@/lib/beat-validator";
 import { StoryRepairer } from "@/lib/story-repairer";
 import { ArtifactStore } from "@/storage/artifact-store";
 import type { GenerateRuntime } from "@/lib/generate-service";
@@ -58,6 +63,9 @@ export interface GenerationResult {
   run_id: string;
   config: StoryConfig;
   beat_plan: BeatPlan;
+  /** v1.4.0 §4：BeatPlan 的结构校验结论；没注入 BeatValidator 时是 null。 */
+  beat_validation: BeatValidationResult | null;
+  beat_validation_status: BeatValidationStatus;
   story: string;
   validation: ValidationResult | null;
   validation_status: ValidationStatus;
@@ -95,6 +103,8 @@ function artifactsOf(
   validation: ValidationResult | null,
   review: ReviewResult | null,
   quality: QualityResult | null = null,
+  // v1.4.0 §20：beat-validation.json 是运行级产物，只在实际校验过时出现
+  beatValidation: BeatValidationResult | null = null,
 ): Record<string, string> {
   const artifacts: Record<string, string> = {
     config: "config.json",
@@ -102,6 +112,7 @@ function artifactsOf(
     story: "story.md",
     metadata: "metadata.json",
   };
+  if (beatValidation) artifacts.beat_validation = "beat-validation.json";
   if (validation) artifacts.validation = "validation.json";
   if (review) artifacts.review = "review.json";
   // v1.2.0 §20：quality.json 与 metadata 同口径（修订后），装配过就一定有这个文件
@@ -124,6 +135,13 @@ interface MetaPatch {
   validation_status?: ValidationStatus;
   validation?: ValidationResult | null;
   validation_error?: string | null;
+  /**
+   * v1.4.0 additive：BeatPlan 结构校验。写入时派生出 beat_validation_passed /
+   * beat_validation_issue_count 两个字段——与 validation_* 同一套派生方式，不新增口径。
+   */
+  beat_validation_status?: BeatValidationStatus;
+  beat_validation?: BeatValidationResult | null;
+  beat_validation_error?: string | null;
   review_status?: ReviewStatus;
   review_error?: string | null;
   review?: ReviewResult | null;
@@ -175,14 +193,42 @@ interface AttemptRecord {
 }
 
 /**
+ * v1.4.0 一次 BeatPlan 结构校验的结论。BeatValidator 自身异常只影响 beat_validation_status
+ * （§12），不升级为 Run 失败；只有结论里带 error 级 issue 时才阻断整个 Run（§7）。
+ */
+interface BeatCheck {
+  beat_validation: BeatValidationResult | null;
+  beat_validation_status: BeatValidationStatus;
+  beat_validation_error: string | null;
+}
+
+/** v1.4.0 §5：没注入 BeatValidator 时这一路等于不存在，metadata 里一个字段都不多。 */
+const BEAT_CHECK_SKIPPED: BeatCheck = {
+  beat_validation: null,
+  beat_validation_status: "not_started",
+  beat_validation_error: null,
+};
+
+function beatCheckPatch(check: BeatCheck): Partial<MetaPatch> {
+  const patch: Partial<MetaPatch> = {
+    beat_validation_status: check.beat_validation_status,
+    beat_validation: check.beat_validation,
+  };
+  if (check.beat_validation_error) patch.beat_validation_error = check.beat_validation_error;
+  return patch;
+}
+
+/**
  * §3/§25 GenerationPipeline：把一次完整生成组织成一个 Run。
  * v0.7.0 固定顺序（§19）：
  *   Config → Planning → [ Attempt n: Generate → Save Story → Validate → Review → Decide → Retry? ] → Finalize
  * v0.8.0 在 Attempt 内部插入 Repair-before-Retry（§20/§33）：
  *   Generate → Save Story → Validate → Review → 未过且有可修问题且允许修订
  *   → Repair → Revalidate → Re-review → 再判一次 → 仍不过才 Full Retry。
+ * v1.4.0 在 Planning 之后、Attempt 之前插入 BeatPlan 结构校验：
+ *   Config → Planning → Validate BeatPlan → [ Attempt n: … ] → Finalize。
  * §8/§9：BeatPlan 与 StoryConfig 只确定一次，同一 Run 内所有 Attempt 复用，
- * 不自动换 Model / 改温度 / 改 Config（§70）。Repair 同样不碰它们（§65）。
+ * 不自动换 Model / 改温度 / 改 Config（§70）。Repair 与 Beat 校验同样不碰它们（§65）。
  * §65 只暴露 run() 与 runWithPlan()，不做 Stage Registry / DAG / Plugin。
  */
 export class GenerationPipeline {
@@ -201,6 +247,8 @@ export class GenerationPipeline {
     private qualityAssembler: QualityAssembler = new QualityAssembler(),
     /** §42 版本号单一来源：VERSION 文件（§43），不在代码里硬编码。 */
     private projectVersion: string = readProjectVersion(),
+    /** v1.4.0 §5 可选：不注入就完全没有 BeatPlan 结构校验，流程与 v1.3.0 逐字一致。 */
+    private beatValidator?: BeatValidator,
   ) {}
 
   /** §6 Automatic：StoryConfig → Plan → 若干 Attempt → 选中的那一个。 */
@@ -232,6 +280,7 @@ export class GenerationPipeline {
     const rid = ctx.run_id;
     let beatPlan: BeatPlan | undefined = suppliedPlan;
     const policy = validateRetryPolicy(retryPolicyArg ?? this.retryPolicy);
+    const beatCheck: BeatCheck = { ...BEAT_CHECK_SKIPPED };
 
     try {
       this.artifactStore.createRunDirectory(rid);
@@ -246,6 +295,10 @@ export class GenerationPipeline {
         logger.child({ run_id: rid }).info(`planning completed（${beatPlan.beats.length} beats）`);
       }
       this.artifactStore.putBeatPlan(rid, beatPlan);
+
+      // v1.4.0 §7：BeatPlan 先过结构校验，再进入 Attempt 循环。
+      // 骨架都站不住时不写正文——不产生 attempt 产物，也不消耗生成额度。
+      await this.validateBeatPlan(ctx, rid, config, beatPlan, runtime, policy, beatCheck);
 
       // §19 重试循环：硬上限来自 policy.max_attempts（§15 禁止无限重试）。
       const records: AttemptRecord[] = [];
@@ -285,6 +338,7 @@ export class GenerationPipeline {
         rid,
         this.metaFor(ctx, runtime, {
           ...policyPatch(policy),
+          ...beatCheckPatch(beatCheck),
           attempt_count: records.length,
           selected_attempt: selected.attempt.attempt_number,
           quality_status: qualityStatus,
@@ -303,6 +357,8 @@ export class GenerationPipeline {
         run_id: rid,
         config,
         beat_plan: beatPlan,
+        beat_validation: beatCheck.beat_validation,
+        beat_validation_status: beatCheck.beat_validation_status,
         story: selected.attempt.story ?? "",
         validation: selected.attempt.validation,
         validation_status: selected.validation_status,
@@ -316,7 +372,12 @@ export class GenerationPipeline {
         quality_status: qualityStatus,
         attempts: records.map((r) => r.attempt),
         status: "completed",
-        artifacts: artifactsOf(selected.attempt.validation, selected.attempt.review, selected.quality),
+        artifacts: artifactsOf(
+          selected.attempt.validation,
+          selected.attempt.review,
+          selected.quality,
+          beatCheck.beat_validation,
+        ),
         started_at: ctx.started_at,
         finished_at: new Date().toISOString(),
       };
@@ -327,7 +388,10 @@ export class GenerationPipeline {
       logger.child({ run_id: rid }).error(`run failed at ${ctx.current_stage ?? "unknown"}`, e);
       failRun(ctx, ctx.current_stage ?? "unknown", detail);
       try {
-        this.artifactStore.putMetadata(rid, this.metaFor(ctx, runtime));
+        this.artifactStore.putMetadata(
+          rid,
+          this.metaFor(ctx, runtime, { ...policyPatch(policy), ...beatCheckPatch(beatCheck) }),
+        );
       } catch {
         /* metadata 保存失败时保留原始错误 */
       }
@@ -336,6 +400,69 @@ export class GenerationPipeline {
         rid,
         ctx.current_stage ?? "unknown",
         e,
+      );
+    }
+  }
+
+  /**
+   * v1.4.0 BeatPlan 结构校验（§7/§10）：只跑一次，位置在 Planning 之后、第一个 Attempt 之前。
+   * §4 只校验、不修改——既不会自动重排 beat，也不会顺手补一拍再试。
+   * §12 BeatValidator 自身异常（模型超时 / 输出非法）只让 beat_validation_status 变成 failed，
+   *     生成照常继续，不把 Run 判失败。
+   * §7 结论里带 error 级 issue 才算硬失败：此时一个 Attempt 都不跑。
+   */
+  private async validateBeatPlan(
+    ctx: RunContext,
+    rid: string,
+    config: StoryConfig,
+    plan: BeatPlan,
+    runtime: GenerateRuntime | undefined,
+    policy: RetryPolicy,
+    /** §7 结论先记进这个盒子再抛：硬失败时 runStages 的 catch 也要把它写进 metadata。 */
+    out: BeatCheck,
+  ): Promise<void> {
+    if (!this.beatValidator) return;
+
+    transitionStage(ctx, "validating_beat_plan", "validating_beat_plan");
+    this.artifactStore.putMetadata(
+      rid,
+      this.metaFor(ctx, runtime, {
+        ...policyPatch(policy),
+        beat_validation_status: "validating",
+      }),
+    );
+
+    let beatValidation: BeatValidationResult | null = null;
+    let beatValidationError: string | null = null;
+    try {
+      // §10：与故事生成、审阅各自独立拿一份结论；这里不用 runtime.temperature，
+      // 结构判断需要一个稳定的低温度，不跟着正文的创作温度走。
+      beatValidation = await this.beatValidator.validate(config, plan);
+    } catch (e) {
+      // §12：校验器自身崩溃 ≠ BeatPlan 有问题。保留骨架，继续生成。
+      beatValidation = null;
+      beatValidationError = safeText(errorDetail(e));
+      logger.child({ run_id: rid }).error("beat validation failed", e);
+    }
+
+    out.beat_validation = beatValidation;
+    out.beat_validation_status = beatValidation ? "completed" : "failed";
+    out.beat_validation_error = beatValidationError;
+    // §8：passed 与 failed 都落盘——骨架没过时更要能看出是哪儿没过。
+    if (beatValidation) {
+      this.artifactStore.putBeatValidation(rid, beatValidation);
+      logger
+        .child({ run_id: rid })
+        .info(`beat validation completed → ${beatValidation.passed ? "passed" : "not passed"}（${beatValidation.issues.length} issues）`);
+    }
+    this.artifactStore.putMetadata(rid, this.metaFor(ctx, runtime, { ...policyPatch(policy), ...beatCheckPatch(out) }));
+
+    if (beatValidation && !beatValidation.passed) {
+      const codes = [...new Set(beatValidation.issues.map((i) => i.code))].join("、");
+      throw new PipelineError(
+        `Beat plan 结构校验未通过：${beatValidation.summary}${codes ? `（${codes}）` : ""}`,
+        rid,
+        "validating_beat_plan",
       );
     }
   }
@@ -770,6 +897,13 @@ export class GenerationPipeline {
       meta.validation_issue_count = patch.validation.issues.length;
     }
     if (patch.validation_error) meta.validation_error = patch.validation_error;
+    // v1.4.0 additive：BeatPlan 结构校验的四个字段，与 validation_* 同口径
+    if (patch.beat_validation_status) meta.beat_validation_status = patch.beat_validation_status;
+    if (patch.beat_validation) {
+      meta.beat_validation_passed = patch.beat_validation.passed;
+      meta.beat_validation_issue_count = patch.beat_validation.issues.length;
+    }
+    if (patch.beat_validation_error) meta.beat_validation_error = patch.beat_validation_error;
     if (patch.review_status) meta.review_status = patch.review_status;
     if (patch.review_error) meta.review_error = patch.review_error;
     if (patch.review) meta.review_score = reviewOverallScore(patch.review);
@@ -783,7 +917,12 @@ export class GenerationPipeline {
     if (ctx.status === "completed" || ctx.status === "failed") {
       meta.finished_at = new Date().toISOString();
     }
-    meta.artifacts = artifactsOf(patch.validation ?? null, patch.review ?? null, patch.quality ?? null);
+    meta.artifacts = artifactsOf(
+      patch.validation ?? null,
+      patch.review ?? null,
+      patch.quality ?? null,
+      patch.beat_validation ?? null,
+    );
     return meta;
   }
 }
