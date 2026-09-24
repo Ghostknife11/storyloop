@@ -18,11 +18,13 @@
 import { isIP } from "node:net";
 import { lookup } from "node:dns/promises";
 
-/** §12：调用方改请求就能解决的错误，映射成 400 CONFIG_INVALID。 */
+/** §12：调用方改请求就能解决的错误，映射成 400 CONFIG_INVALID。
+ *  类名与运行时 name 一致：api-error 的 400 映射按 name 认它，
+ *  v1.1.0 借用别人的名字（RequestValidationError）会让日志里的错误名指不到真实类型。 */
 export class UnsafeRequestUrlError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "RequestValidationError";
+    this.name = "UnsafeRequestUrlError";
   }
 }
 
@@ -98,18 +100,46 @@ function isPublicIPv4(ip: string): boolean {
   return !BLOCKED_IPV4_RANGES.some((range) => ((value & range.mask) >>> 0) === range.network);
 }
 
+/**
+ * 内嵌 IPv4 的 IPv6 前缀：::ffff:0:0/96（IPv4-mapped）与 64:ff9b::/96（NAT64）。
+ * 写进 URL 的可能是点分形式（http://[::ffff:127.0.0.1]/），但 WHATWG URL 会把它规范化成
+ * 十六进制（[::ffff:7f00:1]），所以这里不匹配点分文本，直接从最后两段取内嵌地址——
+ * 两种写法走同一条路，结果一致。
+ */
+const IPV4_TRANSLATION_PREFIXES: readonly string[] = ["::ffff:", "64:ff9b:"];
+
+/** 单个十六进制段；不是 1~4 位十六进制（含 :: 折叠出来的空段）时返回 null。 */
+function parseHextet(raw: string | undefined): number | null {
+  if (raw === undefined || !/^[0-9a-f]{1,4}$/.test(raw)) return null;
+  return Number.parseInt(raw, 16);
+}
+
+/** 从翻译前缀地址里取内嵌的 IPv4（最后两段拼成 32 位）；取不到返回 null。 */
+function embeddedIPv4(address: string): string | null {
+  const hextets = address.split(":");
+  if (hextets.length < 3) return null;
+  const hi = parseHextet(hextets[hextets.length - 2]);
+  const lo = parseHextet(hextets[hextets.length - 1]);
+  if (hi === null || lo === null) return null;
+  const value = ((hi << 16) | lo) >>> 0;
+  return [(value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff].join(".");
+}
+
 function isPublicIPv6(ip: string): boolean {
   // 调用处已去掉 URL.hostname 自带的方括号（Node 的 URL 对 IPv6 会保留它们，isIP 认不出）
   const address = ip.toLowerCase();
   if (address === "::" || address === "::1") return false; // 未指定 / 环回
-  // IPv4-mapped（::ffff:127.0.0.1）按内嵌的那个 IPv4 判，否则环回就从这扇门进来
-  if (address.startsWith("::ffff:")) {
-    const embedded = address.replace(/^::ffff:/, "").match(IPV4_PATTERN);
-    return embedded !== null && isPublicIPv4(embedded[0]);
-  }
   if (/^fe[89ab]/.test(address)) return false; // fe80::/10 链路本地
+  if (/^fec/.test(address)) return false; // fec0::/10 站点本地（已废弃，但仍有实现认它）
   if (/^f[cd]/.test(address)) return false; // fc00::/7 唯一本地地址
   if (address.startsWith("2001:db8:")) return false; // 文档段
+  if (address.startsWith("2002:")) return false; // 6to4 中继任意播
+  // 内嵌 IPv4 的翻译前缀：目标地址是那个 IPv4，规则跟着它走
+  if (IPV4_TRANSLATION_PREFIXES.some((prefix) => address.startsWith(prefix))) {
+    const embedded = embeddedIPv4(address);
+    // 取不出内嵌地址就按拒绝处理：验不了就不放行
+    return embedded !== null && isPublicIPv4(embedded);
+  }
   return true;
 }
 

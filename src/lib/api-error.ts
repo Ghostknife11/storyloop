@@ -91,10 +91,12 @@ export function errorMessageOf(json: unknown): string {
   return "未知错误";
 }
 
-/** §12 用户/请求错误：调用方改请求就能解决，一律 4xx。 */
+/** §12 用户/请求错误：调用方改请求就能解决，一律 4xx。
+ *  v1.1.1：地址校验错误用类自己的名字（v1.1.0 借用 RequestValidationError，
+ *  v1.0.x 起就没有第二处抛这个名字，一并换掉，不留指不到人的死条目）。 */
 const USER_ERROR_NAMES = new Set([
   "ConfigValidationError",
-  "RequestValidationError",
+  "UnsafeRequestUrlError",
   "UnsupportedConfigVersionError",
   "RetryPolicyError",
   "RepairValidationError",
