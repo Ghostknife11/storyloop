@@ -313,3 +313,49 @@ describe("§31 CLI 不重复业务逻辑", () => {
     expect(() => rmSync(before, { recursive: true, force: true })).not.toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// v1.1.1：CLI 的 --base-url 是操作者在本机给出的受信配置，信任级与 LLM_BASE_URL 相同
+// （能跑这条命令的人本来就读得到 .env），所以不撞请求体那道「只允许公网地址」的关卡，
+// 否则 CLI 再也连不上本地假模型。四个走模型的子命令必须表现一致。
+// ---------------------------------------------------------------------------
+
+describe("v1.1.1 CLI 入口的 baseUrl 信任级", () => {
+  const LOCAL_ENDPOINT = "http://127.0.0.1:1/v1";
+  const realKey = process.env.LLM_API_KEY;
+
+  beforeEach(() => {
+    // 假 Key：只为了通过 CLI 自己的 Key 检查，请求根本连不到任何真实服务
+    process.env.LLM_API_KEY = "test-key-not-real";
+  });
+
+  afterEach(() => {
+    if (realKey === undefined) delete process.env.LLM_API_KEY;
+    else process.env.LLM_API_KEY = realKey;
+  });
+
+  it("--base-url 指向本地时，plan / run / review 都因为连不上而失败，而不是被地址关卡拒掉", async () => {
+    const { configPath, goodPath } = writeFiles();
+    for (const command of [
+      ["plan", "--config", configPath],
+      ["run", "--config", configPath, "--max-attempts", "1"],
+      ["review", "--config", configPath, "--story", goodPath],
+    ]) {
+      const c = collector();
+      const code = await runCli([...command, "--base-url", LOCAL_ENDPOINT], c.io);
+      const text = c.errors.join("\n") + c.lines.join("\n");
+      // 三个子命令同一结局：请求发出去但连不上本地假模型
+      expect(code, `${command[0]} 应以运行时失败结束：${text}`).toBe(EXIT_RUNTIME);
+      expect(text).not.toContain("非公网地址");
+      expect(text).toContain("LLM 请求失败");
+    }
+  });
+
+  it("客户端只有一个构建点，请求体里不带 baseUrl", async () => {
+    const { readFileSync: read } = await import("node:fs");
+    const source = read(join(process.cwd(), "scripts", "generate-cli.ts"), "utf8");
+    // 注入客户端前若把关卡打开了，v1.1.0 的 CLI 回归就会出现：plan 拦、run 不拦
+    expect((source.match(/clientFromEnv\(/g) ?? []).length).toBe(1);
+    expect((source.match(/cliClient\(args\)/g) ?? []).length).toBeGreaterThanOrEqual(5);
+  });
+});
