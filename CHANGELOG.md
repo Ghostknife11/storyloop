@@ -13,6 +13,96 @@ All notable changes to Storyloop.
 
 ---
 
+## [1.2.0] —— 2026-09-24
+
+v1.2.0 是**质量工程基础版本**：第一次把散落在 `validation.json` / `review.json` /
+`metadata.json` / API 响应里的质量结论收口成一份统一快照。没有引入任何新的打分能力——
+`QualityAssembler` 不调用模型、不产生新分数，读的三样东西（校验结论、审阅结论、采纳结论）
+在 v1.2.0 之前就全都在产物里了。全部改动 additive：既有字段、路由、错误码、CLI 参数与
+产物布局一个都没动。
+
+### Added
+
+- **`QualityResult` 统一质量模型**（`src/types/quality.ts`）：`overall_score`（单一整体分，
+  取 `review.score`，没有审阅结论时为 `null`）、`validation_passed`（`true` / `false` /
+  校验没跑时的 `null`）、`accepted`、`issues`（`QualityIssue[]`）、`suggestions`
+  （`QualitySuggestion[]`）、`summary`。没有维度分、没有等级、没有 PASS/FAIL 阈值
+- **`QualityAssembler`**（`src/core/quality-assembler.ts`）：纯函数，把校验结论、审阅结论与
+  采纳结论确定性装配成 `QualityResult`；同一输入永远得到同一份 JSON，不调模型、无随机。
+  问题 id 固定为 `validation-N` / `review-N` / `review-suggestion-N`（N 从 1 起按同类序号）
+- **`quality.json` 产物**（Run 根与 `attempts/NN/` 各一份）：见 `ArtifactStore.putQuality` /
+  `putAttemptQuality`，与 `validation.json` 等同为 UTF-8 JSON、两空格缩进；
+  与同层 metadata 的 `overall_score` / `quality_issue_count` 同口径（都取**修订后**的结论，
+  与最终采用的 `story.md` 对齐）。修订目录 `attempts/NN/repairs/MM/` 里**没有**这个文件
+- **Run 与 Attempt metadata 的三个新字段**：`quality_assembly_status`（`completed`）、
+  `overall_score`、`quality_issue_count`。刻意不复用 `quality_status`（那个字段已经表示
+  accepted / exhausted），三个字段同样取修订后的结论
+- **API 响应新增 `quality`**：Run 类入口（`/api/runs`、`/api/runs/from-plan`、`/api/generate`）、
+  `GET /api/runs/<run_id>`、`GET /api/runs/<run_id>/attempts/<attempt_number>` 各加一个
+  `QualityResult | null`；`artifacts` 在质量装配成功时追加 `quality` 键。其余字段逐字不变
+- **`ReviewResult` 的可选 `suggestions`**（`prompts/reviewer.txt` 同步要求输出一组建议）：
+  模型没给时响应与落盘里这个键整个不出现，与 v1.0 / v1.1 的结构逐字一致
+- **前端 Quality Summary 面板**（`src/components/quality-panel.tsx` + `src/lib/quality-view.ts`）：
+  总览一个整体分 + 校验状态 + 采纳状态 + 问题/建议计数，只做汇总，不带 Fix / Retry /
+  重写一类操作入口；`quality` 缺失时整个区域不出现，不占位也不白屏
+- **旧 Run 兼容读**：没有 `quality.json` 的 Run（v1.2.0 之前生成的全部 Run）读取时按同一套
+  规则临时装配，读响应与读详情都不会因此失败，也不会回写文件；`quality.json` 解析失败或字段
+  不合规时同样退回临时装配，退化的 worst case 是 `quality: null`
+- **`examples/example_run/` 升级为 v1.2.0 布局**：运行根与 `attempts/01/` 各新增一份
+  `quality.json`，metadata 补齐三个新字段；`attempts/01/review.json` 刻意保留 v1.1 的四键
+  形状（没有 `suggestions`），用来演示「旧结论也能被装配」
+
+### Changed
+
+- 质量信息从「分散在三处、口径还不完全一致」改为**一个 additive 的统一模型**对外：
+  响应读 `quality` 字段、磁盘读 `quality.json`，两者内容一致
+- 入选 Attempt 的提升文件集合新增 `quality.json`（`promoteAttempt` 从三个文件变成四个）
+- README 定位改为「从 v1.2.0 开始建立统一质量工程层」，并补 QualityResult 架构图与已知限制
+
+### Security
+
+- v1.1.0 / v1.1.1 的地址关卡（请求体 `baseUrl` 只允许公网地址、服务端与 CLI 按受信输入处理）
+  在 v1.2.0 **原样保留**，并新增服务层回归测试：注入假组件的 `startRun` 对
+  `http://127.0.0.1:9999/v1`、`http://localhost:9999/v1`、`http://192.168.1.10:9999/v1`
+  一律 400（`tests/test_quality_api.test.ts`）。本次改动未扩大任何攻击面：`quality.json`
+  只是既有结论的汇总，不含新的外部输入路径，也不含任何凭据
+
+### Documentation
+
+- `docs/run-artifacts.md`：新增 `quality.json` 两处布局、运行级与 attempt 级字段表各三行新字段，
+  以及「统一质量快照（v1.2.0）」一节（说明为何取修订后结论、为何修订目录里没有它）
+- `docs/api.md`：Run 类入口字段表新增 `quality`，补 `QualityResult` / `QualityIssue` /
+  `QualitySuggestion` 与 `ReviewResult.suggestions` 的字段说明，并写明三处响应的分数口径
+- `docs/compatibility.md`：新增「v1.2.0 的统一质量层（纯 additive）」，逐条对上 1.x 的承诺；
+  已知不对称第 5 条补充 `quality.json` 的口径
+- `docs/upgrade.md`：新增「从 1.1.x 升级到 1.2.0」，升级操作与回滚同步到 1.2.0
+
+### Tests
+
+- 新增五个测试文件（全部用假模型 / 假组件，不调真实接口）：
+  - `tests/test_quality_assembler.test.ts`：四种装配情形、suggestions 映射、确定性（同输入
+    JSON 逐字节相同）、不修改入参、键集固定且不含维度词
+  - `tests/test_quality_models.test.ts`：`qualityResultOf` 的容错解析——只有
+    `overall_score` / `validation_passed` / `accepted` 三个字段会让整份快照作废，
+    `summary` / `issues` / `suggestions` 一律按可丢弃处理
+  - `tests/test_quality_pipeline.test.ts`：落盘与内存返回值逐字节一致、多次运行 JSON 稳定、
+    重试与修订路径的快照、组件自身异常时快照仍落盘
+  - `tests/test_quality_api.test.ts`：Run / Run 详情 / Attempt 详情三处口径一致、旧 Run
+    无 `quality.json` 时临时装配、`quality.json` 损坏或被删后的降级、地址关卡回归
+  - `tests/test_quality_ui.test.ts`：QualitySummary 面板的状态推导（分数缺失、校验三种状态、
+    采纳两态、`quality` 为 null 时整体隐藏），并断言不出现多维 / 趋势 / 等级一类措辞
+- 存量合同测试同步 additive 字段：`artifacts` 键集、文件清单、metadata 键集与若干用例标题
+
+### Compatibility
+
+- 1.1.x → 1.2.0 无破坏性变更、无行为变更：v1.1.1 写的产物 v1.2.0 直接读；
+  v1.2.0 写的 Run 回落到 1.1.x 也只是多一个被忽略的文件。详见 [docs/upgrade.md](./docs/upgrade.md)
+- 一处刻意保留的不对称：`quality.json` 取**修订后**的结论，而同目录 `review.json` 是**首次**
+  结论。这让快照与 metadata、与最终采用的正文同口径，代价是同一层里两个文件的分数可能不同。
+  见 [docs/compatibility.md](./docs/compatibility.md) 已知不对称第 5 条
+
+---
+
 ## [1.1.1] —— 2026-09-24
 
 v1.1.1 是**修订版本**：没有新能力，只修 v1.1.0 那道地址关卡自身的问题。
