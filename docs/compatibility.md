@@ -44,6 +44,7 @@ Git tag 不带 `v` 前缀（`0.9.1`、`1.0.0`）；GitHub Release 标题带 `v` 
 |---|---|
 | StoryConfig / BeatPlan | 追加可选字段；`config_version` / `beat_plan_version` 保持 `"1"`，直到主版本 +1 才升到 `"2"` |
 | ValidationResult / ReviewResult | 追加可选字段；`issues[].code` 可以新增取值 |
+| BeatValidationResult（v1.4.0） | 追加可选字段；新文件 `beat-validation.json`，`issues[].code` 可以新增取值 |
 | Run 产物 | metadata 可以新增字段；文件名与目录层级不变 |
 | QualityResult（v1.2.0） | 追加可选字段；`quality.json` 是新增文件，不影响既有文件 |
 | HTTP API | 追加路由；既存路由只加字段 |
@@ -185,6 +186,35 @@ v1.3.0 让审阅者在整体分之外多给四个基础维度（连贯性 / 叙�
 两条边界必须写死在这里：维度**不新增阈值**，`RetryPolicy` 里仍然只有 `min_review_score`
 一个总分门槛（比的还是整体分）；维度也**不驱动修订**，`RepairStrategy` 仍然只按问题类别
 选一次要改的地方。换句话说，多出四个维度只改变「看得见多少」，不改变「怎么决策」。
+
+## v1.4.0 的 BeatPlan 结构校验（additive，但生成链路多一道门）
+
+v1.4.0 在 Planning 之后、第一个 Attempt 之前加了一道 BeatPlan 结构校验：
+`BeatValidator` → `BeatValidationResult` → `beat-validation.json`，另有
+`POST /api/validate-beats` 与前端 Beat Validation 面板。对外契约仍是 additive：
+
+- **`BeatValidationResult` 是新结构，不动旧结构。** `StoryConfig` / `BeatPlan` /
+  `ValidationResult` / `ReviewResult` / `QualityResult` 一个字段都没改，
+  `beat_plan_version` 仍是 `"1"`。
+- **Run 产物多一个新文件。** `beat-validation.json` 只在骨架结构校验真正跑过且成功时
+  落在 Run 根，文件名与既有文件不冲突；校验器自身抛异常或没注入校验器时这个文件不存在，
+  metadata 的 `beat_validation_*` 按缺失处理。
+- **既有路由只加字段。** Run 类入口多 `beat_validation` / `beat_validation_status` /
+  `beat_validation_error`，Run 详情多 `beat_validation` / `beat_validation_status`，
+  `artifacts` 可能在成功时多一个 `beat_validation` 键；错误码多一个
+  `BEAT_VALIDATION_FAILED`（502）。既有字段、路由、状态码含义全都没动。
+- **旧 Run 不需要迁移。** 1.4.0 之前的 Run 没有 `beat-validation.json`，读回时
+  `beat_validation` 是 `null`、`beat_validation_status` 是 `not_started`，与当年逐字一致。
+
+但有**一处行为变化**必须写清楚：骨架结构带 `error` 级 issue 时，Run 会在写正文之前结束
+（`status: "failed"`、`current_stage: "validating_beat_plan"`、产物只有 `config.json` /
+`beats.json` / `beat-validation.json` / `metadata.json`）。这类 Run 在 1.3.x 会一路生成到
+Attempt 阶段。**warning 级 issue 不算不通过**，`passed` 仍为 `true`，生成链路照常往下走。
+
+这道门仍然遵守「只报告，不修复」：校验结论里没有 `fixed_beats` / `rewritten_plan` /
+`suggested_plan` 这类字段，不会自动改写、重排、补拍任何一拍，也不会据此重新规划；
+骨架怎么改由使用者决定。`POST /api/validate-beats` 也不读不写 `run_id`——
+外部调用不该改动 Pipeline 自己落盘的那份结论。
 
 ## 破坏性变更怎么发布
 

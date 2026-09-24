@@ -172,6 +172,55 @@ npm install
 git checkout 1.2.1
 ```
 
+## 从 1.3.x 升级到 1.4.0
+
+**没有任何需要改代码的地方。** 字段、路由、CLI 参数与产物布局一个都没动，1.3.x 写的产物
+可以直接读，1.4.0 写的 Run 回落到 1.3.x 也能读（多出来的 `beat-validation.json` 与四个
+`beat_validation_*` metadata 字段会被安全忽略）。
+
+新增的四样东西：
+
+1. **`beat-validation.json`**——Run 根目录一份，记录 BeatPlan 的结构校验结论（`passed` /
+   `issues` / `summary`）。布局与字段见 [run-artifacts.md](./run-artifacts.md)。
+2. **API 响应里的 `beat_validation` / `beat_validation_status`**——Run 类入口三个字段
+   （另有可选的 `beat_validation_error`），Run 详情两个字段；`artifacts` 在校验成功时多一个
+   `beat_validation` 键。字段说明见 [api.md](./api.md)。
+3. **`POST /api/validate-beats`**——`{config, beat_plan}` → 单独校验一份剧情骨架的结构，
+   不写任何产物，不读不写 `run_id`。
+4. **前端 Beat Validation 面板**——Beat Plan 区多一块校验状态与问题清单（severity / code /
+   message / 命中的拍），没有 Auto Fix / Rewrite 一类操作入口。
+
+需要知道的三件事：
+
+- **生成链路多了一道门。** BeatPlan 落盘后会先过一次结构校验，进度记在
+  `validating_beat_plan`。骨架结构带 `error` 级 issue 时 Run 在写正文之前结束：
+  `status: "failed"`，产物只有 `config.json` / `beats.json` / `beat-validation.json` /
+  `metadata.json`。这类 Run 在 1.3.x 会一路生成到 Attempt 阶段。**warning 级 issue 不算
+  不通过**，`passed` 仍为 `true`，生成照常往下走。
+- **骨架不达标不是「校验器失败」。** `beat_validation_status` 是 `completed`、
+  `beat_validation_passed` 是 `false`、错误响应一个都没有；只有校验器自己抛异常时
+  `status` 才是 `failed` 并记 `beat_validation_error`，而那种情况下 Run 继续走。
+- **校验只报告，不修复。** 结论里没有 `fixed_beats` / `rewritten_plan` /
+  `suggested_plan`，不会自动改写、重排、补拍任何一拍，也不会据此重新规划
+  （明细见 [compatibility.md](./compatibility.md) 的「v1.4.0 的 BeatPlan 结构校验」）。
+
+升级后跑一遍 `npm test`：新增的 `tests/test_beat_validation.test.ts`（模型、schema 白名单、
+规则层与解析）、`tests/test_beat_validation_pipeline.test.ts`（硬失败阻断、warning 放行、
+旧 Run）、`tests/test_beat_validation_api.test.ts`（新路由与错误码）、
+`tests/test_beat_validation_ui.test.ts`（面板状态推导）覆盖这一层，都用假模型，不调真实接口。
+
+```bash
+git fetch && git checkout 1.4.0     # tag 不带 v 前缀
+npm install
+```
+
+回滚到 1.3.0 的代价只有一处：带 `error` 级结构问题的 BeatPlan 会重新一路生成到 Attempt
+阶段（1.4.0 那道门消失），多出来的文件与字段被旧版本忽略：
+
+```bash
+git checkout 1.3.0
+```
+
 ## 从 0.9.x 升级到 1.0.0
 
 ### 行为变化（需要注意的两处）
@@ -217,7 +266,7 @@ git checkout 1.2.1
 ## 升级操作
 
 ```bash
-git fetch && git checkout 1.2.0     # tag 不带 v 前缀；从 0.9.x 升级时 checkout 1.0.0 亦可
+git fetch && git checkout 1.4.0     # tag 不带 v 前缀；从 0.9.x 升级时 checkout 1.0.0 亦可
 npm install
 cp .env.example .env                # 填入 LLM_API_KEY 后即可跑
 npm run dev                         # Web UI
@@ -237,3 +286,5 @@ npx tsx scripts/generate-cli.ts run --config configs/example_story.json
 HTTP 行为与 1.1.0 相同；合法的公网 IPv4-mapped 地址会再次被误拒（只影响少数 IPv6 部署）。
 从 1.2.0 回滚到 1.1.1 同样不需要迁移：1.2.0 新增的 `quality.json` 与 metadata 的三个新字段
 只是被旧版本忽略，旧版本不会因为多一个文件而读不了 Run；CLI 与 HTTP 行为逐字相同。
+从 1.4.0 回滚到 1.3.0 也只有一处行为差别：带 `error` 级结构问题的 BeatPlan 会重新一路生成
+到 Attempt 阶段，多出来的 `beat-validation.json` 与 `beat_validation_*` 字段被旧版本忽略。

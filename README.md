@@ -49,10 +49,12 @@ npx tsx scripts/generate-cli.ts validate --config configs/example_story.json --s
 一次完整生成就是一个 **Run**，固定顺序：
 
 ```text
-StoryConfig → Planning →〔Attempt 1..max_attempts: Generate → Save Story → Validate → Review → Repair? → Decide〕→ Finalize
+StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts: Generate → Save Story → Validate → Review → Repair? → Decide〕→ Finalize
 ```
 
 - **AI Beat Planning**：先生成剧情骨架（BeatPlan），再据此写正文；骨架可手动编辑后进入生成
+- **Beat Plan Validator（剧情骨架结构校验，v1.4.0）**：写正文之前先检查这份骨架撑不撑得起一个
+  完整短篇；结论只报告，不改写骨架，用户改完可以再校验一次
 - **Story Validator（硬性有效性检查）**：正文落盘后立即跑一遍确定性规则，回答「这篇正文基本可用吗」
 - **Basic AI Reviewer**：每次生成的正文自动获得一次基础审阅，产出 0–100 整体分，
   并给出四个基础维度的分数与短评（连贯性 / 叙事 / 人物 / 因果）
@@ -89,6 +91,9 @@ StoryConfig → Planning →〔Attempt 1..max_attempts: Generate → Save Story 
 > 没有模型参与、没有打分、没有择优），重试同样由确定性策略驱动，没有学习、没有自适应：
 > 同样的输入得到同样的重试次数。修订只回答「这篇正文哪里不对、按类别改一次」，不回答「为什么会失败」。
 >
+> **Beat 校验只报告，不修复（v1.4.0）**：骨架结构不达标时 Storyloop 不改写任何一拍、不重排顺序、
+> 不自动补拍，也不据此重新规划——它只告诉你哪儿站不住，骨架怎么改由你决定。
+>
 > 后端没有任何为未实现能力预留的隐藏接口——没有的功能就没有入口。
 
 ## 架构
@@ -104,7 +109,7 @@ StoryConfig → Planning →〔Attempt 1..max_attempts: Generate → Save Story 
 └──────────┬───────────┘
            ▼
 ┌──────────────────────┐
-│   Run API            │  POST /api/runs · POST /api/runs/from-plan · POST /api/validate · POST /api/review
+│   Run API            │  POST /api/runs · POST /api/runs/from-plan · POST /api/validate · POST /api/review · POST /api/validate-beats
 └──────────┬───────────┘
            ▼
 ┌──────────────────────────────────────────┐
@@ -112,7 +117,7 @@ StoryConfig → Planning →〔Attempt 1..max_attempts: Generate → Save Story 
 └──────────┬───────────────────────────────┘
            ▼
 ┌──────────────────────┐
-│  GenerationPipeline  │  固定顺序：Config → Planning →〔Attempt 1..max_attempts: Generate → Save Story → Validate → Review → Repair? → Decide〕→ Finalize
+│  GenerationPipeline  │  固定顺序：Config → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts: Generate → Save Story → Validate → Review → Repair? → Decide〕→ Finalize
 │  · run()             │  StoryConfig → BeatPlan → Story → ValidationResult → ReviewResult
 │  · runWithPlan()     │  用户编辑后的 BeatPlan 直接进入生成
 │  · RetryPolicy       │  max_attempts / min_review_score / retry_on_validation_failure / enable_repair / max_repairs_per_attempt
@@ -134,6 +139,7 @@ StoryConfig → Planning →〔Attempt 1..max_attempts: Generate → Save Story 
            ▼
 ┌──────────────────────┐
 │  BeatPlanner         │  prompts/beat_planner.txt → LLM → BeatPlan（可手动编辑）
+│  BeatValidator       │  prompts/beat_validator.txt → LLM → BeatValidationResult（只看结构，不改写骨架）
 │  StoryGenerator      │  prompts/story.txt 渲染（含 Beat Plan）
 │  StoryValidator      │ 确定性硬性规则 → ValidationResult（不调用 LLM，只检查，不改写）
 │  BasicReviewer       │  prompts/reviewer.txt → LLM → ReviewResult（只评价，不改写）
@@ -147,6 +153,7 @@ StoryConfig → Planning →〔Attempt 1..max_attempts: Generate → Save Story 
 ┌──────────────────────────────────────────┐
 │    ArtifactStore     │  原子写入 runs/<run_id>/ 下的产物，写失败抛 ArtifactWriteError
 │                      │  v1.2.0 起多一份 quality.json（Run 根与 attempts/NN/ 各一份）
+│                      │  v1.4.0 起多一份 beat-validation.json（Run 根，对 BeatPlan 唯一）
 └──────────────────────┘
 ```
 
@@ -167,6 +174,13 @@ StoryConfig → Planning →〔Attempt 1..max_attempts: Generate → Save Story 
 修订成功且达标即接受该次尝试，不再整篇重生。修订阶段的进度记在 `current_stage`
 （`repairing` / `revalidating` / `rereviewing`），修订本身失败不会让 Run 失败——
 正文保留修订前那一版，Run 按重试策略继续走。
+
+BeatPlan 在第一个 Attempt 之前单独过一道结构校验（v1.4.0，进度记在 `validating_beat_plan`）：
+规则层先查空骨架、拍数不足、编号重复、编号不连续这几件不用问模型的事；这些没问题才把
+StoryConfig + BeatPlan 交给模型判结构。**结论里带 error 级问题时整个 Run 就此结束**——
+一个 Attempt 都不跑，`story.md` 与 `attempts/` 都不会出现（骨架都站不住时不花生成额度）；
+只有 warning 或完全没有问题时照常生成。BeatValidator 自身崩溃则只把
+`beat_validation_status` 置为 `failed` 并记录原因，骨架与生成流程都不受影响。
 
 ## StoryConfig
 
@@ -211,6 +225,10 @@ StoryConfig → Planning →〔Attempt 1..max_attempts: Generate → Save Story 
 生成失败或计划非法时，Storyloop 只报告错误并保留你已编辑的 BeatPlan：自动重试只会带着同一份
 BeatPlan 整篇重新生成，不会改写它。
 
+v1.4.0 起这份骨架在写正文之前还要过一道**结构校验**（见下面的 BeatValidationResult）：
+撑得起一个完整短篇才往下走，撑不起就停在这里。校验只读不写——你在 UI 里编辑 Beat、
+保存、再点一次 Validate Beats，拿到的永远是新结论，旧的那份不会被就地改掉。
+
 ## Run 与产物
 
 一次完整生成就是一个 **Run**。Run ID 形如 `20260920_101530_k3f9aq`（本地时间戳 + 6 位随机字符），
@@ -221,6 +239,7 @@ runs/
 └── <run_id>/
     ├── config.json      # 本次运行使用的 StoryConfig
     ├── beats.json       # 实际采用的 BeatPlan（多次 Attempt 复用同一份）
+    ├── beat-validation.json  # 这份 BeatPlan 的结构校验结论（v1.4.0 新增，跑过这一步才有）
     ├── story.md         # 被选中那一次 Attempt 的正文（发生过修订时为修订后的版本）
     ├── validation.json  # 被选中那一次 Attempt 的首次硬性校验结果
     ├── review.json      # 被选中那一次 Attempt 的首次审阅结果
@@ -254,7 +273,8 @@ runs/
 `review_score`、`review_error`、`quality_assembly_status`、`overall_score`、
 `quality_issue_count`、`max_attempts`、`min_review_score`、
 `attempt_count`、`selected_attempt`、`quality_status`、`enable_repair`、
-`max_repairs_per_attempt`、`repair_count`。
+`max_repairs_per_attempt`、`repair_count`、`beat_validation_status`、
+`beat_validation_passed`、`beat_validation_issue_count`、`beat_validation_error`。
 `model` 始终是「本次真正生效的模型」（请求覆盖 → 环境变量 → 缺省值），attempt 级的 `error`
 没有错误时是 `null`——这两条是 v1.0.0 固定下来的字段语义。
 
@@ -405,6 +425,50 @@ Run 类入口与两个读回接口响应里的 `quality`、前端 Quality Summar
 读取时按同一套规则临时装配，不会因此失败。装配取的是这次尝试**最终留下的那一版**结论
 （发生过修订时是修订后那一轮，与 `metadata.json` 同口径，v1.2.1 起如此）。
 
+## BeatValidationResult
+
+写正文之前对 BeatPlan 的结构校验结论。StoryValidator 看正文，这里看骨架（§2）——
+两套结论各自独立，谁也不算谁的输入。
+
+| Field | Type | Description |
+|---|---|---|
+| `passed` | boolean | `true` 当且仅当没有 `severity: "error"` 的 issue；由 issues 重新推导，不采信模型自报值 |
+| `issues` | BeatValidationIssue[] | 命中项清单（可为空数组） |
+| `summary` | string | 一句话说清这份骨架结构上成不成；面板直接展示，不再二次拼接 |
+
+`BeatValidationIssue` 四个字段：`code`（稳定问题码）、`severity`（`warning` / `error`，
+只有两级）、`message`（人类可读说明）、可选 `beat_ids`（涉及哪几拍，指认不到就不填）。
+没有 rewritten_plan / fixed_beats / suggested_plan——**本版本只报告，不修复**。
+
+| Code | Severity | 谁判的 | 触发条件 |
+|---|---|---|---|
+| `EMPTY_PLAN` | error | 规则层 | BeatPlan 里没有任何一拍 |
+| `TOO_FEW_BEATS` | warning | 规则层 | 拍数少于 3，正面建立 / 冲突升级 / 高潮收束必然挤在一起 |
+| `BROKEN_SEQUENCE` | error | 规则层 | 编号不是从 1 连续递增 |
+| `DUPLICATE_BEAT` | error | 规则层 | 两拍同一个 id |
+| `MISSING_OPENING` | warning | 模型 | 没有哪一拍承担建立人物 / 处境 / 世界观的正面任务 |
+| `MISSING_ESCALATION` | warning | 模型 | 没有冲突升级或转折，拍与拍之间原地踏步 |
+| `MISSING_CLIMAX` | error | 模型 | 没有高潮或决定性对抗，故事缺一个顶点 |
+| `MISSING_RESOLUTION` | error | 模型 | 没有收束，结局处于悬空状态 |
+| `CHARACTER_STATE_CONFLICT` | error | 模型 | 同一人物在不同拍之间状态互相矛盾 |
+| `UNSUPPORTED_TURN` | error | 模型 | 某一拍的转折没有任何前文铺垫 |
+| `ENDING_NOT_PREPARED` | warning | 模型 | 结局所需的条件（道具 / 信息 / 关系）从未在前文出现 |
+
+前四条由规则层（不调用 LLM 的纯函数）判定，出现 error 时直接下结论、不再请求模型——
+不花冤枉钱。后七条交给模型判结构，温度固定为 `0.2`，与生成温度相互独立。
+规则层与模型报到同一处问题时只保留一份。
+
+**校验不通过不是 Run 失败，而是 Run 提前结束**：`status` 为 `failed`、`current_stage` 为
+`validating_beat_plan`，`beat_validation_passed` 为 `false`，产物里留下 `beats.json` 与
+`beat-validation.json`——够你看出是哪儿站不住，但一个 Attempt 都没跑。
+**只有 warning 时照常生成**，结论同样落盘。BeatValidator 自身崩溃时
+`beat_validation_status` 为 `failed`、`beat_validation_error` 记录原因，生成流程不受影响，
+此时没有 `beat-validation.json`。没跑过这一步的 Run（v1.4.0 之前）
+`beat_validation_status` 是 `not_started`、`beat_validation` 是 `null`。
+
+`POST /api/validate-beats` 可以单独校验一份骨架：同样的模型、同样的规则，
+但**不写任何产物**——Run 里那一份 `beat-validation.json` 由 Pipeline 自己负责。
+
 ## 定点修订（Targeted Repair）
 
 请求五个字段：`config`、`beat_plan`、`story`、`issue_type`、`issue_message`。
@@ -436,6 +500,7 @@ Run 类入口与两个读回接口响应里的 `quality`、前端 Quality Summar
 | POST | `/api/generate` | 兼容入口，等价于 `/api/runs/from-plan` |
 | POST | `/api/review` | `{config, story}`（+可选 `run_id`）→ 单独审阅正文 |
 | POST | `/api/validate` | `{config, story}`（+可选 `run_id`）→ 单独校验正文 |
+| POST | `/api/validate-beats` | `{config, beat_plan}` → 单独校验剧情骨架的结构，不写任何产物 |
 | POST | `/api/repair` | `{config, beat_plan, story, issue_type, issue_message}` → 单独定点修订 |
 | POST | `/api/prompt/preview` | `config`（+可选 `beat_plan`）→ 渲染后的最终 Prompt，不调模型 |
 | GET | `/api/runs/<run_id>` | 读回一次 Run 与它的 Attempt 摘要 |
@@ -446,7 +511,8 @@ Run 类入口与两个读回接口响应里的 `quality`、前端 Quality Summar
 `retry_policy` 可省略，省略时用默认值。它不属于 StoryConfig，不会写进 `config.json`，
 只会记录在 Run 的 `metadata.json` 里。非法值返回 400，Run 不会开始。
 `artifacts` 是产物文件名映射（`config` / `beat_plan` / `story` / `metadata`，
-校验、审阅或质量装配各自成功时追加 `validation` / `review` / `quality`），
+校验、审阅或质量装配各自成功时追加 `validation` / `review` / `quality`，
+跑过 Beat 结构校验时追加 `beat_validation`），
 响应中不会返回服务器绝对路径。
 
 **校验不通过不会让 Run 失败**——`story` 与 `status: "completed"` 照常返回，`validation.passed` 为 `false`，
@@ -475,6 +541,7 @@ HTTP 状态码仍然是 200（这是一次成功的业务结果，不是错误�
 | `GENERATION_FAILED` | 502 | 生成阶段失败（含连正文都没拿到的最后一次 Attempt） |
 | `REVIEW_FAILED` | 502 | 单独审阅入口的模型输出非法 |
 | `REPAIR_FAILED` | 502 | 单独修订入口的模型输出非法 |
+| `BEAT_VALIDATION_FAILED` | 502 | 骨架结构校验拿不到合法 BeatValidationResult（v1.4.0） |
 | `VALIDATION_FAILED_INTERNAL` | 500 | Validator 自身崩溃（不是「校验不通过」） |
 | `ARTIFACT_WRITE_FAILED` | 500 | 产物写入失败（磁盘 / 权限 / 目录被占用） |
 | `INTERNAL_ERROR` | 500 | 未预期异常；message 固定为「服务器内部错误」 |
@@ -555,7 +622,8 @@ mapped / NAT64 地址按内嵌的那个地址判
 - **没有失败归因与因果图**：修订只按类别改一次，不回答「为什么会失败」、
   不推断「哪个组件最可能出问题」
 - **没有自适应生成与自优化**：同样的输入得到同样的重试次数与同样的修订类别
-- **没有 Beat 质量校验**：BeatPlan 只做结构校验，不评价规划质量
+- **Beat 校验只管结构，且只报告**：它不评价规划质量（这一拍写得好不好、该不该这么排），
+  不做跨拍因果推演，也没有自动改写、重排、补拍或重新规划——发现问题后由你决定怎么改
 - **没有工作流引擎 / DAG / Stage Registry**：阶段顺序固定，不能任意跳段
 - **没有鉴权、限流、批量与流式**：API 没有用户体系，也没有 SSE / WebSocket
 - **`target_words` 是目标不是保证**：实际输出长度受模型能力与上下文窗口影响
@@ -563,6 +631,13 @@ mapped / NAT64 地址按内嵌的那个地址判
 
 ## 升级说明
 
+v1.4.0 在 Planning 之后加了一道 BeatPlan 结构校验（`BeatValidationResult` /
+`beat-validation.json` / `POST /api/validate-beats` / 前端 Beat Validation 面板），
+纯 additive：从 1.3.x 升到 1.4.0 **不需要改任何代码**，1.3.x 写的产物可以直接读
+（`beat_validation_status` 读作 `not_started`、`beat_validation` 读作 `null`），
+1.4.0 写的 Run 回落到 1.3.x 只是多一份被忽略的文件与几个被忽略的 metadata 字段。
+唯一的行为变化在生成链路上：骨架结构带 error 级问题时 Run 会在写正文之前结束，
+这类 Run 以前会一路生成到 Attempt 阶段。
 v1.3.0 给审阅结论加了四个可选的基础维度（连贯性 / 叙事 / 人物 / 因果），整体分改为四维均分，
 纯 additive：从 1.2.x 升到 1.3.0 **不需要改任何代码**，1.2.x 写的产物可以直接读，
 1.3.0 写的 Run 回落到 1.2.x 只是多一个被忽略的 `dimensions` 字段。
@@ -580,7 +655,7 @@ attempt 级 metadata 的 `error` 没有错误时是 `null`（以前按条件写�
 两者都是「字段从可能没有变成一定有」，不会让旧读取方崩掉。
 
 ```bash
-git fetch && git checkout 1.3.0     # tag 不带 v 前缀
+git fetch && git checkout 1.4.0     # tag 不带 v 前缀
 npm install
 cp .env.example .env
 npx tsx scripts/generate-cli.ts run --config configs/example_story.json
@@ -623,6 +698,12 @@ v1.3.0 的四个基础维度另有两个测试文件：
 `test_quality_dimensions`（维度模型、确定性聚合、可选字段校验、解析、重试门槛只认整体分）、
 `test_quality_dimensions_pipeline`（维度在真实管道里一路带到 `quality.json` 与 metadata，
 修订后取新的维度，没有维度时与 v1.2.x 逐字一致）。
+
+v1.4.0 的 BeatPlan 结构校验另有四个测试文件：
+`test_beat_validation`（模型、schema 白名单、规则层、解析、`BeatValidator` 行为）、
+`test_beat_validation_pipeline`（硬失败阻断、warning 放行、校验器自身异常、不注入时与
+v1.3.0 逐字一致）、`test_beat_validation_api`（新路由、错误码、旧 Run 读回）、
+`test_beat_validation_ui`（面板状态推导，含「骨架不过 ≠ 校验器失败」）。
 
 所有测试都不调用真实 LLM：LLM 由注入的桩对象或 `FakeLLM` 替代（`tests/helpers/fixtures.ts`），
 `fetch` 也被桩掉。重试相关断言同样只用桩，从不触发真实模型调用。

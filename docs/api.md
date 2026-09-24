@@ -24,6 +24,7 @@
 | `LLM_TIMEOUT` | 504 | 单次 LLM 请求超时 |
 | `LLM_REQUEST_FAILED` | 502 | LLM 请求失败（网络、鉴权、限流） |
 | `PLANNER_INVALID_OUTPUT` | 502 | 规划输出解析不出合法 BeatPlan |
+| `BEAT_VALIDATION_FAILED` | 502 | v1.4.0 新增：骨架结构校验拿不到合法的 `BeatValidationResult` |
 | `GENERATION_FAILED` | 502 | 生成阶段失败 |
 | `REVIEW_FAILED` | 502 | 审阅输出解析失败 |
 | `REPAIR_FAILED` | 502 | 修订输出解析失败 |
@@ -86,6 +87,7 @@
 | GET | `/api/health` | 健康检查，无失败路径 |
 | GET | `/api/version` | 返回 `{ "version": "..." }`，与 `VERSION` 文件一致 |
 | POST | `/api/plan` | StoryConfig → BeatPlan |
+| POST | `/api/validate-beats` | v1.4.0 新增：`{config, beat_plan}` → 单独校验剧情骨架的结构，不写任何产物 |
 | POST | `/api/runs` | Automatic Run：Config → Plan → Attempt → Retry? |
 | POST | `/api/runs/from-plan` | Manual Run：用给定 BeatPlan 直接生成（`beat_plan` 必填） |
 | POST | `/api/generate` | 兼容入口，等价于 `/api/runs/from-plan` |
@@ -114,6 +116,9 @@
 | `validation` | ValidationResult \| null | 校验器自身出错时为 `null` |
 | `validation_status` | string | `not_started` / `validating` / `completed` / `failed` |
 | `validation_error` | string | 可选，仅在出错时出现 |
+| `beat_validation` | BeatValidationResult \| null | v1.4.0 新增：骨架结构校验结论；没注入校验器或没跑到这一步时是 `null` |
+| `beat_validation_status` | string | v1.4.0 新增，取值同 `validation_status` 四值 |
+| `beat_validation_error` | string | 可选，仅在校验器自身抛异常时出现；**骨架不达标不算错误** |
 | `review` | ReviewResult \| null | 审阅失败时为 `null` |
 | `review_status` | string | 同上四值 |
 | `review_error` | string | 可选，仅在出错时出现 |
@@ -126,7 +131,8 @@
 | `attempts` | AttemptSummary[] | 每次尝试的摘要 |
 
 `artifacts` 恒含 `config` / `beat_plan` / `story` / `metadata` 四个键（值是文件名），
-校验、审阅或质量装配各自成功时追加 `validation` / `review` / `quality`。
+校验、审阅或质量装配各自成功时追加 `validation` / `review` / `quality`，
+骨架结构校验成功时追加 `beat_validation`（v1.4.0）。
 
 `QualityResult`（v1.2.0 新增，纯 additive）：`overall_score`（有维度时是四维均分，否则是
 `review.score`，没有审阅结论时是 `null`）、`validation_passed`（`true` / `false` /
@@ -167,6 +173,8 @@
 
 `RunDetail`，与 Run 入口不同：**没有** `beat_plan` 与 `artifacts`，
 多了策略回显字段 `max_attempts` / `min_review_score` / `enable_repair` / `max_repairs_per_attempt`。
+v1.4.0 起还多两个读回字段 `beat_validation`（BeatValidationResult 或 `null`）与
+`beat_validation_status`（四值）：1.4.0 之前的 Run 没有这个文件，读出 `null` 与 `not_started`。
 `run_id` 为 `""`、`.`、`..` 或含路径分隔符时 400；Run 不存在 404 `RUN_NOT_FOUND`。
 
 `quality` 按三级兜底取，三级都是同一版正文（入选 Attempt 最终留下的那一版）：
@@ -189,6 +197,23 @@ v1.2.0 直接读 attempt 目录，于是旧 Run 装配出的分数描述的是�
 Run 不存在与 Attempt 不存在共用 `RUN_NOT_FOUND` 这个 code，只能靠 message 区分；
 `attempt_number` 不是 1~99 的整数时 400。
 `quality` 先读 `attempts/<NN>/quality.json`，缺失或被改坏时按上面第 3 级同一套规则装配。
+
+### `POST /api/validate-beats`（v1.4.0 新增）
+
+请求体 `{config, beat_plan}`（可选 `model` / `baseUrl` / `temperature`，与其它路由同一套覆盖规则），
+顶层直接是 `BeatValidationResult`：`passed`、`issues`（`BeatValidationIssue[]`）、`summary`。
+
+它与 Pipeline 内部那一次校验复用同一个 `BeatValidator`，但**不写任何产物**：Run 里的
+`beat-validation.json` 由 Pipeline 自己负责，外部调用不该改动它，所以这个路由不读也不写
+`run_id`（带 `run_id` 时静默忽略）。
+
+- `beat_plan` 缺失或不是合法 BeatPlan → 400 `CONFIG_INVALID`
+- 模型输出解析不出合法的 `BeatValidationResult` → 502 `BEAT_VALIDATION_FAILED`
+- 返回 200 且 `passed: false` 时是**一次成功的调用**：骨架不达标是诚实的业务结果，不是错误
+
+`BeatValidationIssue`：`code`、`severity`（`warning` / `error`）、`message`、
+可选的 `beat_ids`（定位到哪些拍）。它没有任何与「怎么改」有关的字段——
+没有 `fixed_beats`、没有 `rewritten_plan`、没有 `suggested_plan`：校验只报告，不修复。
 
 ### `POST /api/review` 与 `POST /api/validate`
 
@@ -217,6 +242,7 @@ Run 不存在与 Attempt 不存在共用 `RUN_NOT_FOUND` 这个 code，只能靠
 - 不做 SSE / WebSocket 流式输出
 - 不做批量接口
 - 没有 middleware 改响应、没有全局 error handler：每个路由自己负责把 service 的结果转成响应
+- 骨架结构校验只报告，不修复：`/api/validate-beats` 不返回改写后的骨架，也不会触发重新规划
 
 ## 相关
 

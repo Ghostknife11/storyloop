@@ -23,6 +23,7 @@ runs/
 └── <run_id>/                          # run_id = YYYYMMDD_HHMMSS_<6位随机>
     ├── config.json                    # 本次 Run 使用的 StoryConfig（归一化后）
     ├── beats.json                     # 本次 Run 使用的 BeatPlan
+    ├── beat-validation.json           # BeatPlan 的结构校验结论（v1.4.0 新增；没跑到或校验器自身失败时缺失）
     ├── story.md                       # 最终入选正文（# 标题 + 空行 + 正文）
     ├── validation.json                # 入选 Attempt 的首次校验结果
     ├── review.json                    # 入选 Attempt 的首次审阅结果（v1.3.0 起可能带维度）
@@ -48,9 +49,15 @@ runs/
 固定规则：
 
 - attempt 与 repair 目录名都是两位数字 `01`、`02`…（上限 99）
-- 运行级目录里除了 `attempts/` 只有那七个文件，没有别的
+- 运行级目录里除了 `attempts/` 只有那八个文件，没有别的
+- `beat-validation.json`（v1.4.0 新增）是**运行级独有**的一份：BeatPlan 在第一个 Attempt
+  之前校验一次，`attempts/` 与 `repairs/` 下都没有它。骨架结构带 `error` 级 issue 时 Run
+  在这里就结束了，此时运行级目录只有 `config.json` / `beats.json` /
+  `beat-validation.json` / `metadata.json` 四个文件
 - `validation.json` / `review.json` 可能缺失：校验或审阅自身出错时 Pipeline 只写 metadata，
   不写这两个文件（对应 API 响应里字段为 `null`、`*_status` 为 `failed`）。
+`beat-validation.json` 同理：Beat 校验器自身抛异常时不写这个文件，但
+`beat_validation_error` 会记下原因——**骨架不达标不算错误**，那种情况文件照常写
 `review.json` / `validation.json` 与 v1.2.0 起新增的 `quality.json` 都不受这个影响：
 装配只需要 validation 与采纳结论，Review 失败时照样落盘，只是 `overall_score` 与 `summary`
 为 `null`
@@ -90,8 +97,12 @@ runs/
 | `validation_issue_count` | number | 入选版本有校验结论 | 问题条数 |
 | `review_score` | number | 入选版本有审阅结论 | 审阅整体分：v1.3.0 起有维度时是四维均分，否则就是 `review.score`（与 `overall_score` 同一个口径） |
 | `validation_error` / `review_error` | string | 校验或审阅自身抛异常 | 组件自身失败的原因（已过 `safe-text`）；正文不达标不算 |
+| `beat_validation_status` | string | BeatPlan 结构校验跑到过 | v1.4.0 新增：`not_started` / `validating` / `completed` / `failed` |
+| `beat_validation_passed` | boolean | 有结构校验结论 | v1.4.0 新增：结论里有没有 error 级问题（只有 warning 也算通过） |
+| `beat_validation_issue_count` | number | 有结构校验结论 | v1.4.0 新增：命中了几条结构规则 |
+| `beat_validation_error` | string | Beat 校验器自身抛异常 | v1.4.0 新增：校验器自身失败的原因；**骨架不达标不算错误**，那种情况 `beat_validation_passed` 是 `false`、这个字段不出现 |
 | `error` | string | Run 失败 | Run 级失败原因，已过 `safe-text`；成功时整个字段不出现 |
-| `artifacts` | object | 必有 | 文件名索引：`config` / `beat_plan` / `story` / `metadata`，有结论时再加 `validation` / `review` / `quality` |
+| `artifacts` | object | 必有 | 文件名索引：`config` / `beat_plan` / `story` / `metadata`，有结论时再加 `beat_validation` / `validation` / `review` / `quality` |
 
 运行级 `metadata.json` 是**整体快照**：每次阶段推进都整份重写，不与上一次合并。因此在中断
 现场读到的 metadata 还可能带着过程态字段（例如 Attempt 刚开始时的 `attempt_number`），
@@ -174,8 +185,28 @@ v1.3.0 起审阅给了四个基础维度时再多一个可选的 `dimensions`（
 
 1.2.0 之前产生的 Run 没有 `quality.json`，读接口按同一套规则临时装配兜底（
 [compatibility.md](./compatibility.md)），磁盘上不会补写。v1.2.0 的这个兜底原先取的是
-attempt 目录下的**首次**结论，于是旧 Run 装配出的分数描述的是修订前那版正文；1.2.1 起改成
+attempt 目录下的**首次**结论，于是旧 Run 装配出的分数描述的是修订前那一版正文；1.2.1 起改成
 与落盘口径一致的「最终那一版」，读到的 `quality` 与同一次尝试的 `metadata.json` 对齐。
+
+### BeatPlan 结构校验结论（v1.4.0 新增）
+
+`beat-validation.json` 记录 BeatPlan 在写正文之前那一道结构校验的结论，字段为
+`passed` / `issues` / `summary`（`BeatValidationResult`）。它在 Run 根目录**只出现一次**：
+BeatPlan 只校验一次，不随重试重跑，`attempts/` 与 `repairs/` 下都没有它。
+
+`BeatValidationIssue`：`code`、`severity`（`warning` / `error`，只有两级）、`message`、
+可选的 `beat_ids`（定位到哪些拍）。**没有任何与「怎么改」有关的字段**——
+没有 `fixed_beats`、没有 `rewritten_plan`、没有 `suggested_plan`：校验只报告，不修复，
+不改写、不重排、不补拍任何一拍。
+
+`passed` 为 `true` 当且仅当没有 `severity: "error"` 的 issue，warning 级问题照样通过。
+不通过时 Run 在写正文之前结束（`status: "failed"`、`current_stage: "validating_beat_plan"`），
+此时运行级目录只有 `config.json` / `beats.json` / `beat-validation.json` /
+`metadata.json` 四个文件——**没有** `story.md`，也**没有** `attempts/`。
+
+结论对应的四个运行级 metadata 字段（`beat_validation_status` / `beat_validation_passed` /
+`beat_validation_issue_count` / `beat_validation_error`）见上面「运行级 metadata.json」表；
+注意 `beat_validation_error` 只在**校验器自身**抛异常时出现，骨架不达标不算错误。
 
 ## 安全约定
 

@@ -13,6 +13,107 @@ All notable changes to Storyloop.
 
 ---
 
+## [1.4.0] —— 2026-09-25
+
+v1.4.0 在写正文之前加了一道 **BeatPlan 结构校验**：剧情骨架生成后先过一次结构检查——
+四拍结构（建置 / 升级 / 高潮 / 收束）是否各有承担者、编号与顺序讲不讲得通、有没有哪一拍
+靠没有铺垫的转折硬转、结局所需的条件是否在前文出现过。结论落成 `beat-validation.json`、
+API 的 `beat_validation` 字段与前端 Beat Validation 面板三处。
+
+这道校验仍然只报告、不修复：不改写任何一拍、不重排顺序、不自动补拍，也不据此重新规划——
+发现问题后由使用者决定骨架怎么改。`passed` 为 `false`（有 `error` 级问题）时 Run 在写正文
+之前结束，产物里**没有** `story.md`，也**没有** `attempts/`；`warning` 级问题不算不通过。
+`BeatValidator` 是可选的第十一个 Pipeline 构造函数参数，不注入就完全没有这道校验，
+流程与 v1.3.0 逐字一致。
+
+### Added
+
+- **`BeatValidationResult` / `BeatValidationIssue` 模型**（`src/types/beat-validation.ts`）：
+  布尔结论 + 命中项列表 + 一句话摘要。`BeatValidationIssue` 只有四个字段：
+  `code`、`severity`（`warning` / `error`，与 `ValidationResult` 同一套两级口径）、
+  `message`、可选的 `beat_ids`。**没有分数、没有修复建议**——没有 `fixed_beats`、
+  没有 `rewritten_plan`、没有 `suggested_plan`
+- **十一个稳定问题码**：`EMPTY_PLAN` / `TOO_FEW_BEATS` / `MISSING_OPENING` /
+  `MISSING_ESCALATION` / `MISSING_CLIMAX` / `MISSING_RESOLUTION` / `BROKEN_SEQUENCE` /
+  `DUPLICATE_BEAT` / `CHARACTER_STATE_CONFLICT` / `UNSUPPORTED_TURN` / `ENDING_NOT_PREPARED`。
+  白名单由 `BEAT_VALIDATION_ISSUE_CODES` 钉死，新增只能追加
+- **规则层 `checkBeatPlanDeterministic`**（`src/lib/beat-validator.ts`）：不调模型就能判的
+  四条（空骨架、拍数太少、编号重复、编号不连续）。规则层报出 `error` 时短路，不再花钱调模型
+- **`BeatValidator`**（`src/lib/beat-validator.ts`）：StoryConfig + BeatPlan →
+  `prompts/beat_validator.txt` → LLM → `BeatValidationResult`。温度固定 0.2，
+  `passed` 由 `beatValidationPassed(issues)` 重新推导（不信模型自己说的 `passed`），
+  规则层与模型层的重复命中按 `code + beat_ids` 去重。只读输入，不改写 BeatPlan
+- **`parseBeatValidationResult`**（`src/lib/beat-validation-parser.ts`）：容错 code fence 与
+  首尾空白，不做散文 scavenging；拿不到结构合法的 JSON 抛 `BeatValidationParseError`
+- **Pipeline 新阶段 `validating_beat_plan`**（`src/core/pipeline.ts`）：BeatPlan 落盘后、
+  第一个 Attempt 之前校验一次，进度写进 metadata；带 `error` 级问题时抛 `PipelineError`
+  结束这次 Run
+- **`beat-validation.json`**（`src/storage/artifact-store.ts`）：Run 根目录一份，
+  `attempts/` 与 `repairs/` 下都没有——BeatPlan 只校验一次，不随重试重跑
+- **四个运行级 metadata 字段**：`beat_validation_status`（四值，与 `validation_status` 同口径）、
+  `beat_validation_passed`、`beat_validation_issue_count`、`beat_validation_error`。
+  **骨架不达标不算错误**——只有校验器自己抛异常时才有 `beat_validation_error`
+- **API 字段**：Run 类入口多 `beat_validation` / `beat_validation_status` /
+  `beat_validation_error`，Run 详情多 `beat_validation` / `beat_validation_status`，
+  `artifacts` 在校验成功时多一个 `beat_validation` 键；1.4.0 之前的 Run 读出
+  `null` 与 `not_started`
+- **`POST /api/validate-beats`**：`{config, beat_plan}` → 单独校验一份骨架，不写任何产物。
+  不读也不写 `run_id`——外部调用不该改动 Pipeline 自己落盘的那份结论
+- **新错误码 `BEAT_VALIDATION_FAILED`（502）**：骨架结构校验拿不到合法的 `BeatValidationResult`
+- **前端 Beat Validation 面板**（`src/lib/beat-validation-view.ts` +
+  `src/components/beat-validation-panel.tsx`）：状态 + 每个 issue 的 severity / code /
+  message / 命中的拍（`Beat 3 / Beat 4` 这样的定位标签）。没有 Auto Fix / Rewrite /
+  重新规划一类操作入口
+- **`prompts/beat_validator.txt`**：十个模型侧检查项、各自的严重程度口径、
+  「没有问题就返回空 issues，不要为了凑数编造问题」、以及「不重写任何一拍、不给分数」；
+  规则层负责的两个码明确不让模型重复报告。占位符白名单不变，没有新增占位符
+
+### Changed
+
+- **生成链路多一道门**：BeatPlan 落盘后先校验。带 `error` 级结构问题的骨架，Run 在
+  `status: "failed"` / `current_stage: "validating_beat_plan"` 结束，产物只有
+  `config.json` / `beats.json` / `beat-validation.json` / `metadata.json` 四个文件。
+  这类 Run 在 1.3.x 会一路生成到 Attempt 阶段；`warning` 级问题的行为完全不变
+- **组件自身异常仍不连累 Run**：`BeatValidator` 抛异常时只把 `beat_validation_status`
+  置为 `failed`、记下 `beat_validation_error`，Run 照常继续生成
+- **examples/example_run/** 增加 `beat-validation.json` 与对应的 metadata 字段（一条
+  `ENDING_NOT_PREPARED` warning + `passed: true`），样例 README 同步
+- 版本号 1.3.0 → 1.4.0（`VERSION` / `package.json` / `package-lock.json` /
+  `FALLBACK_VERSION`）
+
+### Tests
+
+- 新增 `tests/test_beat_validation.test.ts`（24 条）：模型与 schema 白名单、
+  `passed` 推导、`beat_ids` 过滤、没有修复字段、解析容错（code fence / 首尾空白，
+  不做散文 scavenging）、规则层四条判定、`BeatValidator`（温度、提示词、短路、
+  重新推导 `passed`、去重、模板缺失即抛错、不改写输入）
+- 新增 `tests/test_beat_validation_pipeline.test.ts`（11 条）：硬失败抛
+  `PipelineError` 且只留四个产物、warning 放行正常生成、校验器在多次 Attempt 之间只跑一次、
+  校验器自身异常不阻断 Run、不注入校验器时与 v1.3.0 逐字一致
+- 新增 `tests/test_beat_validation_api.test.ts`（10 条）：新路由 happy path、
+  400 / 502 分支、不写 `runs/` 与 `outputs/`、v1.3.0 的老 Run 读回
+- 新增 `tests/test_beat_validation_ui.test.ts`（18 条）：请求形状（不带 `run_id`）、
+  面板五种状态（含「骨架不过 ≠ 校验器失败」）、`beat_ids` 定位标签、没有修复 / 重规划入口
+- 合同测试同步：`tests/test_contract_artifacts.test.ts` 的文件表加入
+  `beat-validation.json`、metadata 必填字段加入 `beat_validation_status`；
+  `tests/test_contract_api.test.ts` 的路由清单加入 `POST /api/validate-beats`；
+  `tests/test_contract_docs.test.ts` 的保留能力清单移出 `BeatValidator`，并新增
+  「Beat 校验只报告，不改写、不重排、不补拍」的边界断言
+- **测试总量：986 passed / 65 files**（1.3.0 为 985 / 65——净增是 63 条 Beat 校验用例与
+  1 条边界断言）。全部用例仍只用假模型 / 假组件，不调真实接口、不碰真实主机
+
+### Compatibility
+
+- 1.3.x → 1.4.0 无破坏性变更，也不需要迁移：既有字段、路由、错误码、CLI 参数与产物布局
+  一个都没动，1.3.x 写的产物可以直接读（`beat_validation` 是 `null`、
+  `beat_validation_status` 是 `not_started`），1.4.0 写的 Run 回落到 1.3.x 也只是多一份
+  被忽略的文件与几个被忽略的 metadata 字段
+- 唯一的行为变化是上面那道门：带 `error` 级结构问题的 BeatPlan 不再进入生成阶段
+- 明细见 [docs/upgrade.md](./docs/upgrade.md) 的「从 1.3.x 升级到 1.4.0」与
+  [docs/compatibility.md](./docs/compatibility.md) 的「v1.4.0 的 BeatPlan 结构校验」
+
+---
+
 ## [1.3.0] —— 2026-09-24
 
 v1.3.0 给审阅结论加了**四个基础质量维度**（连贯性 / 叙事 / 人物 / 因果），让同一篇正文的质量

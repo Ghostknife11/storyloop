@@ -1,6 +1,6 @@
 {
   "run_id": "20260101_120000_example",
-  "project_version": "1.2.0",
+  "project_version": "1.4.0",
   "status": "completed",
   "started_at": "2026-01-01T12:00:00.000Z",
   "model": "gpt-4o-mini",
@@ -16,6 +16,9 @@
   "validation_status": "completed",
   "validation_passed": true,
   "validation_issue_count": 0,
+  "beat_validation_status": "completed",
+  "beat_validation_passed": true,
+  "beat_validation_issue_count": 1,
   "review_status": "completed",
   "review_score": 82,
   "quality_assembly_status": "completed",
@@ -27,6 +30,7 @@
     "beat_plan": "beats.json",
     "story": "story.md",
     "metadata": "metadata.json",
+    "beat_validation": "beat-validation.json",
     "validation": "validation.json",
     "review": "review.json",
     "quality": "quality.json"
