@@ -7,7 +7,8 @@ import { qualityPanelState } from "@/lib/quality-view";
  * v1.2.0 §31/§32/§33 Quality Summary 面板：总览。
  * 顺序是 Quality（总览）→ Validation（详情）→ Review（详情），所以本面板只做汇总，
  * 不重复 Validation / Review 的条目，也不提供Fix / Retry / 重写一类入口（§32/§65）。
- * §34：没有多维图表、没有历史趋势、没有 PASS/FAIL 等级——那都是 v1.3+ 的东西。
+ * v1.3.0 §36：多出「维度评分」一小节——四个基础维度 + 各自的短评，都是审阅输出，
+ * 仍然没有等级、没有趋势、没有雷达图，某个维度低也不会多出什么按钮。
  */
 export interface QualityPanelProps {
   quality: QualityResult | null;
@@ -69,6 +70,36 @@ export function QualityPanel({ quality }: QualityPanelProps) {
 
       {state.summary && (
         <p className="mt-2.5 text-[13px] leading-6 text-zinc-300">{state.summary}</p>
+      )}
+
+      {/* v1.3.0 §36：维度评分。旧 Run 没有维度时这一段整体不出现（§37）。 */}
+      {state.dimensions.length > 0 && (
+        <div className="mt-3">
+          <div className="text-[10px] font-mono tracking-widest uppercase text-violet-500/80">
+            维度评分
+          </div>
+          <ul className="mt-1.5 space-y-2">
+            {state.dimensions.map((d) => (
+              <li key={d.key}>
+                <div className="flex items-center gap-2">
+                  <span className="w-12 shrink-0 text-[12px] text-zinc-300">{d.label}</span>
+                  <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/10">
+                    <span
+                      className="block h-full rounded-full bg-violet-400"
+                      style={{ width: `${d.percent}%` }}
+                    />
+                  </span>
+                  <span className="w-10 shrink-0 text-right text-[12px] tabular-nums text-zinc-300 font-mono">
+                    {d.scoreText}
+                  </span>
+                </div>
+                <p className="mt-0.5 ml-14 text-[12px] leading-5 text-muted-foreground">
+                  {d.summary}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
