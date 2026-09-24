@@ -67,6 +67,36 @@
 升级后跑一遍 `npm test`：`tests/test_cli.test.ts` 新增了「v1.1.1 CLI 入口的 baseUrl 信任级」，
 `tests/test_url_guard.test.ts` 补了 mapped / NAT64 / 站点本地 / 6to4 四类地址的判定。
 
+## 从 1.1.x 升级到 1.2.0
+
+**没有任何需要改代码的地方。** v1.2.0 是纯 additive：既有字段、路由、错误码、CLI 参数与
+产物布局一个都没动，v1.1.1 写的产物可以被 v1.2.0 直接读，反之 1.2.0 写的 Run 回落到
+1.1.x 也能读（多出来的 `quality.json` 与三个 metadata 字段会被安全忽略）。
+
+新增的四样东西：
+
+1. **`quality.json`**——运行根与 `attempts/NN/` 各一份，把已有的校验结论、审阅结论与采纳结论
+   汇成一份统一快照。布局与字段见 [run-artifacts.md](./run-artifacts.md)。
+2. **API 响应里的 `quality`**（`QualityResult | null`）——Run 类入口、Run 详情、Attempt 详情
+   都多了这一个字段，其余字段逐字不变。字段说明见 [api.md](./api.md)。
+3. **`ReviewResult` 的可选 `suggestions`**——`prompts/reviewer.txt` 现在会额外要一组建议；
+   模型没返回时响应与落盘里这个键整个不出现。字段说明见 [api.md](./api.md)。
+4. **前端多了一张 Quality Summary 面板**——只做汇总，不带 Fix / Retry 一类操作入口。
+
+需要知道的两件事：
+
+- **旧 Run 没有 `quality.json`。** v1.2.0 之前生成的 Run 在读取时按同一套规则临时装配出
+  `quality`，读响应不会失败，也不会回写文件。明细见
+  [compatibility.md](./compatibility.md) 的「v1.2.0 的统一质量层」。
+- **`quality.json` 取修订后的结论**，而同目录 `review.json` 是首次结论。这让快照与 metadata 的
+  `overall_score` / `quality_issue_count` 同口径，代价是同一层里两个文件的分数可能不同——
+  这是刻意保留的不对称（[compatibility.md](./compatibility.md) 已知不对称第 5 条）。
+
+升级后跑一遍 `npm test`：新增的 `tests/test_quality_assembler.test.ts`（装配规则）、
+`tests/test_quality_models.test.ts`（快照解析容错）、`tests/test_quality_pipeline.test.ts`
+（落盘与内存一致）、`tests/test_quality_api.test.ts`（读回一致、旧 Run 兼容）、
+`tests/test_quality_ui.test.ts`（面板状态推导）覆盖这一层，且都用假模型，不调真实接口。
+
 ## 从 0.9.x 升级到 1.0.0
 
 ### 行为变化（需要注意的两处）
@@ -112,7 +142,7 @@
 ## 升级操作
 
 ```bash
-git fetch && git checkout 1.1.1     # tag 不带 v 前缀；从 0.9.x 升级时 checkout 1.0.0 亦可
+git fetch && git checkout 1.2.0     # tag 不带 v 前缀；从 0.9.x 升级时 checkout 1.0.0 亦可
 npm install
 cp .env.example .env                # 填入 LLM_API_KEY 后即可跑
 npm run dev                         # Web UI
@@ -130,3 +160,5 @@ npx tsx scripts/generate-cli.ts run --config configs/example_story.json
 回滚后请求体 `baseUrl` 又可以指向任意主机（这正是 1.1.0 收紧掉的行为）。
 从 1.1.1 回滚到 1.1.0 也不需要迁移：CLI 会重新开始拦 `--base-url` 指向本机的请求，
 HTTP 行为与 1.1.0 相同；合法的公网 IPv4-mapped 地址会再次被误拒（只影响少数 IPv6 部署）。
+从 1.2.0 回滚到 1.1.1 同样不需要迁移：1.2.0 新增的 `quality.json` 与 metadata 的三个新字段
+只是被旧版本忽略，旧版本不会因为多一个文件而读不了 Run；CLI 与 HTTP 行为逐字相同。

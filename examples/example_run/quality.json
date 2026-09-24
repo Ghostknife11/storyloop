@@ -1,0 +1,21 @@
+{
+  "overall_score": 82,
+  "validation_passed": true,
+  "accepted": true,
+  "issues": [
+    {
+      "id": "review-1",
+      "source": "review",
+      "category": "review_problem",
+      "message": "中段线索复用偏多"
+    }
+  ],
+  "suggestions": [
+    {
+      "id": "review-suggestion-1",
+      "source": "review",
+      "message": "压缩重复线索，让中段事件承担新的推进功能。"
+    }
+  ],
+  "summary": "节奏紧凑，悬念保持到尾。"
+}

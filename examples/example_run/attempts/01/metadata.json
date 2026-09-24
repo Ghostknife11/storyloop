@@ -25,5 +25,8 @@
       "success": true
     }
   ],
-  "error": null
+  "error": null,
+  "quality_assembly_status": "completed",
+  "overall_score": 82,
+  "quality_issue_count": 1
 }

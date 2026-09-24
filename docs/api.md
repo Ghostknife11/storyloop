@@ -117,6 +117,7 @@
 | `review` | ReviewResult \| null | 审阅失败时为 `null` |
 | `review_status` | string | 同上四值 |
 | `review_error` | string | 可选，仅在出错时出现 |
+| `quality` | QualityResult \| null | v1.2.0 新增：统一质量快照，见下 |
 | `artifacts` | object | 见下 |
 | `quality_status` | string | `accepted` / `exhausted` |
 | `attempt_count` | number | 尝试次数 |
@@ -125,18 +126,34 @@
 | `attempts` | AttemptSummary[] | 每次尝试的摘要 |
 
 `artifacts` 恒含 `config` / `beat_plan` / `story` / `metadata` 四个键（值是文件名），
-校验或审阅成功时追加 `validation` / `review`。
+校验、审阅或质量装配各自成功时追加 `validation` / `review` / `quality`。
+
+`QualityResult`（v1.2.0 新增，纯 additive）：`overall_score`（`review.score`，没有审阅结论时
+是 `null`）、`validation_passed`（`true` / `false` / 校验没跑时的 `null`）、`accepted`、
+`issues`（`QualityIssue[]`）、`suggestions`（`QualitySuggestion[]`）、`summary`。
+它由 `QualityAssembler` 从已有的校验结论、审阅结论与采纳结论确定性装配，不调用模型、
+不引入新分数（只有一个整体分，没有维度分）。
+
+- `QualityIssue`：`id`（`validation-1` / `review-1`…）、`source`（`validation` / `review`）、
+  `category`（校验侧是 issue code，审阅侧统一 `review_problem`）、`message`、可选的 `severity`
+- `QualitySuggestion`：`id`、`source`（`review`；`system` 保留给后续版本，v1.2.0 不产出）、
+  `message`
+
+`ReviewResult` 的 `suggestions` 是 v1.2.0 新增的可选字段：缺失时响应里整个键不出现，
+与 v1.0 / v1.1 的落盘结构逐字一致。
 
 `AttemptSummary`：`attempt_number`、`accepted`、`retry_reason`（`null` 或原因）、
 `review_score`（可为 `null`）、`validation_passed`（可为 `null`）、`repair_count`、`repairs`。
 
-**发生过修订时，这两处的分数来源不同**（与 [run-artifacts.md](./run-artifacts.md) 的产物语义一致）：
+**发生过修订时，这几处的分数来源不同**（与 [run-artifacts.md](./run-artifacts.md) 的产物语义一致）：
 
 - Run 类入口的 `review` / `validation` 与 `attempts[].review_score` / `validation_passed`
   来自**入选 Attempt 修订后**的结论——也就是这个 Run 最终采用的那一版；
 - `GET /api/runs/<run_id>/attempts/<attempt_number>` 的 `review` / `validation` 读的是
   attempt 目录下的 `review.json` / `validation.json`，即该次尝试的**首次**结论；
   修订后的那份要通过 `repairs[].before_review_score` / `after_review_score` 看变化。
+- 而三处响应的 `quality` 一律取**修订后**的结论（与最终采用的 `story` 对齐），
+  旧 Run 没有 `quality.json` 时按同一套规则临时装配。
 
 所以同一个 Attempt 在「详情」和「Run 摘要」里看到不同分数不是 bug，详见
 [compatibility.md](./compatibility.md) 的「已知的不对称」。
@@ -146,12 +163,14 @@
 `RunDetail`，与 Run 入口不同：**没有** `beat_plan` 与 `artifacts`，
 多了策略回显字段 `max_attempts` / `min_review_score` / `enable_repair` / `max_repairs_per_attempt`。
 `run_id` 为 `""`、`.`、`..` 或含路径分隔符时 400；Run 不存在 404 `RUN_NOT_FOUND`。
+`quality` 与 Run 入口同结构：优先读 `runs/<run_id>/quality.json`，v1.2.0 之前的 Run 没有
+这个文件（或被手改坏）时按同一套确定性规则临时装配——读取不会因此失败。
 
 ### `GET /api/runs/<run_id>/attempts/<attempt_number>`
 
 `AttemptDetail`：`run_id`、`attempt_number`、`accepted`、`retry_reason`、`selected`、
 `story`、`initial_story`（没发生修订时是 `null`）、`repair_count`、`repairs`（`RepairDetail[]`）、
-`validation`、`review`。
+`validation`、`review`、`quality`（v1.2.0 新增，取该次尝试修订后的快照）。
 Run 不存在与 Attempt 不存在共用 `RUN_NOT_FOUND` 这个 code，只能靠 message 区分；
 `attempt_number` 不是 1~99 的整数时 400。
 

@@ -3,6 +3,10 @@
 > 本文件是 v1.0.0 冻结的 Run 产物布局：目录层级、文件名、每层 metadata 的字段集。
 > 1.x 版本不得改名、不得删文件、不得改变字段语义；扩展只能是新增文件或新增可选字段。
 >
+> v1.2.0 在这一约束下新增了 `quality.json`（Run 根 + 每个 attempt）与三个 metadata 字段：
+> `quality_assembly_status` / `overall_score` / `quality_issue_count`。都是纯新增，
+> 没有任何旧字段改名或改语义。
+>
 > 实现：`src/core/pipeline.ts` + `src/storage/artifact-store.ts`
 > 契约测试：`tests/test_contract_artifacts.test.ts`（存在性与必填字段）、
 > `tests/test_contract_docs_sync.test.ts`（本文件的字段表 ↔ 真实产物逐字段一致）
@@ -18,12 +22,14 @@ runs/
     ├── story.md                       # 最终入选正文（# 标题 + 空行 + 正文）
     ├── validation.json                # 入选 Attempt 的首次校验结果
     ├── review.json                    # 入选 Attempt 的首次审阅结果
+    ├── quality.json                   # 入选 Attempt 的统一质量快照（v1.2.0 新增）
     ├── metadata.json                  # 运行级 metadata
     └── attempts/
         └── 01/                        # 第 1 次尝试，两位数字
             ├── story.md               # 该次尝试的最终正文（有修订时为修订后）
             ├── validation.json        # 该次尝试的首次校验结果
             ├── review.json            # 该次尝试的首次审阅结果
+            ├── quality.json           # 该次尝试的统一质量快照（v1.2.0 新增）
             ├── metadata.json          # attempt 级 metadata
             ├── initial_story.md       # 只在发生过修订时出现（修订前的原文）
             └── repairs/               # 只在发生过修订时出现
@@ -38,9 +44,13 @@ runs/
 固定规则：
 
 - attempt 与 repair 目录名都是两位数字 `01`、`02`…（上限 99）
-- 运行级目录里除了 `attempts/` 只有那六个文件，没有别的
+- 运行级目录里除了 `attempts/` 只有那七个文件，没有别的
 - `validation.json` / `review.json` 可能缺失：校验或审阅自身出错时 Pipeline 只写 metadata，
-  不写这两个文件（对应 API 响应里字段为 `null`、`*_status` 为 `failed`）
+  不写这两个文件（对应 API 响应里字段为 `null`、`*_status` 为 `failed`）。
+  `quality.json` 不受这个影响：装配只需要 validation 与采纳结论，Review 失败时照样落盘，
+  只是 `overall_score` 与 `summary` 为 `null`
+- 修订目录 `repairs/NN/` 固定五个文件，**不写** `quality.json`：attempt 级那份快照取的
+  已经是修订后的结论，Revision 级的同一份内容没有读者（见下面「统一质量快照」）
 - 一切都是 UTF-8 文本；`.md` 是 Markdown，其余是 JSON
 - 写盘是「先写 `.名字.tmp` 再 rename」的原子操作：写失败可能留下 `.metadata.json.tmp`
   这样的临时文件，读产物的一方应当忽略
@@ -67,13 +77,16 @@ runs/
 | `repair_count` | number | 重试循环结束后 | 全部 Attempt 的修订总轮数 |
 | `selected_attempt` | number | 重试循环结束后 | 入选正文来自第几次尝试；全部未达标时是最后一次 |
 | `quality_status` | string | 重试循环结束后 | `accepted` / `exhausted` |
+| `quality_assembly_status` | string | 装配出统一质量快照时 | v1.2.0 新增：`completed`。只表示快照装配完成，与 `quality_status` 的采纳结论是两件事，所以另起这个名字 |
+| `overall_score` | number \| null | 同上 | v1.2.0 新增：统一快照里的总分，等于入选版本的审阅分；没有审阅结论就是 `null`，不由代码自己补分 |
+| `quality_issue_count` | number | 同上 | v1.2.0 新增：统一快照里 issues 的条数（校验问题 + 审阅问题） |
 | `validation_status` / `review_status` | string | 对应阶段跑到过 | `not_started` / `validating` / `reviewing` / `completed` / `failed` |
 | `validation_passed` | boolean | 入选版本有校验结论 | 硬性规则是否全过 |
 | `validation_issue_count` | number | 入选版本有校验结论 | 问题条数 |
 | `review_score` | number | 入选版本有审阅结论 | 审阅总分 |
 | `validation_error` / `review_error` | string | 校验或审阅自身抛异常 | 组件自身失败的原因（已过 `safe-text`）；正文不达标不算 |
 | `error` | string | Run 失败 | Run 级失败原因，已过 `safe-text`；成功时整个字段不出现 |
-| `artifacts` | object | 必有 | 文件名索引：`config` / `beat_plan` / `story` / `metadata`，有结论时再加 `validation` / `review` |
+| `artifacts` | object | 必有 | 文件名索引：`config` / `beat_plan` / `story` / `metadata`，有结论时再加 `validation` / `review` / `quality` |
 
 运行级 `metadata.json` 是**整体快照**：每次阶段推进都整份重写，不与上一次合并。因此在中断
 现场读到的 metadata 还可能带着过程态字段（例如 Attempt 刚开始时的 `attempt_number`），
@@ -91,6 +104,8 @@ runs/
 | `validation_status` / `review_status` | string | 必有 | 同上，对应那一路的阶段状态 |
 | `repair_count` | number | 必有 | 这次 Attempt 里的修订轮数 |
 | `repairs` | RepairRecord[] | 必有 | 每轮修订的记录；没有修订时是空数组 |
+| `quality_assembly_status` | string | 该次尝试装配出快照时 | v1.2.0 新增：与运行级同名字段同口径，`completed` |
+| `overall_score` / `quality_issue_count` | number \| null / number | 同上 | v1.2.0 新增：该次尝试的快照总分与问题条数，取**修订后**的结论 |
 | `error` | string \| null | 必有 | 这次尝试的失败原因；没出错是 `null`（v1.0.0 固定语义） |
 | `validation_error` / `review_error` | string | 校验或审阅自身抛异常 | 只在该路组件失败时出现，内容同运行级同名字段 |
 
@@ -126,6 +141,29 @@ runs/
 `review.json` 是修订前那次审阅）。1.x 内不改这个语义，详见
 [compatibility.md](./compatibility.md) 的「已知的不对称」。
 
+### 统一质量快照（v1.2.0）
+
+`quality.json` 是**新增的统一层**，不是 `review.json` 改名，也不替代任何已有产物。它由
+`QualityAssembler` 从已有的「首次校验结论 + 首次审阅结论 + 采纳结论」确定性装配，不调用
+LLM、不读文件系统、不引入新阈值——同一个输入永远得到同一份快照。字段为
+`overall_score` / `validation_passed` / `accepted` / `issues` / `suggestions` / `summary`，
+详见 [api.md](./api.md) 的 `quality` 字段。
+
+快照取哪一轮的结论：
+
+- 运行级与 attempt 级的 `quality.json` 记的是**修订后**的结论，与同目录 `metadata.json`
+  的 `overall_score` / `quality_issue_count`、与最终入选的 `story.md` 严格对齐；
+- 同目录的 `review.json` / `validation.json` 仍是**首次**结论（沿用上面的刻意不对称）。
+  因此 Run 根目录可能出现「`review.json` 分数 41、`quality.json` 分数 82」——
+  与「`metadata.json` 分数 82、`review.json` 分数 41」是同一条规则；
+- 入选 Attempt 的 `quality.json` 通过 promote 流程复制到 Run 根目录（与 `story.md` 等
+  同一套机制），所以根目录那份与入选正文一一对应；
+- `repairs/NN/` 不写 `quality.json`：attempt 级那份已经是修订后的快照，再写一份内容相同
+  的历史文件没有读者。
+
+1.2.0 之前产生的 Run 没有 `quality.json`，读接口按内存装配的结果兜底（
+[compatibility.md](./compatibility.md)），磁盘上不会补写。
+
 ## 安全约定
 
 - 产物里不写 API Key、不写 Bearer token
@@ -136,6 +174,7 @@ runs/
 
 - 不做跨 Run 的版本库、不做产物 diff、不做 run 重放（`ExperimentRunner` 一类能力保留给后续版本）
 - 不做失败归因统计与因果图（`FailureAttribution` / `CausalGraph` 同理）
+- `quality.json` 只是把已有结论汇到一起：不额外打分、不设 PASS/FAIL 阈值、不做多维评分
 - 不写 `.tmp` 之外的中间文件（原子写入产生的临时文件见上面的「固定规则」）
 
 ## 相关

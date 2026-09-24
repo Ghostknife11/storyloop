@@ -45,6 +45,7 @@ Git tag 不带 `v` 前缀（`0.9.1`、`1.0.0`）；GitHub Release 标题带 `v` 
 | StoryConfig / BeatPlan | 追加可选字段；`config_version` / `beat_plan_version` 保持 `"1"`，直到主版本 +1 才升到 `"2"` |
 | ValidationResult / ReviewResult | 追加可选字段；`issues[].code` 可以新增取值 |
 | Run 产物 | metadata 可以新增字段；文件名与目录层级不变 |
+| QualityResult（v1.2.0） | 追加可选字段；`quality.json` 是新增文件，不影响既有文件 |
 | HTTP API | 追加路由；既存路由只加字段 |
 | CLI | 追加命令与参数；既存参数语义不变 |
 | 环境变量 | 追加变量；既有变量含义不变 |
@@ -66,6 +67,9 @@ Git tag 不带 `v` 前缀（`0.9.1`、`1.0.0`）；GitHub Release 标题带 `v` 
    `validation_issue_count` / `review_score`（以及 API 里对应字段）取**修订后**的结论。
    因此同一层里「metadata 的分数」与「`review.json` 的 score」可能不同——这不是数据损坏，
    也不在校正范围内：两边各自语义固定，1.x 内都不会改。
+   v1.2.0 的 `quality.json` 与它派生的 `overall_score` / `quality_issue_count`
+   一律取**修订后**的结论（与 metadata、与最终采用的 `story.md` 同口径）；
+   修订目录 `attempts/NN/repairs/MM/` 里**没有** `quality.json`。
 
 以上五条都有合同测试看守，改动它们属于破坏性变更。
 
@@ -107,6 +111,31 @@ v1.1.1 是一次修订版本：没有新能力，只把 v1.1.0 那道关卡自�
 
 已知限制（重定向、DNS rebinding）原文写在 [api.md](./api.md) 的「`baseUrl` 覆盖的地址限制」末尾，
 v1.1.1 没有改动这两条的行为，只是把它们写明。
+
+## v1.2.0 的统一质量层（纯 additive）
+
+v1.2.0 新增的是「怎么把已有的质量结论汇到一起」，不是新的打分能力：`QualityAssembler`
+不调用模型、不引入新分数、没有多维、没有 PASS/FAIL 阈值。它读的三样东西
+（校验结论、审阅结论、采纳结论）v1.2.0 之前就全都在产物里了。
+
+因此这一版按纯 additive 发布，逐条对上「1.x 的承诺」的「可以做的事」：
+
+- **新增文件，不改既有文件。** `quality.json` 出现在 Run 根与 `attempts/NN/` 两处；
+  既有的 `story.md` / `config.json` / `beat_plan.json` / `validation.json` / `review.json` /
+  `metadata.json` 一个字节都没动。
+- **既有字段一个没删没改。** `ReviewResult` 只多了一个可选 `suggestions`；
+  缺失时响应与落盘结构里这个键整个不出现，与 v1.0 / v1.1 逐字一致。
+- **既有路由只加字段。** Run 类入口、Run 详情、Attempt 详情都只多一个 `quality`
+  （`QualityResult | null`）；错误码、状态码、路由集不变。
+- **旧 Run 不需要迁移。** 没有 `quality.json` 的 Run（v1.2.0 之前生成的全部 Run）在读取时
+  按同一套确定性规则**临时装配**，读响应、读详情都不会因此失败；也不会回写 `quality.json`。
+- **`quality.json` 坏了不会连累 Run。** 解析失败或字段不合规时退回临时装配，
+  退化的 worst case 是 `quality: null`（面板整体隐藏），不是 500。
+
+一处需要写明的取舍：`quality.json` 取**修订后**的结论，而同目录的 `review.json` 是**首次**
+结论。这让快照与 metadata 的 `overall_score` / `quality_issue_count`、与最终采用的 `story.md`
+三者同口径（`overall_score` 就是那一版正文的审阅分）。代价是同一层里两个文件的分数可能不同
+——这与上方第 5 条已有的「metadata vs `review.json`」不对称同源，刻意保留，1.x 内不改。
 
 ## 破坏性变更怎么发布
 

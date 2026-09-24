@@ -1,13 +1,15 @@
 # Storyloop · AI 短篇生成引擎
 
-> 一个稳定的 AI 短篇小说生成引擎：剧情规划、硬性校验、基础审阅、确定性自动重试与定点修订。
+> 一个稳定的 AI 短篇小说生成引擎：剧情规划、硬性校验、基础审阅、确定性自动重试、定点修订，
+> 以及一份把以上结论汇到一起的统一质量快照。
 > A stable pipeline-based AI short-story generator: beat planning, hard validation, basic review,
-> deterministic automatic retry, and targeted story repair.
+> deterministic automatic retry, targeted repair, and a unified quality snapshot.
 >
-> **v1.0.0 是冻结版本（Stable Generation Engine）。** 它没有新增智能能力，
-> 而是把已经能跑的每一条契约写成公开承诺：StoryConfig v1、BeatPlan v1、Run 产物布局、
-> HTTP API、CLI、运行时默认值、错误 schema，并用合同测试看守，用文档固定下来。
-> 从这里开始，「能用什么」和「不能用什么」都有明确答案。
+> **v1.2.0 开始建立统一质量工程层。** v1.0.0 冻结了生成契约，v1.1.x 收紧了地址关卡，
+> v1.2.0 做的是把散落在 `validation.json` / `review.json` / `metadata.json` / API 响应里的
+> 质量结论收口成一份 `QualityResult`：不调用模型、不产生新分数、没有多维、没有 PASS/FAIL 阈值——
+> 它读的三样东西在 v1.2.0 之前就全都在产物里了。全部改动 additive：既有字段、路由、
+> 错误码、CLI 参数与产物布局一个都没动。
 
 ## 快速开始
 
@@ -56,6 +58,9 @@ StoryConfig → Planning →〔Attempt 1..max_attempts: Generate → Save Story 
 - **Automatic Retry（自动重试）**：生成失败、校验不通过或总分低于阈值时按确定性策略重新生成
 - **Targeted Story Repair（定点修订）**：Attempt 不通过时先按具体问题类别改写这篇正文，
   修订后再校验、再审阅；修订彻底失败才退回整篇重新生成
+- **Unified Quality Snapshot（统一质量快照）**：把校验结论、审阅结论与采纳结论汇成一份
+  `QualityResult`（`quality.json` + API 的 `quality` 字段 + 前端 Quality Summary 面板），
+  不调用模型、不新增分数
 - **Run Artifacts**：产物统一落在 `runs/<run_id>/`，每次 Attempt、每次修订单独归档
 - **现代 Web UI**：六阶段进度、Attempt 计数、修订明细、Validation / Review 面板、Run ID 与产物清单
 - **OpenAI-compatible LLM**：OpenAI / DeepSeek / 硅基流动 / 任意兼容端点
@@ -111,6 +116,14 @@ StoryConfig → Planning →〔Attempt 1..max_attempts: Generate → Save Story 
 │   RunContext         │  run_id + status + current_stage + error
 └──────────┬───────────┘
            ▼
+┌──────────────────────────────────────────────────────────────┐
+│  QualityAssembler（v1.2.0）                                  │
+│  纯函数：ValidationResult + ReviewResult + 采纳结论          │
+│  → QualityResult（overall_score / validation_passed /       │
+│    accepted / issues / suggestions / summary）               │
+│  不调用模型 · 无随机 · 同一输入永远得到同一份 JSON            │
+└──────────┬───────────────────────────────────────────────────┘
+           ▼
 ┌──────────────────────┐
 │  BeatPlanner         │  prompts/beat_planner.txt → LLM → BeatPlan（可手动编辑）
 │  StoryGenerator      │  prompts/story.txt 渲染（含 Beat Plan）
@@ -123,10 +136,16 @@ StoryConfig → Planning →〔Attempt 1..max_attempts: Generate → Save Story 
 │      LLM Client      │  OpenAI-compatible（system + user）· 单次超时 LLM_TIMEOUT · transport retry 硬上限 2 次
 └──────────┬───────────┘
            ▼
-┌──────────────────────┐
+┌──────────────────────────────────────────┐
 │    ArtifactStore     │  原子写入 runs/<run_id>/ 下的产物，写失败抛 ArtifactWriteError
+│                      │  v1.2.0 起多一份 quality.json（Run 根与 attempts/NN/ 各一份）
 └──────────────────────┘
 ```
+
+质量结论的流向：Validator / Reviewer / RetryPolicy 各自产出**原始**结论（落盘为
+`validation.json` / `review.json`、metadata 记录分数），QualityAssembler 只做**汇总**——
+把同一份结论整理成 `QualityResult` 写进 `quality.json`。它排在原始结论的下游，
+不会反过来影响校验、审阅或重试的任何判定。
 
 正文先落盘再校验、再审阅：即使 Validator 自身抛异常或 Reviewer 调用失败 / 输出非法，
 `story.md` 与整个 Run 都保持成功，只有对应的 `validation_status` / `review_status` 变为 `failed` 并记录原因。
@@ -197,6 +216,7 @@ runs/
     ├── story.md         # 被选中那一次 Attempt 的正文（发生过修订时为修订后的版本）
     ├── validation.json  # 被选中那一次 Attempt 的首次硬性校验结果
     ├── review.json      # 被选中那一次 Attempt 的首次审阅结果
+    ├── quality.json     # 被选中那一次 Attempt 的统一质量快照（v1.2.0 新增）
     ├── metadata.json    # 运行级 metadata
     └── attempts/
         ├── 01/
@@ -204,6 +224,7 @@ runs/
         │   ├── initial_story.md  # 修订前的正文（只有发生过修订时才存在）
         │   ├── validation.json   # 该次尝试的首次校验结论
         │   ├── review.json       # 该次尝试的首次审阅结论
+        │   ├── quality.json      # 该次尝试的统一质量快照（v1.2.0 新增）
         │   ├── metadata.json     # attempt 级 metadata
         │   └── repairs/
         │       ├── 01/
@@ -222,7 +243,8 @@ runs/
 运行级 `metadata.json` 的字段：`run_id`、`project_version`、`status`、`current_stage`、
 `started_at`、`finished_at`、`model`、`error`、`artifacts`、`validation_status`、
 `validation_passed`、`validation_issue_count`、`validation_error`、`review_status`、
-`review_score`、`review_error`、`max_attempts`、`min_review_score`、
+`review_score`、`review_error`、`quality_assembly_status`、`overall_score`、
+`quality_issue_count`、`max_attempts`、`min_review_score`、
 `attempt_count`、`selected_attempt`、`quality_status`、`enable_repair`、
 `max_repairs_per_attempt`、`repair_count`。
 `model` 始终是「本次真正生效的模型」（请求覆盖 → 环境变量 → 缺省值），attempt 级的 `error`
@@ -231,7 +253,9 @@ runs/
 发生过修订时有一处**刻意的不对称**：运行级 `metadata.json` 里的 `validation_*` / `review_score`
 取自入选 Attempt **修订后**的结论，而同目录的 `validation.json` / `review.json`（以及
 `attempts/NN/` 下的同名文件）是**首次**结论，修订后的那份在 `attempts/NN/repairs/MM/` 里。
-因此两处分数可能不同（`examples/example_run/` 就是这个样子）。1.x 内保持这个语义不变。
+`quality.json` 与它派生的 `overall_score` / `quality_issue_count` 一律取**修订后**的结论，
+与 metadata、与最终采用的 `story.md` 同口径；因此同一层里 `quality.json` 的分数可能高于
+`review.json`（`examples/example_run/` 就是这个样子）。1.x 内保持这个语义不变。
 
 **校验不通过不是 Run 失败**：`status` 仍为 `completed`，`validation_passed` 为 `false`，
 此时会按策略定点修订或自动重试。**校验器自身崩溃也不是 Run 失败**：`validation_status` 为 `failed`，
@@ -321,6 +345,32 @@ Validator 只回答「基本可用吗」，不回答「写得好不好」。
 没有多维评分、严重度、证据定位、置信度，也没有 PASS / FAIL 判定——审阅只提供反馈。
 审阅用的温度固定为 `0.3`，与生成温度相互独立。
 
+## QualityResult（v1.2.0）
+
+把上面两样结论与采纳结论汇到一起的统一快照，六个字段，没有维度、没有等级：
+
+| Field | Type | Description |
+|---|---|---|
+| `overall_score` | number \| null | 单一整体分，取 `review.score`；没有审阅结论时是 `null`（不是 0） |
+| `validation_passed` | boolean \| null | `true` / `false`；校验没跑（组件自身异常）时是 `null`，与「校验没过」是两件事 |
+| `accepted` | boolean | RetryPolicy 的采纳结论，不参与判定 |
+| `issues` | QualityIssue[] | 问题清单（可为空数组） |
+| `suggestions` | QualitySuggestion[] | 建议清单（可为空数组） |
+| `summary` | string \| null | 审阅的总体评价；审阅失败或没给时是 `null` |
+
+`QualityIssue`：`id`（`validation-N` / `review-N`）、`source`（`validation` / `review`）、
+`category`（校验侧是 issue code，审阅侧统一 `review_problem`）、`message`、可选 `severity`。
+`QualitySuggestion`：`id`（`review-suggestion-N`）、`source`、`message`。
+
+`QualityAssembler` 是纯函数：同一输入永远得到同一份 JSON，不调用模型、无随机，
+读的三样东西（`ValidationResult` / `ReviewResult` / 采纳结论）在 v1.2.0 之前就都在产物里。
+它只汇总，**不参与**任何校验、审阅或重试判定。
+
+快照出现在三个地方，内容一致：Run 根与 `attempts/NN/` 下的 `quality.json`、
+Run 类入口与两个读回接口响应里的 `quality`、前端 Quality Summary 面板。
+修订目录 `attempts/NN/repairs/MM/` 里**没有** `quality.json`。v1.2.0 之前的 Run 没有这个文件，
+读取时按同一套规则临时装配，不会因此失败。
+
 ## 定点修订（Targeted Repair）
 
 请求五个字段：`config`、`beat_plan`、`story`、`issue_type`、`issue_message`。
@@ -362,7 +412,8 @@ Validator 只回答「基本可用吗」，不回答「写得好不好」。
 `retry_policy` 可省略，省略时用默认值。它不属于 StoryConfig，不会写进 `config.json`，
 只会记录在 Run 的 `metadata.json` 里。非法值返回 400，Run 不会开始。
 `artifacts` 是产物文件名映射（`config` / `beat_plan` / `story` / `metadata`，
-校验、审阅成功时追加 `validation` / `review`），响应中不会返回服务器绝对路径。
+校验、审阅或质量装配各自成功时追加 `validation` / `review` / `quality`），
+响应中不会返回服务器绝对路径。
 
 **校验不通过不会让 Run 失败**——`story` 与 `status: "completed"` 照常返回，`validation.passed` 为 `false`，
 HTTP 状态码仍然是 200（这是一次成功的业务结果，不是错误）。
@@ -458,7 +509,8 @@ mapped / NAT64 地址按内嵌的那个地址判
 
 这些是**刻意不做**的，不是待修的缺陷。每一条都有对应说明：
 
-- **没有多维评审**：Review 只有一个 0–100 总分，没有分维度打分、没有严重度、没有证据定位
+- **没有多维评审**：Review 只有一个 0–100 总分，没有分维度打分、没有严重度、没有证据定位；
+  统一质量快照只是把同一个总分换个地方放，不多打一次分、不出趋势图
 - **没有 Best-of-N 择优**：取第一个满足策略的 Attempt，不会在多次尝试里挑「最好的」
 - **没有质量门禁**：没有 PASS / FAIL 判定，`quality_status` 只有 `accepted` / `exhausted` 两种
 - **没有商业审阅**：不评估市场适配、读者预期或商业可行性
@@ -476,6 +528,9 @@ mapped / NAT64 地址按内嵌的那个地址判
 
 ## 升级说明
 
+v1.2.0 建立了统一质量工程层（`QualityResult` / `quality.json` / API 的 `quality` 字段 /
+前端 Quality Summary 面板），纯 additive：从 1.1.x 升到 1.2.0 **不需要改任何代码**，
+1.1.1 写的产物可以直接读，1.2.0 写的 Run 回落到 1.1.x 也只是多一个被忽略的文件。
 v1.1.1 修的是 v1.1.0 那道地址关卡自身的问题（CLI 的 `--base-url` 不再被自己挡、
 IPv4-mapped / NAT64 地址改判），约束方向不变；从 1.1.0 升到 1.1.1 不需要改任何代码。
 v1.1.0 收紧了请求体 `baseUrl` 覆盖的取值，只允许 http/https 的公网地址；其余与 1.0.1 一致。
@@ -485,7 +540,7 @@ attempt 级 metadata 的 `error` 没有错误时是 `null`（以前按条件写�
 两者都是「字段从可能没有变成一定有」，不会让旧读取方崩掉。
 
 ```bash
-git fetch && git checkout 1.1.1     # tag 不带 v 前缀
+git fetch && git checkout 1.2.0     # tag 不带 v 前缀
 npm install
 cp .env.example .env
 npx tsx scripts/generate-cli.ts run --config configs/example_story.json
@@ -507,7 +562,6 @@ node node_modules/next/dist/bin/next build       # 生产构建
 测试分两类。**行为测试**用注入的假 Generator / Validator / Reviewer 驱动 Pipeline，
 覆盖重试路径、修订路径、`exhausted` 路径与各条边界路径。
 **合同测试**（v1.0.0 新增，v1.0.1 补了产物对照）把公开契约钉死，改一个字段名就红：
-
 | 合同测试 | 钉住什么 |
 |---|---|
 | `tests/test_contract_story_config.test.ts` | StoryConfig v1 字段集、缺省值、未知字段不穿透 |
@@ -518,6 +572,11 @@ node node_modules/next/dist/bin/next build       # 生产构建
 | `tests/test_contract_docs.test.ts` | README 必备章节、docs/ 完整性、版本号唯一来源、防泄漏守卫 |
 | `tests/test_contract_docs_sync.test.ts` | 文档字段表 ↔ 真实产物逐字段一致（多写、漏写、改名都红） |
 | `tests/test_url_guard.test.ts` | 请求体 `baseUrl` 只允许 http/https 公网地址，私网/环回/保留段在发请求前就被拒 |
+
+v1.2.0 的质量快照另有五个测试文件（同样只用假组件，不调真实接口）：
+`test_quality_assembler`（装配规则与确定性）、`test_quality_models`（快照解析容错）、
+`test_quality_pipeline`（落盘与内存一致）、`test_quality_api`（三处口径一致、旧 Run 兼容、
+`quality.json` 损坏后的降级、地址关卡回归）、`test_quality_ui`（面板状态推导）。
 
 所有测试都不调用真实 LLM：LLM 由注入的桩对象或 `FakeLLM` 替代（`tests/helpers/fixtures.ts`），
 `fetch` 也被桩掉。重试相关断言同样只用桩，从不触发真实模型调用。
@@ -548,6 +607,7 @@ URL 校验的用例用注入的假解析器跑，不真的查 DNS，也不碰任
 可直接阅读的实现（无外部依赖）：
 
 - `src/core/retry-policy.ts`：重试策略与 RetryDecision 的实现
+- `src/core/quality-assembler.ts`：统一质量快照的装配规则（纯函数，不调模型）
 - `src/lib/validation-rules.ts`：六条硬性校验规则的实现
 - `src/lib/api-error.ts`：稳定错误码与状态码映射
 - `src/lib/safe-text.ts`：错误文本的净化规则（绝对路径替换、凭据打码），只此一份
