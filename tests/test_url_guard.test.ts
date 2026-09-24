@@ -96,9 +96,25 @@ describe("私网、链路本地与保留段", () => {
     await rejects("http://[2001:db8::1]/v1");
   });
 
-  it("IPv4-mapped IPv6 按内嵌 IPv4 判，环回不会从这扇门进来", async () => {
+  // v1.1.1：这里要的是「按内嵌的那个 IPv4 判」。
+  // 写进 URL 的点分形式会被 WHATWG URL 规范化成十六进制（[::ffff:127.0.0.1] → [::ffff:7f00:1]），
+  // v1.1.0 里那段匹配点分文本的分支因此永远走不到——它靠的是后一个分支返回 false 的 fail-closed。
+  it("IPv4-mapped IPv6 按内嵌 IPv4 判，环回与云元数据不会从这扇门进来", async () => {
     await rejects("http://[::ffff:127.0.0.1]/v1");
     await rejects("http://[::ffff:169.254.169.254]/v1");
+    await rejects("http://[::ffff:10.0.0.1]/v1");
+  });
+
+  it("内嵌公网 IPv4 的 mapped 地址要放行——不能把合法地址一起误拒", async () => {
+    await accepts("https://[::ffff:93.184.216.34]/v1");
+  });
+
+  it("NAT64 / 站点本地 / 6to4 同样按内嵌地址或前缀判", async () => {
+    await rejects("https://[64:ff9b::7f00:1]/v1"); // NAT64 指向环回
+    await rejects("https://[64:ff9b::a9fe:a9fe]/v1"); // NAT64 指向云元数据地址
+    await accepts("https://[64:ff9b::5db8:d822]/v1"); // NAT64 指向公网 IPv4
+    await rejects("http://[fec0::1]/v1"); // 站点本地
+    await rejects("http://[2002:7f00:1::1]/v1"); // 6to4 中继段
   });
 
   it("解析到私网的域名拒绝", async () => {
@@ -149,8 +165,10 @@ describe("公网地址", () => {
 });
 
 describe("与服务端错误映射的衔接", () => {
-  it("错误名是 RequestValidationError，映射成 400 CONFIG_INVALID", () => {
+  it("类名与运行时 name 一致，映射成 400 CONFIG_INVALID", () => {
     const httpError = new UnsafeRequestUrlError("baseUrl 不允许指向非公网地址：127.0.0.1");
+    // v1.1.0 借用别人的名字，日志里的错误名指不到真实类型；v1.1.1 改回一致
+    expect(httpError.name).toBe("UnsafeRequestUrlError");
     const apiError = toApiError(httpError);
     expect(apiError.httpStatus).toBe(400);
     expect(apiError.body().error.code).toBe("CONFIG_INVALID");

@@ -134,7 +134,7 @@ describe("§12 状态码按错误性质分开", () => {
   it("用户错误一律 400，不因为「内部实现里抛的是 Error」就升到 500", () => {
     for (const name of [
       "ConfigValidationError",
-      "RequestValidationError",
+      "UnsafeRequestUrlError",
       "UnsupportedConfigVersionError",
       "RetryPolicyError",
       "RepairValidationError",
