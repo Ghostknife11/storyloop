@@ -13,6 +13,57 @@ All notable changes to Storyloop.
 
 ---
 
+## [1.2.1] —— 2026-09-24
+
+v1.2.1 是**修订版本**：没有新能力、没有新文件、没有改字段、没有改路由、没有改产物布局。
+修的是 v1.2.0 一处「同一口径没走到底」的问题，顺带订正三处文档与一处已发布 Release 的笔误。
+
+### Fixed
+
+- **旧 Run 的质量兜底装配改取修订后的结论**（与落盘的 `quality.json` 同口径）。v1.2.0 落盘的
+  `quality.json` 取的是修订后那一轮，但**没有**这个文件的 Run（v1.2.0 之前生成的全部 Run）
+  在读取时临时装配读的却是 attempt 目录下的首次结论。于是同一个发生过修订的旧 Run 自相矛盾：
+  `metadata.json` 的 `review_score` 是 82、`repairs[].after_review_score` 是 82，
+  接口给的 `quality.overall_score` 却是 41（描述的是修订前那版正文）。Run 根目录那份
+  `quality.json` 丢了而 attempt 那份还在时，Run 详情与 Attempt 详情还会给出两个不同分数。
+  v1.2.1 起三级兜底，每一级都是「这次尝试最终留下的那一版正文」：运行根的 `quality.json`
+  → 入选 Attempt 自己的 `quality.json` → 从最终结论临时装配（发生过修订时取最后一次真正跑过
+  校验 / 审阅的 `repairs/MM/` 里的那两份，修订调用本身失败时不写这两个文件，于是继续往前找，
+  一次修订都没跑通才回落到 attempt 目录下的首次结论）。实现见
+  `src/lib/generate-service.ts` 的 `finalCheckOf` 与 `ArtifactStore.readRepairValidation` /
+  `readRepairReview`
+- **`docs/run-artifacts.md` 的自相矛盾**：统一质量快照一段原先把快照写成由「首次校验结论 +
+  首次审阅结论」装配，与同文件下一段「取修订后的结论」相反，已改为最终结论口径并写明兜底规则
+- **测试文件数写错**：README、`CHANGELOG.md` 与 1.2.0 Release 的质量测试文件都写的五个，
+  实际新增六个（漏了 `tests/test_quality_compat.test.ts`），三处一并订正；1.2.0 Release 只订正
+  这一处表格，其余内容与测试总量数字不变
+
+### Security
+
+- 本次改动没有扩大任何攻击面：`quality.json` 与兜底装配都只读既有产物，不新增外部输入路径、
+  不引入凭据。请求体 `baseUrl` 的公网地址关卡（v1.1.0 / v1.1.1 的口径）原样未动，回归测试仍在
+
+### Tests
+
+- `tests/test_quality_compat.test.ts` 新增 8 条回归：修订后那一轮的结论被用来装配（分数与
+  `metadata.review_score` / `repairs[].after_review_score` 一致）、多轮修订取最后一次真正跑过
+  校验 / 审阅的那一轮、修订彻底失败时回落首次结论、运行根快照缺失而 attempt 那份还在时
+  Run 详情与 Attempt 详情一致、临时装配结果与 `QualityAssembler` 直接装配逐字节相同，
+  以及 `quality.json` 语法坏 / 分数越界 / 顶层是数组 / 读接口不把服务器路径带进响应、
+  不往磁盘补写文件
+- **测试总量：875 passed / 59 files**（1.2.0 为 867 / 59）。全部用例仍只用假模型 / 假组件，
+  不调真实接口、不碰真实主机
+
+### Compatibility
+
+- 1.2.0 → 1.2.1 无破坏性变更，也不需要迁移：v1.2.0 落盘过 `quality.json` 的 Run 读取结果
+  一个字节都没变（前两级兜底优先）；受影响的只有旧 Run 的 `quality` 字段，改回 v1.2.0 承诺的
+  口径。读接口依旧不写盘、不 500，`quality` 最差是 `null`
+- 明细见 [docs/upgrade.md](./docs/upgrade.md) 的「从 1.2.0 升级到 1.2.1」与
+  [docs/compatibility.md](./docs/compatibility.md) 的「v1.2.1 对同一条口径的修正」
+
+---
+
 ## [1.2.0] —— 2026-09-24
 
 v1.2.0 是**质量工程基础版本**：第一次把散落在 `validation.json` / `review.json` /
@@ -79,12 +130,15 @@ v1.2.0 是**质量工程基础版本**：第一次把散落在 `validation.json`
 
 ### Tests
 
-- 新增五个测试文件（全部用假模型 / 假组件，不调真实接口）：
+- 新增六个测试文件（全部用假模型 / 假组件，不调真实接口）：
   - `tests/test_quality_assembler.test.ts`：四种装配情形、suggestions 映射、确定性（同输入
     JSON 逐字节相同）、不修改入参、键集固定且不含维度词
   - `tests/test_quality_models.test.ts`：`qualityResultOf` 的容错解析——只有
     `overall_score` / `validation_passed` / `accepted` 三个字段会让整份快照作废，
-    `summary` / `issues` / `suggestions` 一律按可丢弃处理
+    `summary` / `issues` / `suggestions` 一律按丢弃处理
+  - `tests/test_quality_compat.test.ts`：三类旧资产原样可读——没有 `suggestions` 的旧
+    `review.json`、没有 `quality.json` 的旧 Run（v1.1.1 形状）、仓库里的
+    `examples/example_run`；读接口不 500、不补写文件、不把服务器路径带进响应
   - `tests/test_quality_pipeline.test.ts`：落盘与内存返回值逐字节一致、多次运行 JSON 稳定、
     重试与修订路径的快照、组件自身异常时快照仍落盘
   - `tests/test_quality_api.test.ts`：Run / Run 详情 / Attempt 详情三处口径一致、旧 Run
