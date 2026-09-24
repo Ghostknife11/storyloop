@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ReviewPanel } from "@/components/review-panel";
 import { ValidationPanel } from "@/components/validation-panel";
 import { AttemptPanel } from "@/components/attempt-panel";
+import { QualityPanel } from "@/components/quality-panel";
 import {
   ManualRepair,
   RepairPanel,
@@ -35,6 +36,7 @@ import {
 import { validateBeatPlan, type BeatPlan, type StoryBeat } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
+import type { QualityResult } from "@/types/quality";
 
 type Phase = "idle" | "generating" | "success" | "error";
 type PlanPhase = "idle" | "planning" | "success" | "error";
@@ -191,6 +193,7 @@ export default function GeneratePage() {
     story: string;
     validation: ValidationResult | null;
     review: ReviewResult | null;
+    quality: QualityResult | null;
   } | null>(null);
   // §36/§37：当前查看的 Attempt 的修订详情与修订前的正文（用于 Repair 面板与 Before / After）
   const [attemptInfo, setAttemptInfo] = useState<{
@@ -553,6 +556,7 @@ export default function GeneratePage() {
         story: detail.story,
         validation: detail.validation,
         review: detail.review,
+        quality: detail.quality,
       });
       setAttemptInfo({
         number: attemptNumber,
@@ -582,6 +586,8 @@ export default function GeneratePage() {
   const shownReviewStatus = viewAttempt
     ? (viewAttempt.review ? "completed" : "not_started")
     : reviewOverride ? "completed" : result?.review_status ?? "not_started";
+  /** v1.2.0 §26：同样跟着当前看的 Attempt 切；手动审阅/校验不影响质量快照（§36 只改正文与结论）。 */
+  const shownQuality = viewAttempt ? viewAttempt.quality : result?.quality ?? null;
   /** §36：当前看的是哪一次 Attempt。 */
   const viewingAttempt = viewAttempt?.number ?? result?.selected_attempt ?? 0;
   /** §36：当前 Attempt 的修订记录（只有真的修过才有内容）。 */
@@ -1021,6 +1027,8 @@ export default function GeneratePage() {
                         setStoryTab("after");
                       }}
                     />
+                    {/* v1.2.0 §31/§32 Quality Summary：总览在前，Validation / Review 作为详情在后 */}
+                    <QualityPanel quality={shownQuality} />
                     {/* §28 Validation 区域：Passed / Failed + Issues（Code / Severity / Message）。
                         §29 与 Review 分开：这里只有硬性检查，没有分数。 */}
                     <ValidationPanel

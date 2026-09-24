@@ -22,6 +22,8 @@ import type { GenerationAttempt } from "@/core/generation-attempt";
 import { RepairStrategy } from "@/core/repair-strategy";
 import type { RepairRecord } from "@/types/repair";
 import { repairRequestOf } from "@/types/repair";
+import { QualityAssembler } from "@/core/quality-assembler";
+import type { QualityResult } from "@/types/quality";
 import { logger } from "@/lib/logger";
 import { safeText } from "@/lib/safe-text";
 import { llmSettings } from "@/lib/app-config";
@@ -63,6 +65,8 @@ export interface GenerationResult {
   review: ReviewResult | null;
   review_status: ReviewStatus;
   review_error: string | null;
+  /** v1.2.0 §4：入选 Attempt 的统一质量快照，与 story 是同一份正文的结论。 */
+  quality: QualityResult;
   attempt_count: number;
   selected_attempt: number;
   quality_status: QualityStatus;
@@ -90,6 +94,7 @@ function skipReviewFor(validation: ValidationResult | null): boolean {
 function artifactsOf(
   validation: ValidationResult | null,
   review: ReviewResult | null,
+  quality: QualityResult | null = null,
 ): Record<string, string> {
   const artifacts: Record<string, string> = {
     config: "config.json",
@@ -99,6 +104,8 @@ function artifactsOf(
   };
   if (validation) artifacts.validation = "validation.json";
   if (review) artifacts.review = "review.json";
+  // v1.2.0 §20：quality.json 与 metadata 同口径（修订后），装配过就一定有这个文件
+  if (quality) artifacts.quality = "quality.json";
   return artifacts;
 }
 
@@ -120,6 +127,12 @@ interface MetaPatch {
   review_status?: ReviewStatus;
   review_error?: string | null;
   review?: ReviewResult | null;
+  /**
+   * v1.2.0 §28 additive：统一质量快照。写入时派生出 quality_assembly_status /
+   * overall_score / quality_issue_count 三个字段——不复用已被 accepted / exhausted
+   * 占用的 quality_status（§29）。
+   */
+  quality?: QualityResult | null;
 }
 
 /** §25 Run 级策略字段：写进 metadata，中断后也能看到当时生效的策略。 */
@@ -151,6 +164,8 @@ interface StoryCheck {
  */
 interface AttemptRecord {
   attempt: GenerationAttempt;
+  /** v1.2.0：这次 Attempt 的最终质量快照（发生过修订时就是修订后那一轮）。 */
+  quality: QualityResult;
   validation_status: ValidationStatus;
   validation_error: string | null;
   review_status: ReviewStatus;
@@ -182,6 +197,8 @@ export class GenerationPipeline {
     private repairer?: StoryRepairer,
     /** §12 固定规则策略；不注入时用默认实例，仍然不学习、不调 LLM。 */
     private repairStrategy: RepairStrategy = new RepairStrategy(),
+    /** v1.2.0 统一质量装配：纯函数、不调 LLM、不碰文件系统；不注入时用默认实例。 */
+    private qualityAssembler: QualityAssembler = new QualityAssembler(),
     /** §42 版本号单一来源：VERSION 文件（§43），不在代码里硬编码。 */
     private projectVersion: string = readProjectVersion(),
   ) {}
@@ -260,6 +277,7 @@ export class GenerationPipeline {
       const repairCount = records.reduce((sum, r) => sum + r.attempt.repairs.length, 0);
 
       // §23/§28：根目录 story.md / validation.json / review.json 对应 selected attempt。
+      // v1.2.0 §57：quality.json 一起晋升，根目录快照因此与 selected attempt 逐字一致。
       this.artifactStore.promoteAttempt(rid, selected.attempt.attempt_number);
 
       transitionStage(ctx, "completed", "completed");
@@ -277,6 +295,7 @@ export class GenerationPipeline {
           review_status: selected.review_status,
           review: selected.attempt.review,
           review_error: selected.review_error,
+          quality: selected.quality,
         }),
       );
 
@@ -291,12 +310,13 @@ export class GenerationPipeline {
         review: selected.attempt.review,
         review_status: selected.review_status,
         review_error: selected.review_error,
+        quality: selected.quality,
         attempt_count: records.length,
         selected_attempt: selected.attempt.attempt_number,
         quality_status: qualityStatus,
         attempts: records.map((r) => r.attempt),
         status: "completed",
-        artifacts: artifactsOf(selected.attempt.validation, selected.attempt.review),
+        artifacts: artifactsOf(selected.attempt.validation, selected.attempt.review, selected.quality),
         started_at: ctx.started_at,
         finished_at: new Date().toISOString(),
       };
@@ -410,6 +430,16 @@ export class GenerationPipeline {
     const accepted = decision.reason === null;
     const attemptError = generationError ?? check.validation_error ?? check.review_error;
 
+    // v1.2.0 §21/§56：Attempt 级质量快照取**最终**结论——修订后重新校验 / 审阅过的
+    // 那一轮，因此它描述的正是这个 Attempt 最终留下的 story.md。
+    // §7/§12：校验或审阅自身失败时对应字段是 null，不伪造结论。
+    const quality = this.qualityAssembler.assemble({
+      validation: check.validation,
+      review: check.review,
+      accepted,
+    });
+    this.artifactStore.putAttemptQuality(rid, attemptNumber, quality);
+
     // §24 Attempt metadata：编号 / 是否被接受 / 重试原因 / 分数 / 校验结论 / 修订记录（§17）。
     // v1.0.0 冻结字段（TASK §10）：error 始终存在，没有错误时是 null——
     // 有条件出现的字段会让「缺字段」与「没错误」无法区分。
@@ -426,6 +456,11 @@ export class GenerationPipeline {
       error: attemptError ?? null,
       ...(check.validation_error ? { validation_error: check.validation_error } : {}),
       ...(check.review_error ? { review_error: check.review_error } : {}),
+      // §28/§29：与运行级 metadata 同一套派生字段。快照本体放在
+      // attempts/NN/quality.json，这里只留摘要，不把整个 QualityResult 嵌进来。
+      quality_assembly_status: "completed",
+      overall_score: quality.overall_score,
+      quality_issue_count: quality.issues.length,
     });
 
     return {
@@ -439,6 +474,7 @@ export class GenerationPipeline {
         error: attemptError,
         repairs,
       },
+      quality,
       validation_status: check.validation_status,
       validation_error: check.validation_error,
       review_status: check.review_status,
@@ -737,10 +773,17 @@ export class GenerationPipeline {
     if (patch.review_status) meta.review_status = patch.review_status;
     if (patch.review_error) meta.review_error = patch.review_error;
     if (patch.review) meta.review_score = patch.review.score;
+    if (patch.quality) {
+      // §28/§29：不复用 quality_status（它已经是 accepted / exhausted），
+      // 统一质量层的状态另起 quality_assembly_status 这个名字。
+      meta.quality_assembly_status = "completed";
+      meta.overall_score = patch.quality.overall_score;
+      meta.quality_issue_count = patch.quality.issues.length;
+    }
     if (ctx.status === "completed" || ctx.status === "failed") {
       meta.finished_at = new Date().toISOString();
     }
-    meta.artifacts = artifactsOf(patch.validation ?? null, patch.review ?? null);
+    meta.artifacts = artifactsOf(patch.validation ?? null, patch.review ?? null, patch.quality ?? null);
     return meta;
   }
 }

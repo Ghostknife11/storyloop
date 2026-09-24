@@ -36,6 +36,8 @@ import {
   validateAttemptNumber,
   type AttemptSummary,
 } from "@/core/generation-attempt";
+import { QualityAssembler } from "@/core/quality-assembler";
+import { qualityResultOf, type QualityResult } from "@/types/quality";
 import type { QualityStatus } from "@/core/pipeline";
 
 export { ConfigValidationError, UnsupportedConfigVersionError } from "@/types/story-config";
@@ -124,7 +126,8 @@ export async function planStory(
 /** §32 v0.5.0 Run 响应：run_id / 状态 / 正文 / 评价 / 产物文件名，不返回本地绝对路径（§67）。
  *  v0.6.0 增加 validation / validation_status / validation_error（§26）。
  *  v0.7.0 增加 attempt_count / selected_attempt / quality_status / attempts（§38）。
- *  v0.8.0 增加 repair_count 与 attempts[].repairs 摘要（§40）。 */
+ *  v0.8.0 增加 repair_count 与 attempts[].repairs 摘要（§40）。
+ *  v1.2.0 增加 quality（§25）：新增的是统一质量层，原有字段一个不动。 */
 export interface RunOk {
   run_id: string;
   status: string;
@@ -138,6 +141,8 @@ export interface RunOk {
   review: ReviewResult | null;
   review_status: string;
   review_error?: string;
+  /** §25/§26：统一质量快照。POST 响应里一定有；读旧 Run 的接口上它可能是 null。 */
+  quality: QualityResult | null;
   artifacts: Record<string, string>;
   /** §16/§38：accepted = 某次 Attempt 满足策略；exhausted = 次数用尽仍未满足。 */
   quality_status: "accepted" | "exhausted";
@@ -212,6 +217,7 @@ function runOkOf(result: GenerationResult): RunOk {
     validation_status: result.validation_status,
     review: result.review,
     review_status: result.review_status,
+    quality: result.quality,
     artifacts: result.artifacts,
     quality_status: result.quality_status,
     attempt_count: result.attempt_count,
@@ -496,6 +502,8 @@ export interface RunDetail {
   validation_status: string;
   review: ReviewResult | null;
   review_status: string;
+  /** §26：统一质量快照。v1.2.0 之前的 Run 没有 quality.json，按同一套规则临时装配。 */
+  quality: QualityResult | null;
   attempts: AttemptSummary[];
 }
 
@@ -516,6 +524,8 @@ export interface AttemptDetail {
   repairs: RepairDetail[];
   validation: ValidationResult | null;
   review: ReviewResult | null;
+  /** §26：统一质量快照；没有 quality.json 的旧 Attempt 按同一套规则临时装配。 */
+  quality: QualityResult | null;
 }
 
 export type RunLookupResult =
@@ -551,6 +561,23 @@ function reasonOf(raw: unknown): RetryReason | null {
   return typeof raw === "string" && RETRY_REASONS.includes(raw as RetryReason)
     ? (raw as RetryReason)
     : null;
+}
+
+/** §26/§27 质量快照读取：优先用落盘的 quality.json；v1.2.0 之前的 Run 没有这个文件，
+ *  或文件被手改坏时，用同一套确定性规则从 validation.json + review.json 临时装配。
+ *  装配器是纯函数，所以临时装配的结果与当年落盘的那份逐字一致，也不需要迁移框架。 */
+const qualityAssembler = new QualityAssembler();
+
+function qualityOf(
+  stored: QualityResult | null,
+  validation: ValidationResult | null,
+  review: ReviewResult | null,
+  accepted: boolean,
+): QualityResult {
+  return (
+    qualityResultOf(stored) ??
+    qualityAssembler.assemble({ validation, review, accepted })
+  );
 }
 
 /** §40 attempts[].repairs：只保留编号 / 类型 / 成败；条目被手改坏就跳过，不让整个详情 500。 */
@@ -630,13 +657,16 @@ export async function getRun(
   const attempts = numbers.map((n) =>
     attemptSummaryFromDisk(runId, n, store.readAttemptMetadata(runId, n), store),
   );
+  const qualityStatus = (strOf(meta?.quality_status) as QualityStatus | null) ?? null;
+  const finalValidation = store.readFinalValidation(runId);
+  const finalReview = store.readFinalReview(runId);
 
   return {
     status: 200,
     json: {
       run_id: runId,
       status: strOf(meta?.status) ?? "unknown",
-      quality_status: (strOf(meta?.quality_status) as QualityStatus | null) ?? null,
+      quality_status: qualityStatus,
       attempt_count: intOf(meta?.attempt_count) ?? numbers.length,
       selected_attempt: intOf(meta?.selected_attempt) ?? (numbers.length > 0 ? numbers[numbers.length - 1] : 0),
       max_attempts: intOf(meta?.max_attempts),
@@ -646,10 +676,17 @@ export async function getRun(
       // §40：Run 级 repair_count 从各 attempt 的修订记录累加，与 POST 响应同一口径。
       repair_count: attempts.reduce((sum, a) => sum + a.repair_count, 0),
       story: store.readFinalStory(runId) ?? "",
-      validation: store.readFinalValidation(runId),
+      validation: finalValidation,
       validation_status: strOf(meta?.validation_status) ?? "not_started",
-      review: store.readFinalReview(runId),
+      review: finalReview,
       review_status: strOf(meta?.review_status) ?? "not_started",
+      quality: qualityOf(
+        store.readFinalQuality(runId),
+        finalValidation,
+        finalReview,
+        // §8：采纳结论沿用 Run 级 quality_status，不另立一套判定
+        qualityStatus === "accepted",
+      ),
       attempts,
     },
   };
@@ -717,6 +754,12 @@ export async function getRunAttempt(
       repairs,
       validation: store.readAttemptValidation(runId, attemptNumber),
       review: store.readAttemptReview(runId, attemptNumber),
+      quality: qualityOf(
+        store.readAttemptQuality(runId, attemptNumber),
+        store.readAttemptValidation(runId, attemptNumber),
+        store.readAttemptReview(runId, attemptNumber),
+        accepted === true,
+      ),
     },
   };
 }

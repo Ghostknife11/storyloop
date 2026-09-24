@@ -2,6 +2,7 @@ import type { StoryConfig } from "@/types/story-config";
 import type { BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
+import type { QualityResult } from "@/types/quality";
 
 /** §34/§38 单个 Attempt 摘要：只带结论，不带完整正文。 */
 export interface AttemptSummaryApi {
@@ -25,7 +26,8 @@ export interface RepairSummaryApi {
 
 /** §32 Run 响应：run_id / 状态 / 正文 / 实际使用的 BeatPlan / 校验结果 / 评价 / 产物文件名。
  *  v0.7.0 增加重试结论与 Attempt 摘要（§38）。
- *  v0.8.0 增加 repair_count 与每个 Attempt 的 repairs 摘要（§40）。 */
+ *  v0.8.0 增加 repair_count 与每个 Attempt 的 repairs 摘要（§40）。
+ *  v1.2.0 增加 quality（§25）：统一质量层是新增字段，原有字段一个不动。 */
 export interface RunApiResult {
   run_id: string;
   status: string;
@@ -39,6 +41,8 @@ export interface RunApiResult {
   review: ReviewResult | null;
   review_status: string;
   review_error?: string;
+  /** §25/§26：统一质量快照；更早的响应里没有这个字段，按可空处理。 */
+  quality: QualityResult | null;
   artifacts: Record<string, string>;
   /** §16：accepted / exhausted。 */
   quality_status: "accepted" | "exhausted";
@@ -223,6 +227,8 @@ export interface RunDetailApi {
   validation_status: string;
   review: ReviewResult | null;
   review_status: string;
+  /** §26：统一质量快照；v1.2.0 之前的 Run 没有 quality.json，服务端会临时装配后返回。 */
+  quality: QualityResult | null;
   attempts: AttemptSummaryApi[];
 }
 
@@ -239,7 +245,8 @@ export interface RepairDetailApi {
 }
 
 /** §35/§38 Attempt 详情：正文 + 这一次独立的校验 / 审阅结论。
- *  v0.8.0 增加修订详情与修订前的初始正文（§36：Repair 面板；§37：Before / After）。 */
+ *  v0.8.0 增加修订详情与修订前的初始正文（§36：Repair 面板；§37：Before / After）。
+ *  v1.2.0 增加这次 Attempt 的质量快照（§26）。 */
 export interface AttemptDetailApi {
   run_id: string;
   attempt_number: number;
@@ -253,6 +260,7 @@ export interface AttemptDetailApi {
   repairs: RepairDetailApi[];
   validation: ValidationResult | null;
   review: ReviewResult | null;
+  quality: QualityResult | null;
 }
 
 /**

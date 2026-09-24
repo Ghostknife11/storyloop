@@ -4,6 +4,7 @@ import type { StoryConfig } from "@/types/story-config";
 import type { BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
+import type { QualityResult } from "@/types/quality";
 import { attemptDirectoryName } from "@/core/generation-attempt";
 import {
   repairDirectoryName,
@@ -16,6 +17,8 @@ import {
  * 不得调用 LLM、分析内容、决定 Pipeline 流程。§22 File System Only。
  * v0.7.0 新增 Attempt 级产物（§23）与 promote（§28）：不改变既有方法的语义。
  * v0.8.0 新增 Repair 级产物（§29-§32）与 initial_story.md（§30）：同样是纯追加。
+ * v1.2.0 新增 quality.json（§20/§21）并把它加入 promote 清单（§57）：同样是纯追加，
+ * 只是多一个由 QualityAssembler 装配出来的统一质量快照。
  */
 
 /** §23/§60 attempt 根目录名；§28 Windows 不可靠目录层级命名，这里固定 ASCII。 */
@@ -110,6 +113,11 @@ export class ArtifactStore {
     return this.putJson(runId, "validation.json", validation);
   }
 
+  /** v1.2.0 §20 运行级质量快照：由 QualityAssembler 装配，覆盖写（同一次 Run 只保留最终结论）。 */
+  putQuality(runId: string, quality: QualityResult): string {
+    return this.putJson(runId, "quality.json", quality);
+  }
+
   putMetadata(runId: string, metadata: Record<string, unknown>): string {
     return this.putJson(runId, "metadata.json", metadata);
   }
@@ -142,6 +150,14 @@ export class ArtifactStore {
 
   putAttemptReview(runId: string, attemptNumber: number, review: ReviewResult): string {
     return this.putJson(runId, this.attemptFile(attemptNumber, "review.json"), review);
+  }
+
+  /**
+   * v1.2.0 §21 Attempt 级质量快照。口径与 attempt metadata 一致：取这次 Attempt 的
+   * **最终**结论（发生过修订时就是修订后那一轮），首次结论仍看 validation.json / review.json。
+   */
+  putAttemptQuality(runId: string, attemptNumber: number, quality: QualityResult): string {
+    return this.putJson(runId, this.attemptFile(attemptNumber, "quality.json"), quality);
   }
 
   /** §24 Attempt metadata：编号 / 是否被接受 / 重试原因 / 分数 / 校验结论。 */
@@ -250,6 +266,15 @@ export class ArtifactStore {
     return this.readJson(runId, "review.json") as ReviewResult | null;
   }
 
+  /** v1.2.0 §26：v1.2.0 之前的 Run 没有这个文件，读到 null 由调用方临时装配。 */
+  readFinalQuality(runId: string): QualityResult | null {
+    return this.readJson(runId, "quality.json") as QualityResult | null;
+  }
+
+  readAttemptQuality(runId: string, attemptNumber: number): QualityResult | null {
+    return this.readJson(runId, this.attemptFile(attemptNumber, "quality.json")) as QualityResult | null;
+  }
+
   // ---------------------------------------------------------------------------
   // §28 promoteAttemptToFinal：Windows 没有可靠符号链接，用复制/重写落地。
   // ---------------------------------------------------------------------------
@@ -260,7 +285,7 @@ export class ArtifactStore {
     // §67：绝对路径不进异常消息，调用方本来就知道 runs 根在哪
     if (!existsSync(dir)) throw new Error(`Attempt ${attemptNumber} 不存在`);
 
-    for (const filename of ["story.md", "validation.json", "review.json"]) {
+    for (const filename of ["story.md", "validation.json", "review.json", "quality.json"]) {
       const source = join(dir, filename);
       if (!existsSync(source)) continue;
       const target = this.rootFile(runId, filename);
