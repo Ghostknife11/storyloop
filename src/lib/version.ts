@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** VERSION 文件读不到时的兜底值；与仓库 VERSION 保持一致，由测试守护。 */
-export const FALLBACK_VERSION = "1.3.0";
+export const FALLBACK_VERSION = "1.4.0";
 
 /** src/lib/version.ts → 仓库根目录。 */
 function repoRootFromModule(): string {
