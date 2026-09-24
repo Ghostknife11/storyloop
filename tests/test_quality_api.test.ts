@@ -8,6 +8,7 @@ import { GET as getRunAttemptDetail } from "@/app/api/runs/[run_id]/attempts/[at
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
 import type { QualityResult } from "@/types/quality";
+import { SAMPLE_BEAT_VALIDATION } from "./helpers/fixtures";
 
 /**
  * v1.2.0 §51/§52 质量 API 契约：quality 是纯新增字段。
@@ -83,6 +84,8 @@ async function start(overrides: {
     repairer: {
       repair: async () => ({ repaired_story: "", issue_type: "general", success: false, notes: "测试用假 Repairer" }),
     } as never,
+    // v1.4.0：这条用例只关心质量层，骨架结构校验给一份固定合格结论
+    beatValidator: { validate: async () => SAMPLE_BEAT_VALIDATION } as never,
   } as never);
 }
 
@@ -103,7 +106,10 @@ describe("§51 POST /api/runs： quality 是 additive 字段", () => {
 
     // §52：原有字段语义不变（validation_error / review_error 只在对应阶段失败时出现）
     expect(Object.keys(body).sort()).toEqual([
-      "artifacts", "attempt_count", "attempts", "beat_plan", "quality", "quality_status",
+      "artifacts", "attempt_count", "attempts", "beat_plan",
+      // v1.4.0：BeatPlan 结构校验是纯追加字段
+      "beat_validation", "beat_validation_status",
+      "quality", "quality_status",
       "repair_count", "review", "review_status", "run_id", "selected_attempt", "status",
       "story", "validation", "validation_status",
     ]);

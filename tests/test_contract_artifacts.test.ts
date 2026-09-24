@@ -10,10 +10,14 @@ import { StoryValidator } from "@/lib/story-validator";
 import { BasicReviewer } from "@/lib/basic-reviewer";
 import { StoryRepairer } from "@/lib/story-repairer";
 import { RepairStrategy } from "@/core/repair-strategy";
+import { BeatValidator } from "@/lib/beat-validator";
+import { QualityAssembler } from "@/core/quality-assembler";
 import { validateStoryConfig } from "@/types/story-config";
+import { validateBeatValidationResult } from "@/types/beat-validation";
 import {
   MISSING_ENDING,
   SAMPLE_BEAT_PLAN,
+  SAMPLE_BEAT_VALIDATION,
   SAMPLE_CONFIG,
   SAMPLE_REVIEW,
   SAMPLE_STORY,
@@ -36,8 +40,10 @@ const PLAN_REPLY = JSON.stringify(SAMPLE_BEAT_PLAN);
 const GOOD_REVIEW = JSON.stringify(SAMPLE_REVIEW);
 const LOW_REVIEW = JSON.stringify({ score: 41, summary: "正文冲突没有展开。", strengths: ["开头有画面"], problems: ["高潮缺失"] });
 
-/** v1.0.0 冻结的运行级文件名；v1.2.0 追加 quality.json（§20，纯新增不替换）。 */
+/** v1.0.0 冻结的运行级文件名；v1.2.0 追加 quality.json（§20）；
+ *  v1.4.0 追加 beat-validation.json（BeatPlan 在生成正文前的结构校验结论）。 */
 const RUN_FILES = [
+  "beat-validation.json",
   "beats.json",
   "config.json",
   "metadata.json",
@@ -54,7 +60,7 @@ const ATTEMPT_FILES = ["metadata.json", "quality.json", "review.json", "story.md
 /** v1.0.0 冻结的 repair 级文件名。 */
 const REPAIR_FILES = ["metadata.json", "request.json", "review.json", "story.md", "validation.json"] as const;
 
-/** TASK §9 要求的运行级 metadata 必备字段。 */
+/** TASK §9 要求的运行级 metadata 必备字段；v1.4.0 追加 beat_validation_status。 */
 const RUN_META_REQUIRED = [
   "run_id",
   "project_version",
@@ -68,6 +74,7 @@ const RUN_META_REQUIRED = [
   "validation_status",
   "review_status",
   "repair_count",
+  "beat_validation_status",
   "artifacts",
 ] as const;
 
@@ -96,6 +103,9 @@ const REPAIR_META_REQUIRED = [
 function pipelineWith(llm: FakeLLM, store: ArtifactStore, retryPolicy?: RetryPolicy) {
   // 四个阶段都只用到 generate()，这里一次性降到它们需要的形状
   const client = llm as never;
+  // v1.4.0：Beat 校验器自带一份假 LLM——它接在 Planner 之后、Generator 之前，
+  // 若和主序列共用就会把 PLAN_REPLY 吃掉。
+  const beatValidator = new BeatValidator(new FakeLLM([JSON.stringify(SAMPLE_BEAT_VALIDATION)]) as never);
   return new GenerationPipeline(
     new BeatPlanner(client),
     new StoryGenerator(client),
@@ -105,6 +115,9 @@ function pipelineWith(llm: FakeLLM, store: ArtifactStore, retryPolicy?: RetryPol
     retryPolicy,
     new StoryRepairer(client),
     new RepairStrategy(),
+    new QualityAssembler(),
+    undefined,
+    beatValidator,
   );
 }
 
@@ -126,7 +139,7 @@ function expectHasAll(actual: string[], required: readonly string[], label: stri
 }
 
 describe("v1.0.0 产物布局冻结 — Happy Path", () => {
-  it("运行级目录只含 attempts/ 与冻结的七个文件", async () => {
+  it("运行级目录只含 attempts/ 与冻结的八个文件", async () => {
     const dir = withTmpDir();
     const llm = new FakeLLM([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW]);
     const result = await pipelineWith(llm, new ArtifactStore()).run(SAMPLE_CONFIG);
@@ -276,9 +289,10 @@ describe("v1.0.0 官方示例 Run", () => {
     expect(readdirSync(join(exampleRoot, "attempts", "01", "repairs", "01")).sort()).toEqual([...REPAIR_FILES]);
   });
 
-  it("示例里的 config.json / beats.json / validation.json / review.json 都能通过 schema 校验", () => {
+  it("示例里的 config.json / beats.json / beat-validation.json / validation.json / review.json 都能通过 schema 校验", () => {
     const config = JSON.parse(readFileSync(join(exampleRoot, "config.json"), "utf8")) as unknown;
     const beats = JSON.parse(readFileSync(join(exampleRoot, "beats.json"), "utf8")) as unknown;
+    const beatValidation = JSON.parse(readFileSync(join(exampleRoot, "beat-validation.json"), "utf8")) as unknown;
     const validation = JSON.parse(readFileSync(join(exampleRoot, "validation.json"), "utf8")) as unknown;
     const review = JSON.parse(readFileSync(join(exampleRoot, "review.json"), "utf8")) as unknown;
 
@@ -290,6 +304,12 @@ describe("v1.0.0 官方示例 Run", () => {
       expect(configKeys, `示例 StoryConfig 应包含可选字段 ${optional}`).toContain(optional);
     }
     expect(JSON.parse(JSON.stringify(beats)).beats.length).toBeGreaterThan(0);
+    // v1.4.0：Beat 结构校验结论同样必须过 schema；passed 与 issues 自洽
+    expect(() => validateBeatValidationResult(beatValidation)).not.toThrow();
+    const bv = beatValidation as { passed: boolean; issues: unknown[]; summary: string };
+    expect(bv.passed).toBe(true);
+    expect(bv.issues).toHaveLength(1);
+    expect(bv.summary).toBeTruthy();
     expect((validation as { passed: boolean }).passed).toBe(true);
     const r = review as { score: number; summary: string; strengths: string[]; problems: string[] };
     expect(Object.keys(r).sort()).toEqual(["problems", "score", "strengths", "summary"]);
@@ -318,6 +338,7 @@ describe("v1.0.0 官方示例 Run", () => {
       "metadata.json",
       "config.json",
       "beats.json",
+      "beat-validation.json",
       "attempts/01/story.md",
       "attempts/01/repairs/01/story.md",
     ];

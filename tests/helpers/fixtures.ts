@@ -18,6 +18,7 @@ import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult, ValidationIssueCode } from "@/types/validation-result";
+import type { BeatValidationResult } from "@/types/beat-validation";
 import { LLMError, LLMTimeoutError } from "@/lib/llm";
 import type { ApiErrorDetail } from "@/lib/api-error";
 
@@ -60,6 +61,27 @@ export const SAMPLE_REVIEW: ReviewResult = {
 };
 
 export const SAMPLE_VALIDATION: ValidationResult = { passed: true, issues: [] };
+
+/** v1.4.0：一份结构完整的 BeatPlan 的合格结论——SAMPLE_BEAT_PLAN 就该是这个结果。 */
+export const SAMPLE_BEAT_VALIDATION: BeatValidationResult = {
+  passed: true,
+  issues: [],
+  summary: "骨架结构完整：开场、冲突升级、高潮、收束都有，顺序与状态一致。",
+};
+
+/** v1.4.0：一份带 error 级问题的结论——Pipeline 会据此在生成前终止这次 Run。 */
+export const SAMPLE_BEAT_VALIDATION_FAILED: BeatValidationResult = {
+  passed: false,
+  issues: [
+    {
+      code: "MISSING_CLIMAX",
+      severity: "error",
+      message: "第 4 拍直接跳到结局，没有任何高潮或决定性对抗。",
+      beat_ids: [4],
+    },
+  ],
+  summary: "缺少高潮：从升级直接跳到收束，故事没有顶点。",
+};
 
 export function validationFailed(code: ValidationIssueCode, message: string): ValidationResult {
   return { passed: false, issues: [{ code, severity: "error", message }] };

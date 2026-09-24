@@ -15,6 +15,9 @@ import {
 } from "@/lib/api-error";
 import { LLMError, LLMRequestError, LLMTimeoutError } from "@/lib/llm";
 import { BeatParseError } from "@/lib/beat-parser";
+import { BeatValidationParseError } from "@/lib/beat-validation-parser";
+import { BeatPlanValidationError } from "@/types/beat-plan";
+import { BeatValidationValidationError } from "@/types/beat-validation";
 import { ReviewParseError } from "@/lib/review-parser";
 import { PipelineError } from "@/core/pipeline";
 import { ArtifactWriteError } from "@/storage/artifact-store";
@@ -53,6 +56,8 @@ describe("§11 稳定错误码", () => {
       "REVIEW_FAILED",
       "REPAIR_FAILED",
       "ARTIFACT_WRITE_FAILED",
+      // v1.4.0：BeatPlan 结构校验自身失败
+      "BEAT_VALIDATION_FAILED",
       "INTERNAL_ERROR",
     ]);
     expect(new Set(API_ERROR_CODES).size).toBe(API_ERROR_CODES.length);
@@ -115,6 +120,18 @@ describe("§12 状态码按错误性质分开", () => {
     const review = new Error("分数越界");
     review.name = "ReviewParseError";
     expect(toApiError(review).code).toBe("REVIEW_FAILED");
+  });
+
+  it("v1.4.0 BeatValidationParseError → BEAT_VALIDATION_FAILED + 502", () => {
+    const beatValidation = new BeatValidationParseError("不是 JSON");
+    const err = toApiError(beatValidation);
+    expect(err.code).toBe("BEAT_VALIDATION_FAILED");
+    expect(err.httpStatus).toBe(502);
+  });
+
+  it("v1.4.0 请求体里的 BeatPlan / BeatValidationResult 不合法是用户错误，400", () => {
+    expect(toApiError(new BeatPlanValidationError("骨架不合法")).httpStatus).toBe(400);
+    expect(toApiError(new BeatValidationValidationError("issues 不是数组")).httpStatus).toBe(400);
   });
 
   it("ValidatorError → VALIDATION_FAILED_INTERNAL + 500", () => {

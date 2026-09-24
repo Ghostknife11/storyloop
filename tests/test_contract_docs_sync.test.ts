@@ -12,6 +12,7 @@ import { StoryRepairer } from "@/lib/story-repairer";
 import { RepairStrategy } from "@/core/repair-strategy";
 import {
   SAMPLE_BEAT_PLAN,
+  SAMPLE_BEAT_VALIDATION,
   SAMPLE_CONFIG,
   SAMPLE_REVIEW,
   SAMPLE_STORY,
@@ -47,7 +48,7 @@ function pipelineWith(
   llm: FakeLLM,
   store: ArtifactStore,
   retryPolicy?: RetryPolicy,
-  brokenComponents?: { validator?: unknown; reviewer?: unknown },
+  brokenComponents?: { validator?: unknown; reviewer?: unknown; beatValidator?: unknown },
 ) {
   // 四个阶段都只用到 generate()，这里一次性降到它们需要的形状
   const client = llm as never;
@@ -60,6 +61,12 @@ function pipelineWith(
     retryPolicy,
     new StoryRepairer(client),
     new RepairStrategy(),
+    undefined,
+    undefined,
+    // v1.4.0：骨架结构校验要出现在五条路径的 metadata 里，这里注入一个固定结论的假件
+    (brokenComponents?.beatValidator ?? {
+      validate: async () => SAMPLE_BEAT_VALIDATION,
+    }) as never,
   );
 }
 
@@ -68,7 +75,12 @@ function pipelineWith(
 async function runScenario(
   replies: string[],
   policy: RetryPolicy = DEFAULT_RETRY_POLICY,
-  opts: { breakLlm?: (llm: FakeLLM) => void; validator?: unknown; reviewer?: unknown } = {},
+  opts: {
+    breakLlm?: (llm: FakeLLM) => void;
+    validator?: unknown;
+    reviewer?: unknown;
+    beatValidator?: unknown;
+  } = {},
 ) {
   const dir = withTmpDir();
   const llm = new FakeLLM(replies);
@@ -84,6 +96,7 @@ async function runScenario(
   const runDir = join(dir, "runs", runId);
   return {
     runId,
+    runDir,
     runKeys: Object.keys(JSON.parse(readFileSync(join(runDir, "metadata.json"), "utf8")) as object),
     attemptKeys: attemptKeysOf(join(runDir, "attempts")),
     repairKeys: repairKeysOf(join(runDir, "attempts")),
@@ -164,7 +177,7 @@ function expectSameSet(label: string, documented: string[], actual: string[]) {
 }
 
 describe("v1.0.1 文档与产物字段集 — 真实路径", () => {
-  it("五条路径覆盖全部条件字段：成功 / 修订后接受 / 重试耗尽 / 生成失败 / 校验审阅组件异常", async () => {
+  it("六条路径覆盖全部条件字段：成功 / 修订后接受 / 重试耗尽 / 生成失败 / 校验审阅组件异常 / Beat 校验器自身异常", async () => {
     const happy = await runScenario([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW]);
     const repaired = await runScenario([
       PLAN_REPLY,
@@ -197,6 +210,17 @@ describe("v1.0.1 文档与产物字段集 — 真实路径", () => {
         },
       },
     });
+    // v1.4.0 §12：BeatValidator 自身抛异常同样只写 metadata，Run 照常生成
+    const brokenBeatCheck = await runScenario([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW], {
+      ...DEFAULT_RETRY_POLICY,
+      enable_repair: false,
+    }, {
+      beatValidator: {
+        validate: () => {
+          throw new Error("beat validator boom");
+        },
+      },
+    });
 
     expect(happy.runKeys).toContain("quality_status");
     expect(repaired.repairKeys).toContain("repair_number");
@@ -206,6 +230,11 @@ describe("v1.0.1 文档与产物字段集 — 真实路径", () => {
     expect(brokenCheck.attemptKeys).toContain("review_error");
     expect(brokenCheck.runKeys).toContain("validation_error");
     expect(brokenCheck.runKeys).toContain("review_error");
+    // v1.4.0： Beat 校验器自身异常 ≠ 骨架有问题——BeatPlan 一个字段都没被动过
+    expect(brokenBeatCheck.runKeys).toContain("beat_validation_status");
+    expect(brokenBeatCheck.runKeys).toContain("beat_validation_error");
+    expect(existsSync(join(brokenBeatCheck.runDir, "beat-validation.json"))).toBe(false);
+    expect(brokenBeatCheck.runKeys).not.toContain("beat_validation_passed");
 
     const run = unique([
       ...happy.runKeys,
@@ -213,6 +242,7 @@ describe("v1.0.1 文档与产物字段集 — 真实路径", () => {
       ...exhausted.runKeys,
       ...failed.runKeys,
       ...brokenCheck.runKeys,
+      ...brokenBeatCheck.runKeys,
     ]);
     const attempt = unique([
       ...happy.attemptKeys,

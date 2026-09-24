@@ -225,7 +225,7 @@ describe("POST /api/runs — validation failed（§26/§42/§44）", () => {
     expect(validation.passed).toBe(false);
     // §14/§47：Validation Failed + 默认策略 → 再生成一次；默认 max_attempts=2
     const genCalls = callsWithSystem(fetchMock, (system) =>
-      !system.includes("剧情策划") && !system.includes("审阅") && !system.includes("修订"),
+      !system.includes("剧情策划") && !system.includes("审阅") && !system.includes("修订") && !system.includes("结构校验者"),
     );
     expect(genCalls).toHaveLength(2);
     expect(body.attempt_count).toBe(2);

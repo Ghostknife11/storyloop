@@ -27,6 +27,7 @@ import {
 } from "@/lib/generate-service";
 import { ArtifactStore } from "@/storage/artifact-store";
 import { BeatPlanner } from "@/lib/beat-planner";
+import { BeatValidator } from "@/lib/beat-validator";
 import { StoryGenerator } from "@/lib/story-generator";
 import { StoryValidator } from "@/lib/story-validator";
 import { BasicReviewer } from "@/lib/basic-reviewer";
@@ -34,6 +35,7 @@ import { StoryRepairer } from "@/lib/story-repairer";
 import { RepairStrategy } from "@/core/repair-strategy";
 import { LLMError, LLMTimeoutError } from "@/lib/llm";
 import { BeatParseError } from "@/lib/beat-parser";
+import { BeatValidationParseError } from "@/lib/beat-validation-parser";
 import { ReviewParseError } from "@/lib/review-parser";
 import { ValidatorError } from "@/lib/story-validator";
 import { ArtifactWriteError } from "@/storage/artifact-store";
@@ -42,6 +44,7 @@ import { BeatPlanValidationError } from "@/types/beat-plan";
 import type { BeatPlan } from "@/types/beat-plan";
 import {
   SAMPLE_BEAT_PLAN,
+  SAMPLE_BEAT_VALIDATION,
   SAMPLE_CONFIG,
   SAMPLE_REVIEW,
   SAMPLE_STORY,
@@ -51,6 +54,7 @@ import {
   repoVersion,
   withTmpDir,
 } from "./helpers/fixtures";
+import type { BeatValidationResult } from "@/types/beat-validation";
 
 /**
  * v1.0.0 合同测试：公开 API 表面冻结（TASK §12/§13/§14/§51）。
@@ -68,6 +72,9 @@ const RUN_OK_KEYS = [
   "status",
   "story",
   "beat_plan",
+  // v1.4.0 §26：BeatPlan 结构校验同样是纯追加字段
+  "beat_validation",
+  "beat_validation_status",
   "validation",
   "validation_status",
   "review",
@@ -95,6 +102,8 @@ const ROUTES: ReadonlyArray<readonly [string, string]> = [
   ["api/runs/[run_id]", "GET"],
   ["api/runs/[run_id]/attempts/[attempt_number]", "GET"],
   ["api/validate", "POST"],
+  // v1.4.0：手动校验剧情骨架的结构
+  ["api/validate-beats", "POST"],
   ["api/version", "GET"],
 ];
 
@@ -116,7 +125,7 @@ async function jsonOf(res: Response): Promise<Record<string, unknown>> {
 }
 
 /** 走完整 Pipeline 的假件：四个阶段都只用到 generate()。 */
-function runDeps(llm: FakeLLM) {
+function runDeps(llm: FakeLLM, beatValidation?: BeatValidationResult) {
   // 降到这些阶段真正需要的形状，接口其余部分（baseUrl/apiKey/...）与用例无关
   const client = llm as never;
   return {
@@ -127,14 +136,21 @@ function runDeps(llm: FakeLLM) {
     reviewer: new BasicReviewer(client),
     repairer: new StoryRepairer(client),
     repairStrategy: new RepairStrategy(),
+    // v1.4.0：BeatValidator 单独用一条假 LLM——它排在主回复序列中间，
+    // 不拆开会让每条用例里的 plan / story / review 位置全部错位
+    beatValidator: new BeatValidator(
+      new FakeLLM([JSON.stringify(beatValidation ?? SAMPLE_BEAT_VALIDATION)]) as never,
+    ),
   };
 }
 
 describe("v1.0.0 API 冻结 — 错误契约", () => {
-  it("错误码白名单恰好是十一种", () => {
+  it("错误码白名单恰好是十二种", () => {
     expect([...API_ERROR_CODES].sort()).toEqual(
       [
         "ARTIFACT_WRITE_FAILED",
+        // v1.4.0：BeatPlan 结构校验自身失败
+        "BEAT_VALIDATION_FAILED",
         "CONFIG_INVALID",
         "GENERATION_FAILED",
         "INTERNAL_ERROR",
@@ -172,6 +188,7 @@ describe("v1.0.0 API 冻结 — 错误契约", () => {
     [new BeatParseError("解析不出 JSON"), "PLANNER_INVALID_OUTPUT", 502],
     [new ReviewParseError("解析不出 JSON"), "REVIEW_FAILED", 502],
     [new ValidatorError("规则炸了"), "VALIDATION_FAILED_INTERNAL", 500],
+    [new BeatValidationParseError("解析不出 JSON"), "BEAT_VALIDATION_FAILED", 502],
     [new ArtifactWriteError("story.md", new Error("EACCES")), "ARTIFACT_WRITE_FAILED", 500],
     [new ConfigValidationError("配置不合法"), "CONFIG_INVALID", 400],
     [new BeatPlanValidationError("骨架不合法"), "CONFIG_INVALID", 400],
@@ -359,9 +376,9 @@ describe("v1.0.0 API 冻结 — Run 入口", () => {
     expect(status).toBe(200);
     const run = json as unknown as Record<string, unknown>;
     expect(Object.keys(run).sort()).toEqual(RUN_OK_KEYS);
-    // validation / review 都成功：六个 artifact 键齐
+    // validation / review 都成功：七个 artifact 键齐（v1.4.0 多一个 beat-validation.json）
     expect(Object.keys(run.artifacts as object).sort()).toEqual(
-      ["beat_plan", "config", "metadata", "quality", "review", "story", "validation"],
+      ["beat_plan", "beat_validation", "config", "metadata", "quality", "review", "story", "validation"],
     );
     expect(run.quality_status).toBe("accepted");
     expect(run.attempt_count).toBe(1);
@@ -433,6 +450,9 @@ describe("v1.0.0 API 冻结 — Run 入口", () => {
     expect(Object.keys(detail).sort()).toEqual([
       "attempt_count",
       "attempts",
+      // v1.4.0 §26：BeatPlan 结构校验同样是纯追加字段
+      "beat_validation",
+      "beat_validation_status",
       "enable_repair",
       "max_attempts",
       "max_repairs_per_attempt",

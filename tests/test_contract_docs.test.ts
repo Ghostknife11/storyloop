@@ -41,11 +41,15 @@ const DOCS = [
 
 /**
  * §63/§64 保留给 v1.4.0+ 的能力：任何版本树里都不该宣称已经具备。
- * v1.3.0 已经交付基础质量四维度（MultiDimensionalReviewer），所以它从这里移出——
- * 但 35 维审阅、按维度阈值重试、商业审阅一类仍然是本版本不做的事。
+ * v1.3.0 已经交付基础质量四维度（MultiDimensionalReviewer），v1.4.0 已经交付
+ * BeatPlan 结构校验（BeatValidator），所以它俩从这里移出——但自动改写拍子、
+ * 高级规划器、伏笔规划一类仍然是本版本不做的事。
  */
 const RESERVED_CAPABILITIES = [
-  "BeatValidator",
+  "AutomaticBeatRepair",
+  "BeatRegenerationPolicy",
+  "AdvancedBeatPlanner",
+  "ForeshadowPlanner",
   "CommercialReviewer",
   "ExperimentRunner",
   "BenchmarkRunner",
@@ -61,6 +65,16 @@ const DIMENSION_BOUNDARIES = [
   "维度是评价输出，不是行动依据",
   "不新增阈值",
   "不触发重试或修订",
+] as const;
+
+/**
+ * v1.4.0 Beat 校验的边界：README 必须写明它「只报告，不修复」。
+ * 这三句对应 blockquote 里的原话，写松了就等于宣称会自动改骨架。
+ */
+const BEAT_BOUNDARIES = [
+  "不改写任何一拍",
+  "不重排顺序",
+  "不自动补拍",
 ] as const;
 
 function read(rel: string): string {
@@ -128,6 +142,14 @@ describe("v1.0.0 发布门禁 — README 结构", () => {
     for (const boundary of DIMENSION_BOUNDARIES) {
       expect(readme, `README 应写明「${boundary}」`).toContain(boundary);
     }
+  });
+
+  it("README 写清 Beat 校验的边界：只报告，不改写、不重排、不补拍", () => {
+    const readme = read("README.md");
+    for (const boundary of BEAT_BOUNDARIES) {
+      expect(readme, `README 应写明「${boundary}」`).toContain(boundary);
+    }
+    expect(readme).toContain("Beat 校验只报告，不修复");
   });
 
   it("README 里的环境变量与 .env.example 对得上", () => {
