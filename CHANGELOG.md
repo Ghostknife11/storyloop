@@ -13,6 +13,66 @@ All notable changes to Storyloop.
 
 ---
 
+## [1.3.0] —— 2026-09-24
+
+v1.3.0 给审阅结论加了**四个基础质量维度**（连贯性 / 叙事 / 人物 / 因果），让同一篇正文的质量
+不只由一个整体分表达。它仍然不新增任何决策：整体分在有维度时就是四维均分（纯算术、无权重），
+`RetryPolicy` 里仍然只有 `min_review_score` 一个总分门槛，修订策略仍然只按问题类别改一次。
+全部改动 additive：既有字段、路由、错误码、CLI 参数与产物布局一个都没动。
+
+### Added
+
+- **`QualityDimensions` 维度模型**（`src/types/quality-dimensions.ts`）：四个键
+  `coherence` / `narrative` / `character` / `causality`，各自 `{score: number, summary: string}`，
+  附中文标签与定义口径，以及确定性聚合 `aggregateDimensionScore`（四维均分，
+  四舍五入到 1 位小数）。没有权重、没有模型调用、没有随机
+- **`ReviewResult.dimensions`（可选）**：审阅者除了整体分，还给四个维度各打一个 0–100 分
+  并附一句短评。一旦出现就必须四个齐全、各自 0–100 且带非空短评——缺维度、多维度
+  （模型自己扩到 35 维也一样）、分数越界都按审阅输出非法处理（`REVIEW_FAILED`），
+  不补 0、不挑一个先凑着。缺失或显式 `null` 时整个键不出现，与 v1.0 ~ v1.2.x 逐字一致
+- **`QualityResult.dimensions`（可选）**：由 `ReviewResult.dimensions` 原样搬运到
+  `quality.json`、Run / Attempt 读回接口与前端面板；装配逻辑不加判断、不重新打分
+- **前端「维度评分」小节**（`src/lib/quality-view.ts` + `src/components/quality-panel.tsx`）：
+  四个进度条 + 各自短评，固定顺序，与整体分同一个口径；没有维度（旧 Run）时整节不渲染
+- **prompts/reviewer.txt 的四维要求**：四个维度的定义口径（含「连贯性管前后一致、
+  因果管推得动」这条区分）、0–100 + 一句短评的输出格式、禁止增加第五个维度、
+  禁止商业价值一类指标；占位符白名单不变，没有新增占位符
+
+### Changed
+
+- **`overall_score` 的口径**：有维度时等于四维均分，没有维度时仍等于 `review.score`。
+  各级 metadata 的 `review_score` / `before_review_score` / `after_review_score` 与它同一个口径
+  （`src/types/review-result.ts` 的 `reviewOverallScore` 是唯一实现），
+  所以同一个 Run 在不同接口看到的整体分还是同一个数
+- **重试门槛比的仍是整体分**（`src/core/retry-policy.ts`）：`min_review_score` 一个门槛，
+  比的是 `reviewOverallScore`，不是任何一个单独维度；`RetryPolicy` 字段集不变，
+  没有 `min_causality_score` 一类字段
+
+### Tests
+
+- 新增 `tests/test_quality_dimensions.test.ts`（34 条）：维度模型与四个键的固定顺序、
+  确定性聚合（含 80/76/72/66 → 73.5 的例题）、可选维度与旧格式逐字兼容、缺维度 / 多维度 /
+  越界 / 空短评全部按解析失败、解析路径（含 code fence）、`QualityAssembler` 透传、
+  `quality.json` 容错（坏维度只丢维度不丢快照）、重试门槛只认整体分（70/68/67/67 → 68 < 70）、
+  提示词口径（四维定义、连贯性≠因果、不新增占位符、禁商业词）、产物不回带路径或凭据
+- 新增 `tests/test_quality_dimensions_pipeline.test.ts`（5 条）：维度在真实管道里一路带到
+  `quality.json` 与 metadata（happy path / retry path / 修复路径），修订后取新的四个维度，
+  没有维度时与 v1.2.x 逐字一致
+- `tests/test_quality_ui.test.ts` 改写 §34 的防泄漏用例（改为拦趋势 / 雷达 / PASS·FAIL /
+  基准 / 实验一类更远期能力，并补「面板上没有重试 / 修订入口」），新增维度渲染用例
+- **测试总量：919 passed / 61 files**（1.2.1 为 875 / 59）。全部用例仍只用假模型 / 假组件，
+  不调真实接口、不碰真实主机
+
+### Compatibility
+
+- 1.2.x → 1.3.0 无破坏性变更，也不需要迁移：没有 `dimensions` 的 Run（1.3.0 之前生成的全部 Run）
+  读出来与当年一致，多出来的字段会被 1.2.x 安全忽略；`quality.json` 里维度形状不对时按
+  「没有维度」处理，不退化成 500
+- 明细见 [docs/upgrade.md](./docs/upgrade.md) 的「从 1.2.x 升级到 1.3.0」与
+  [docs/compatibility.md](./docs/compatibility.md) 的「v1.3.0 的四个基础维度」
+
+---
+
 ## [1.2.1] —— 2026-09-24
 
 v1.2.1 是**修订版本**：没有新能力、没有新文件、没有改字段、没有改路由、没有改产物布局。
