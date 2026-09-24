@@ -202,6 +202,19 @@ export class ArtifactStore {
     return this.putJson(runId, this.repairFile(attemptNumber, repairNumber, "metadata.json"), metadata);
   }
 
+  /**
+   * v1.2.1 修订级结论的读回：装配旧 Run 的质量快照时要取「这次尝试最终留下的那一版」，
+   * 也就是最后一次真正跑过校验 / 审阅的修订目录。修订失败时这两个文件不存在，读回 null。
+   */
+  readRepairValidation(runId: string, attemptNumber: number, repairNumber: number): ValidationResult | null {
+    return this.readJson(runId, this.repairFile(attemptNumber, repairNumber, "validation.json")) as ValidationResult | null;
+  }
+
+  /** v1.2.1：同 readRepairValidation，取修订后重新审阅的那一份结论。 */
+  readRepairReview(runId: string, attemptNumber: number, repairNumber: number): ReviewResult | null {
+    return this.readJson(runId, this.repairFile(attemptNumber, repairNumber, "review.json")) as ReviewResult | null;
+  }
+
   // ---------------------------------------------------------------------------
   // §28 只读访问：GET /api/runs/{run_id} 与 attempt 详情（§39）只读取内容，
   // 不把服务器绝对路径带进响应（§67）。

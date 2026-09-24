@@ -564,7 +564,7 @@ function reasonOf(raw: unknown): RetryReason | null {
 }
 
 /** §26/§27 质量快照读取：优先用落盘的 quality.json；v1.2.0 之前的 Run 没有这个文件，
- *  或文件被手改坏时，用同一套确定性规则从 validation.json + review.json 临时装配。
+ *  或文件被手改坏时，用同一套确定性规则从这一次尝试**最终留下的那一版**结论临时装配。
  *  装配器是纯函数，所以临时装配的结果与当年落盘的那份逐字一致，也不需要迁移框架。 */
 const qualityAssembler = new QualityAssembler();
 
@@ -578,6 +578,32 @@ function qualityOf(
     qualityResultOf(stored) ??
     qualityAssembler.assemble({ validation, review, accepted })
   );
+}
+
+/**
+ * §26/§27 兜底装配取哪一轮的结论：与落盘的 quality.json 同口径——这次尝试最终留下的那一版。
+ * 发生过修订时，attempt 目录下的 validation.json / review.json 是**首次**结论，最终结论在
+ * 最后一次真正跑过校验 / 审阅的修订目录里（修订失败则不写这两个文件，要往前找）。
+ * v1.2.0 的 bug：这里原先直接读 attempt 目录，于是旧 Run 装配出的分数描述的是修订前那版
+ * 正文，与同一次尝试的 metadata.review_score / repairs[].after_review_score 对不上。
+ */
+function finalCheckOf(
+  store: ArtifactStore,
+  runId: string,
+  attemptNumber: number,
+): { validation: ValidationResult | null; review: ReviewResult | null } {
+  if (attemptNumber >= 1) {
+    const repairs = store.listRepairNumbers(runId, attemptNumber);
+    for (let i = repairs.length - 1; i >= 0; i -= 1) {
+      const review = store.readRepairReview(runId, attemptNumber, repairs[i]);
+      const validation = store.readRepairValidation(runId, attemptNumber, repairs[i]);
+      if (review !== null || validation !== null) return { validation, review };
+    }
+  }
+  return {
+    validation: attemptNumber >= 1 ? store.readAttemptValidation(runId, attemptNumber) : null,
+    review: attemptNumber >= 1 ? store.readAttemptReview(runId, attemptNumber) : null,
+  };
 }
 
 /** §40 attempts[].repairs：只保留编号 / 类型 / 成败；条目被手改坏就跳过，不让整个详情 500。 */
@@ -660,6 +686,13 @@ export async function getRun(
   const qualityStatus = (strOf(meta?.quality_status) as QualityStatus | null) ?? null;
   const finalValidation = store.readFinalValidation(runId);
   const finalReview = store.readFinalReview(runId);
+  const selectedAttempt = intOf(meta?.selected_attempt) ?? (numbers.length > 0 ? numbers[numbers.length - 1] : 0);
+  // §26/§27：三级兜底都指向「入选 Attempt 最终留下的那一版正文」——运行根的 quality.json、
+  // 入选 Attempt 自己的 quality.json、再用最终结论临时装配。
+  const storedQuality =
+    store.readFinalQuality(runId) ??
+    (selectedAttempt >= 1 ? store.readAttemptQuality(runId, selectedAttempt) : null);
+  const finalCheck = finalCheckOf(store, runId, selectedAttempt);
 
   return {
     status: 200,
@@ -668,7 +701,7 @@ export async function getRun(
       status: strOf(meta?.status) ?? "unknown",
       quality_status: qualityStatus,
       attempt_count: intOf(meta?.attempt_count) ?? numbers.length,
-      selected_attempt: intOf(meta?.selected_attempt) ?? (numbers.length > 0 ? numbers[numbers.length - 1] : 0),
+      selected_attempt: selectedAttempt,
       max_attempts: intOf(meta?.max_attempts),
       min_review_score: intOf(meta?.min_review_score),
       enable_repair: typeof meta?.enable_repair === "boolean" ? meta.enable_repair : null,
@@ -680,10 +713,11 @@ export async function getRun(
       validation_status: strOf(meta?.validation_status) ?? "not_started",
       review: finalReview,
       review_status: strOf(meta?.review_status) ?? "not_started",
+      // §26/§27：三级兜底都是同一版正文（见上面的 storedQuality / finalCheck）。
       quality: qualityOf(
-        store.readFinalQuality(runId),
-        finalValidation,
-        finalReview,
+        storedQuality,
+        finalCheck.validation,
+        finalCheck.review,
         // §8：采纳结论沿用 Run 级 quality_status，不另立一套判定
         qualityStatus === "accepted",
       ),
@@ -738,6 +772,8 @@ export async function getRunAttempt(
   const attemptMeta = store.readAttemptMetadata(runId, attemptNumber);
   const accepted = attemptMeta && typeof attemptMeta.accepted === "boolean" ? attemptMeta.accepted : null;
   const repairs = repairDetailsOf(attemptMeta);
+  // §26/§27：兜底装配用这次尝试最终留下的那一版结论（有修订就是最后一次修订的）。
+  const finalCheck = finalCheckOf(store, runId, attemptNumber);
 
   return {
     status: 200,
@@ -754,10 +790,12 @@ export async function getRunAttempt(
       repairs,
       validation: store.readAttemptValidation(runId, attemptNumber),
       review: store.readAttemptReview(runId, attemptNumber),
+      // §26/§27：与运行根那份同口径——先读这份快照，缺失或被改坏时用这次尝试最终留下的
+      // 结论（有修订就是最后一次修订的）临时装配。
       quality: qualityOf(
         store.readAttemptQuality(runId, attemptNumber),
-        store.readAttemptValidation(runId, attemptNumber),
-        store.readAttemptReview(runId, attemptNumber),
+        finalCheck.validation,
+        finalCheck.review,
         accepted === true,
       ),
     },
