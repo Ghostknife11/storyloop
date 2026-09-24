@@ -91,7 +91,7 @@ describe("§54 Happy Path：一次装配，两份落盘", () => {
     expect(qualityAt(join(runDir, "quality.json"))).toEqual(result.quality);
     expect(qualityAt(join(runDir, "attempts", "01", "quality.json"))).toEqual(result.quality);
 
-    // UTF-8 JSON，键集固定（§37：只有一个整体分，没有多维）；与其它产物同一套两空格缩进
+    // UTF-8 JSON，键集固定（没有维度时与 v1.2.0 逐字一致）；与其它产物同一套两空格缩进
     expect(readFileSync(join(runDir, "quality.json"), "utf8")).toBe(JSON.stringify(result.quality, null, 2));
     expect(Object.keys(result.quality).sort()).toEqual([
       "accepted", "issues", "overall_score", "suggestions", "summary", "validation_passed",

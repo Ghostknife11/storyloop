@@ -107,20 +107,70 @@ describe("§37 旧 Run 没有 quality 不崩", () => {
 });
 
 describe("§34 不出现 v1.3+ 能力", () => {
-  it("面板文本里没有多维、趋势、PASS/FAIL、雷达一类字样", () => {
+  it("面板文本里没有趋势、PASS/FAIL、雷达、基准、实验一类字样", () => {
+    // v1.3.0 起维度本身是合法输出，这里只拦更远期的能力
     const html = renderToStaticMarkup(createElement(QualityPanel, { quality: READY }));
-    for (const forbidden of ["Radar", "Coherence", "Narrative", "Character", "Causality", "Dimension", "Trend", "PASS", "FAIL", "Benchmark", "Experiment", "Attribution"]) {
+    for (const forbidden of ["Radar", "Trend", "PASS", "FAIL", "Benchmark", "Experiment", "Attribution", "BeatValidator", "Commercial"]) {
       expect(html).not.toContain(forbidden);
     }
   });
 
-  it("qualityPanelState 不产出任何额外判断字段", () => {
+  it("qualityPanelState 只产出展示字段，其中 dimensions 也只是展示行", () => {
     const state = qualityPanelState({ quality: READY });
     expect(state.kind).toBe("ready");
     if (state.kind !== "ready") return;
     expect(Object.keys(state).sort()).toEqual([
-      "acceptedText", "issues", "kind", "overallScoreText", "suggestions", "summary",
+      "acceptedText", "dimensions", "issues", "kind", "overallScoreText", "suggestions", "summary",
       "validationText", "validationTone",
     ]);
+    expect(state.dimensions).toEqual([]);
+  });
+});
+
+describe("v1.3.0 §36 维度评分 renders", () => {
+  const dimensions = {
+    coherence: { score: 78, summary: "设定前后一致，唯二段落间的称呼变了。" },
+    narrative: { score: 72, summary: "起承转合完整，中段节奏偏慢。" },
+    character: { score: 76, summary: "主角目标清晰，高潮处退让动机交代不足。" },
+    causality: { score: 70, summary: "主线因果成立，配角的反水缺少铺垫。" },
+  };
+  const withDimensions: QualityResult = { ...READY, overall_score: 74, dimensions };
+
+  it("四个维度按固定顺序渲染：中文名 + 分数 + 短评", () => {
+    const html = renderToStaticMarkup(createElement(QualityPanel, { quality: withDimensions }));
+    for (const label of ["连贯性", "叙事", "人物", "因果"]) {
+      expect(html).toContain(label);
+    }
+    expect(html).toContain("维度评分");
+    for (const d of Object.values(dimensions)) {
+      expect(html).toContain(String(d.score));
+      expect(html).toContain(d.summary);
+    }
+    // 顺序固定：连贯性 → 叙事 → 人物 → 因果
+    expect(html.indexOf("连贯性")).toBeLessThan(html.indexOf("叙事"));
+    expect(html.indexOf("叙事")).toBeLessThan(html.indexOf("人物"));
+    expect(html.indexOf("人物")).toBeLessThan(html.indexOf("因果"));
+  });
+
+  it("进度条宽度就是分数本身（0 ~ 100）", () => {
+    const html = renderToStaticMarkup(createElement(QualityPanel, { quality: withDimensions }));
+    expect(html).toContain("width:78%");
+    expect(html).toContain("width:72%");
+    expect(html).toContain("width:76%");
+    expect(html).toContain("width:70%");
+  });
+
+  it("旧 Run（没有 dimensions）不渲染维度小节，也不报错", () => {
+    const state = qualityPanelState({ quality: READY });
+    const html = renderToStaticMarkup(createElement(QualityPanel, { quality: READY }));
+    expect(state.kind === "ready" && state.dimensions).toEqual([]);
+    expect(html).not.toContain("维度评分");
+  });
+
+  it("维度是纯展示：面板上不出现「重试 / 修订 / 维度不达标」一类的行动入口", () => {
+    const html = renderToStaticMarkup(createElement(QualityPanel, { quality: withDimensions }));
+    for (const forbidden of ["重试", "修订", "重写", "重跑", "Fix", "Retry", "Repair"]) {
+      expect(html).not.toContain(forbidden);
+    }
   });
 });

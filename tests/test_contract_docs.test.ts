@@ -39,9 +39,12 @@ const DOCS = [
   "compatibility.md",
 ] as const;
 
-/** §63/§64 保留给 v1.1.0 ~ v1.9.0 的能力：任何版本树里都不该宣称已经具备。 */
+/**
+ * §63/§64 保留给 v1.4.0+ 的能力：任何版本树里都不该宣称已经具备。
+ * v1.3.0 已经交付基础质量四维度（MultiDimensionalReviewer），所以它从这里移出——
+ * 但 35 维审阅、按维度阈值重试、商业审阅一类仍然是本版本不做的事。
+ */
 const RESERVED_CAPABILITIES = [
-  "MultiDimensionalReviewer",
   "BeatValidator",
   "CommercialReviewer",
   "ExperimentRunner",
@@ -51,6 +54,13 @@ const RESERVED_CAPABILITIES = [
   "CausalGraph",
   "AdaptiveGeneration",
   "SelfOptimization",
+] as const;
+
+/** v1.3.0 明确不做的事：README 必须把边界写清楚，不许含糊其辞。 */
+const DIMENSION_BOUNDARIES = [
+  "维度是评价输出，不是行动依据",
+  "不新增阈值",
+  "不触发重试或修订",
 ] as const;
 
 function read(rel: string): string {
@@ -111,6 +121,13 @@ describe("v1.0.0 发布门禁 — README 结构", () => {
     }
     expect(readme).not.toMatch(/[A-Za-z]:\\/);
     expect(readme).not.toMatch(/(^|\s)\/(?:home|Users)\//);
+  });
+
+  it("README 写清维度的边界：是评价输出，不新增阈值、不驱动重试或修订", () => {
+    const readme = read("README.md");
+    for (const boundary of DIMENSION_BOUNDARIES) {
+      expect(readme, `README 应写明「${boundary}」`).toContain(boundary);
+    }
   });
 
   it("README 里的环境变量与 .env.example 对得上", () => {

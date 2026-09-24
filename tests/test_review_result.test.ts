@@ -75,10 +75,10 @@ describe("validateReviewResult（§5/§6/§40）", () => {
     expect(r.strengths).toEqual(["开篇抓人"]);
   });
 
-  it("§10 不产生多维 / 严重度 / 证据等未来字段", () => {
+  it("§10/§16 旧格式输入不产生任何额外字段（维度可有可无，缺就不造）", () => {
     const r = validateReviewResult(valid) as unknown as Record<string, unknown>;
     expect(Object.keys(r).sort()).toEqual(["problems", "score", "strengths", "summary"]);
-    for (const forbidden of ["dimensions", "coherence", "severity", "evidence", "confidence", "location"]) {
+    for (const forbidden of ["dimensions", "severity", "evidence", "confidence", "location"]) {
       expect(r).not.toHaveProperty(forbidden);
     }
   });
