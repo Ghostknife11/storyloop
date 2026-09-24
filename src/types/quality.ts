@@ -6,13 +6,16 @@
  * StoryValidator / BasicReviewer / RetryPolicy / StoryRepairer，只统一表达它们的结果。
  * §10：本版本刻意不加 confidence / rootCause / evidenceSpan / characterId / beatId /
  * probability / failureAttribution 一类字段，那些属于更后面的 Failure Analysis 系统。
- * §70：只有一个整体分数，没有 dimensionScores / coherence / narrative / character / causality。
+ * v1.3.0 起多出可选的 dimensions（见 src/types/quality-dimensions.ts）：四个基础质量维度，
+ * 纯粹是评价输出的另一种表达，仍然只由 Reviewer 给，QualityResult 自己不推导、不拆解。
+ * 它也仍然不会驱动任何决策——重试与修订只看 overall_score 与 validation_passed。
  *
  * 命名沿用仓库现状：TypeScript 模型内部也用 snake_case（见 src/types/repair.ts /
  * src/types/story-config.ts），于是领域模型、API 响应、metadata、quality.json 四处同名。
  */
 
-import { REVIEW_SCORE_MAX, REVIEW_SCORE_MIN } from "@/types/review-result";
+import { REVIEW_SCORE_MAX, REVIEW_SCORE_MIN, validateQualityDimensions } from "@/types/review-result";
+import type { QualityDimensions } from "@/types/quality-dimensions";
 
 /** §9 QualityIssue 来源：一条问题出自硬性校验还是基础审阅。 */
 export type QualityIssueSource = "validation" | "review";
@@ -49,6 +52,12 @@ export interface QualityResult {
   suggestions: QualitySuggestion[];
   /** §6：Reviewer 的总结；没有审阅结论时为 null。 */
   summary: string | null;
+  /**
+   * v1.3.0：可选的四个基础质量维度，直接来自 ReviewResult.dimensions，
+   * 由 QualityAssembler 原样搬运（§18）。缺失时（1.3.0 之前的 Run，或那次审阅
+   * 没有按格式给出维度）整个键不出现，overall_score 仍按原来的整体分口径。
+   */
+  dimensions?: QualityDimensions;
 }
 
 /**
@@ -81,6 +90,20 @@ function issuesOf(raw: unknown): QualityIssue[] {
     });
   }
   return out;
+}
+
+/**
+ * v1.3.0 磁盘读取用的维度归一化：形状不对（缺维度、多维度、分数越界）时按「没有维度」
+ * 处理而不是作废整份快照——一次 Run 详情不该因为一个多余维度键就整个 500，
+ * 更不能把一个不认识的维度值当成 0 分展示出去。
+ */
+function dimensionsOf(raw: unknown): QualityDimensions | null {
+  if (raw === undefined || raw === null) return null;
+  try {
+    return validateQualityDimensions(raw);
+  } catch {
+    return null;
+  }
 }
 
 function suggestionsOf(raw: unknown): QualitySuggestion[] {
@@ -117,6 +140,7 @@ export function qualityResultOf(raw: unknown): QualityResult | null {
   const passed = r.validation_passed;
   if (passed !== null && typeof passed !== "boolean") return null;
 
+  const dimensions = dimensionsOf(r.dimensions);
   return {
     overall_score: score as number | null,
     validation_passed: passed as boolean | null,
@@ -124,5 +148,6 @@ export function qualityResultOf(raw: unknown): QualityResult | null {
     issues: issuesOf(r.issues),
     suggestions: suggestionsOf(r.suggestions),
     summary: textOf(r.summary),
+    ...(dimensions ? { dimensions } : {}),
   };
 }
