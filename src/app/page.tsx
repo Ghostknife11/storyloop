@@ -6,7 +6,7 @@ import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
 import {
   BookOpen, Copy, Download, Eye, FilePlus2, FolderOpen, Loader2,
-  Plus, RotateCcw, Save, Sparkles, Trash2, ArrowUp, ArrowDown, Wrench,
+  Plus, RotateCcw, Save, Sparkles, Trash2, ArrowUp, ArrowDown, Wrench, ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,6 +15,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { ReviewPanel } from "@/components/review-panel";
 import { ValidationPanel } from "@/components/validation-panel";
+import { BeatValidationPanel } from "@/components/beat-validation-panel";
 import { AttemptPanel } from "@/components/attempt-panel";
 import { QualityPanel } from "@/components/quality-panel";
 import {
@@ -25,6 +26,7 @@ import {
 } from "@/components/repair-panel";
 import {
   fetchRunAttempt, generateFromPlan, planStory, previewPrompt, reviewStory, validateStory,
+  validateStoryBeats,
   RunApiError, type RepairDetailApi, type RunApiResult,
 } from "@/lib/api";
 import { configFilename, parseStoryConfig, serializeStoryConfig } from "@/lib/config-io";
@@ -37,6 +39,7 @@ import { validateBeatPlan, type BeatPlan, type StoryBeat } from "@/types/beat-pl
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
 import type { QualityResult } from "@/types/quality";
+import type { BeatValidationResult } from "@/types/beat-validation";
 
 type Phase = "idle" | "generating" | "success" | "error";
 type PlanPhase = "idle" | "planning" | "success" | "error";
@@ -170,6 +173,12 @@ export default function GeneratePage() {
   const [planBaseline, setPlanBaseline] = useState<string | null>(null);
   const [planPhase, setPlanPhase] = useState<PlanPhase>("idle");
   const [planError, setPlanError] = useState("");
+  // v1.4.0：Beat Validation 状态。与 StoryConfig / BeatPlan 编辑独立——
+  // 骨架一改，上一次结论就作废（在 setBeatPlan 的唯一出口处清空）。
+  const [beatValidation, setBeatValidation] = useState<BeatValidationResult | null>(null);
+  const [beatValidationStatus, setBeatValidationStatus] = useState("not_started");
+  const [beatValidationError, setBeatValidationError] = useState("");
+  const [beatValidating, setBeatValidating] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [result, setResult] = useState<RunApiResult | null>(null);
   const [runTitle, setRunTitle] = useState("");
@@ -212,12 +221,22 @@ export default function GeneratePage() {
    *  所以「正在请求」这件事必须用 ref 同步挡住，不能只靠 state。 */
   const reReviewingRef = useRef(false);
   const revalidatingRef = useRef(false);
+  const beatValidatingRef = useRef(false);
   const stepperTimers = useRef<number[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const set = (p: Partial<ConfigForm>) => setForm(prev => ({ ...prev, ...p }));
   const isDirty = serializeStoryConfig(formToConfig(form)) !== baseline;
   const dirtyLabel = isDirty ? "Modified" : "Saved";
+
+  /** v1.4.0：骨架一变，上一次结构校验结论就不再描述它——就地作废，
+   *  免得把旧结论当成新骨架的答案摆在面板上。所有改骨架的入口都走这里。 */
+  const setBeatPlanChecked = (updater: (prev: BeatPlan | null) => BeatPlan | null) => {
+    setBeatPlan(updater);
+    setBeatValidation(null);
+    setBeatValidationStatus("not_started");
+    setBeatValidationError("");
+  };
 
   // §22：plan 生成后，plan 相关字段变化 → outdated
   const planOutdated =
@@ -249,6 +268,9 @@ export default function GeneratePage() {
     setPlanBaseline(null);
     setPlanPhase("idle");
     setPlanError("");
+    setBeatValidation(null);
+    setBeatValidationStatus("not_started");
+    setBeatValidationError("");
     setResult(null);
     setRunTitle("");
     setRunStage("idle");
@@ -272,24 +294,24 @@ export default function GeneratePage() {
   // §19 BeatPlan 手动编辑：改字段 / 增删 / 移动。编辑的是 plan 本身，不是 StoryConfig，
   // 因此 planOutdated 不变（§22 只由 StoryConfig 变化触发）。
   const patchBeat = (id: number, patch: Partial<StoryBeat>) =>
-    setBeatPlan((prev) =>
+    setBeatPlanChecked((prev) =>
       prev ? { ...prev, beats: prev.beats.map((b) => (b.id === id ? { ...b, ...patch } : b)) } : prev,
     );
 
   const addBeat = () =>
-    setBeatPlan((prev) => {
+    setBeatPlanChecked((prev) => {
       if (!prev) return prev;
       const nextId = prev.beats.reduce((max, b) => Math.max(max, b.id), 0) + 1;
       return { ...prev, beats: [...prev.beats, { id: nextId, purpose: "", event: "", characters: [] }] };
     });
 
   const deleteBeat = (id: number) =>
-    setBeatPlan((prev) =>
+    setBeatPlanChecked((prev) =>
       prev ? { ...prev, beats: renumberBeats(prev.beats.filter((b) => b.id !== id)) } : prev,
     );
 
   const moveBeat = (index: number, delta: number) =>
-    setBeatPlan((prev) => {
+    setBeatPlanChecked((prev) => {
       if (!prev) return prev;
       const to = index + delta;
       if (to < 0 || to >= prev.beats.length) return prev;
@@ -358,6 +380,10 @@ export default function GeneratePage() {
       });
       setBeatPlan(plan);
       setPlanBaseline(planRelevantSnapshot(config));
+      // 新骨架上一份结论还没跑过：面板处于「尚未校验」，而不是继续显示上一份的结论
+      setBeatValidation(null);
+      setBeatValidationStatus("not_started");
+      setBeatValidationError("");
       setPlanPhase("success");
       toast.success(`剧情骨架已生成：${plan.beats.length} 个 Beat`);
     } catch (e) {
@@ -397,6 +423,10 @@ export default function GeneratePage() {
     setReviewOverride(null);
     setRevalidating(false);
     setValidationOverride(null);
+    setBeatValidating(false);
+    setBeatValidation(null);
+    setBeatValidationStatus("not_started");
+    setBeatValidationError("");
     setViewAttempt(null);
     setLoadingAttempt(null);
     setAttemptInfo(null);
@@ -415,6 +445,10 @@ export default function GeneratePage() {
       setRunTitle(title);
       setRunStage("completed");
       setPhase("success");
+      // v1.4.0：这次 Run 用到的就是当前这份骨架，它的结构校验结论直接落到面板上
+      setBeatValidation(data.beat_validation);
+      setBeatValidationStatus(data.beat_validation_status);
+      setBeatValidationError("");
       // §16/§34：把重试结论直接讲清楚，不让用户猜为什么换了正文
       toast.success(
         data.quality_status === "accepted"
@@ -495,6 +529,40 @@ export default function GeneratePage() {
     } finally {
       revalidatingRef.current = false;
       setRevalidating(false);
+    }
+  }
+
+  // v1.4.0 Validate Beats：只重新检查当前剧情骨架，不生成正文、不改写骨架。
+  // 与 Generate 时 Pipeline 内部那一次校验同一个服务端实现，结论口径一致。
+  async function handleValidateBeats() {
+    if (beatValidatingRef.current) return;
+    if (!beatPlan) { toast.error("Generate a beat plan first."); return; }
+    // §47 手动编辑可能留下空字段：先本地校验，避免无谓请求
+    try {
+      validateBeatPlan(beatPlan);
+    } catch (e) {
+      toast.error(`BeatPlan 不合法：${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    beatValidatingRef.current = true;
+    setBeatValidating(true);
+    setBeatValidationError("");
+    try {
+      const result = await validateStoryBeats(formToConfig(form), beatPlan);
+      setBeatValidation(result);
+      setBeatValidationStatus("completed");
+      toast.success(result.passed
+        ? "Beat Validation：Passed"
+        : `Beat Validation：Not Passed（${result.issues.length} issues）`);
+    } catch (e) {
+      setBeatValidation(null);
+      setBeatValidationStatus("failed");
+      const msg = e instanceof Error ? e.message : "未知错误";
+      setBeatValidationError(msg);
+      toast.error(msg);
+    } finally {
+      beatValidatingRef.current = false;
+      setBeatValidating(false);
     }
   }
 
@@ -866,6 +934,13 @@ export default function GeneratePage() {
                 disabled={!beatPlan || busy} title={beatPlan ? "在末尾追加一个 Beat" : "Generate a beat plan first."}>
                 <Plus className="h-3.5 w-3.5" /> Add Beat
               </Button>
+              {/* v1.4.0：手动检查当前骨架的结构；只报告，不顺手改写任何一拍 */}
+              <Button variant="outline" size="sm" className="h-8 rounded-full text-xs" onClick={handleValidateBeats}
+                disabled={!beatPlan || busy || beatValidating}
+                title={beatPlan ? "只检查剧情骨架的结构，不生成正文" : "Generate a beat plan first."}>
+                {beatValidating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+                Validate Beats
+              </Button>
             </div>
             <ScrollArea className="max-h-[340px]">
               <div className="p-3 sm:p-4 space-y-2">
@@ -884,7 +959,7 @@ export default function GeneratePage() {
                   <div className="space-y-1.5">
                     <Label className="text-[11px] text-muted-foreground">Summary（可选）</Label>
                     <Input value={beatPlan.summary ?? ""} placeholder="故事整体规划摘要"
-                      onChange={(e) => setBeatPlan((prev) => (prev ? { ...prev, summary: e.target.value || undefined } : prev))}
+                      onChange={(e) => setBeatPlanChecked((prev) => (prev ? { ...prev, summary: e.target.value || undefined } : prev))}
                       disabled={busy} className={fieldCls} />
                   </div>
                 )}
@@ -938,6 +1013,19 @@ export default function GeneratePage() {
                 ))}
               </div>
             </ScrollArea>
+            {/* v1.4.0：骨架结构校验结论。放在滚动区外面——不改骨架就不会被滚走。 */}
+            {beatPlan && (
+              <div className="px-3 sm:px-4 pb-3 sm:pb-4">
+                <BeatValidationPanel
+                  beatValidation={beatValidation}
+                  beatValidationStatus={beatValidating ? "validating" : beatValidationStatus}
+                  beatValidationError={beatValidationError || undefined}
+                  validating={beatValidating}
+                  disabled={busy}
+                  onValidateAgain={handleValidateBeats}
+                />
+              </div>
+            )}
           </div>
 
           {/* 生成结果 */}
