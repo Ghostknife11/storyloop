@@ -54,7 +54,8 @@ StoryConfig → Planning →〔Attempt 1..max_attempts: Generate → Save Story 
 
 - **AI Beat Planning**：先生成剧情骨架（BeatPlan），再据此写正文；骨架可手动编辑后进入生成
 - **Story Validator（硬性有效性检查）**：正文落盘后立即跑一遍确定性规则，回答「这篇正文基本可用吗」
-- **Basic AI Reviewer**：每次生成的正文自动获得一次基础审阅，产出 0–100 单一总分
+- **Basic AI Reviewer**：每次生成的正文自动获得一次基础审阅，产出 0–100 整体分，
+  并给出四个基础维度的分数与短评（连贯性 / 叙事 / 人物 / 因果）
 - **Automatic Retry（自动重试）**：生成失败、校验不通过或总分低于阈值时按确定性策略重新生成
 - **Targeted Story Repair（定点修订）**：Attempt 不通过时先按具体问题类别改写这篇正文，
   修订后再校验、再审阅；修订彻底失败才退回整篇重新生成
@@ -73,10 +74,16 @@ StoryConfig → Planning →〔Attempt 1..max_attempts: Generate → Save Story 
 > |---|---|---|
 > | 回答的问题 | 「这篇正文基本可用吗」 | 「这篇故事写得好吗」 |
 > | 实现 | 确定性规则，不调用 LLM | LLM 审阅，主观评价 |
-> | 产出 | `ValidationResult`（`passed` + `issues`） | `ReviewResult`（`score` + `summary` + `strengths` + `problems`） |
+> | 产出 | `ValidationResult`（`passed` + `issues`） | `ReviewResult`（`score` + 可选 `dimensions` + `summary` + `strengths` + `problems`） |
 > | 判定性质 | 硬性：`error` 即不通过 | 软性：分数只做反馈 |
 >
 > 两者互不影响：**Review 分数不参与 Validation 判定**——哪怕 Review 打 0 分，校验该过还是过。
+>
+> **维度是评价输出，不是行动依据（v1.3.0）**：审阅者在整体分之外还给四个基础维度各打一个
+> 0–100 分并附一句短评。有维度时整体分就是这四个数的均分（四舍五入到 1 位小数，
+> 纯算术、无权重），`RetryPolicy` 里仍然只有 `min_review_score` 一个总分门槛——
+> 维度不新增阈值、不触发重试或修订、不改变采纳判定。维度也可有可无：
+> 1.3.0 之前的 Run 没有这个字段，读取时整个键不出现，行为与当年逐字一致。
 
 > **定点修订在整篇重试之前**：修订策略是纯函数（问题类别只由校验 issue code 或审阅问题文本推出，
 > 没有模型参与、没有打分、没有择优），重试同样由确定性策略驱动，没有学习、没有自适应：
@@ -120,7 +127,8 @@ StoryConfig → Planning →〔Attempt 1..max_attempts: Generate → Save Story 
 │  QualityAssembler（v1.2.0）                                  │
 │  纯函数：ValidationResult + ReviewResult + 采纳结论          │
 │  → QualityResult（overall_score / validation_passed /       │
-│    accepted / issues / suggestions / summary）               │
+│    accepted / issues / suggestions / summary /               │
+│    dimensions?）                                            │
 │  不调用模型 · 无随机 · 同一输入永远得到同一份 JSON            │
 └──────────┬───────────────────────────────────────────────────┘
            ▼
@@ -342,21 +350,45 @@ Validator 只回答「基本可用吗」，不回答「写得好不好」。
 | `strengths` | string[] | 优点列表（可为空数组，条目会 trim） |
 | `problems` | string[] | 问题列表（可为空数组，条目会 trim） |
 
-没有多维评分、严重度、证据定位、置信度，也没有 PASS / FAIL 判定——审阅只提供反馈。
+没有严重度、证据定位、置信度，也没有 PASS / FAIL 判定——审阅只提供反馈。
 审阅用的温度固定为 `0.3`，与生成温度相互独立。
 
-## QualityResult（v1.2.0）
+### 四个基础维度（v1.3.0，可选）
 
-把上面两样结论与采纳结论汇到一起的统一快照，六个字段，没有维度、没有等级：
+`ReviewResult` 有一个可选字段 `dimensions`：四个键，各自一个 0–100 分 + 一句短评。
+
+| 维度键 | 中文名 | 评的是什么 |
+|---|---|---|
+| `coherence` | 连贯性 | 设定、称呼、时间线前后是否一致 |
+| `narrative` | 叙事 | 结构是否完整、起承转合与节奏是否得当 |
+| `character` | 人物 | 言行是否符合其目标与动机 |
+| `causality` | 因果 | 事件推进是否有清楚的前因后果 |
+
+连贯性与因果是两件事：前者管「前后对得上」，后者管「推得动」。一个故事可以因果清楚
+却前后矛盾，也可以前后一致却推不动。
+
+整体分 `score` 在有维度时等于四维均分（四舍五入到 1 位小数），对齐方式是纯算术，
+不引入权重、不让模型自己解释。维度一旦出现就必须四个齐全、各自 0–100 且带非空短评：
+缺维度、多维度（模型自己扩到 35 维也一样）、分数越界都按审阅输出非法处理——
+不补 0、不挑一个先凑着，因为补出来的数会被当成真实评价参与展示。
+
+维度只影响「看得见多少」，不影响「怎么决策」：没有按维度设的阈值，没有维度驱动的重试或修订。
+没有维度的旧结论（1.3.0 之前的 `review.json`）一路照常可用。
+
+## QualityResult（v1.2.0，v1.3.0 增加可选维度）
+
+把上面两样结论与采纳结论汇到一起的统一快照。字段就是「一处校验结论 + 一处审阅结论 +
+一个采纳结论」，没有等级、没有趋势：
 
 | Field | Type | Description |
 |---|---|---|
-| `overall_score` | number \| null | 单一整体分，取 `review.score`；没有审阅结论时是 `null`（不是 0） |
+| `overall_score` | number \| null | 单一整体分；有维度时取四维均分，否则取 `review.score`。没有审阅结论时是 `null`（不是 0） |
 | `validation_passed` | boolean \| null | `true` / `false`；校验没跑（组件自身异常）时是 `null`，与「校验没过」是两件事 |
 | `accepted` | boolean | RetryPolicy 的采纳结论，不参与判定 |
 | `issues` | QualityIssue[] | 问题清单（可为空数组） |
 | `suggestions` | QualitySuggestion[] | 建议清单（可为空数组） |
 | `summary` | string \| null | 审阅的总体评价；审阅失败或没给时是 `null` |
+| `dimensions` | object? | v1.3.0 可选：四个基础维度的分数与短评，由 `ReviewResult.dimensions` 原样搬运；没有维度时整个键不出现 |
 
 `QualityIssue`：`id`（`validation-N` / `review-N`）、`source`（`validation` / `review`）、
 `category`（校验侧是 issue code，审阅侧统一 `review_problem`）、`message`、可选 `severity`。
@@ -364,7 +396,8 @@ Validator 只回答「基本可用吗」，不回答「写得好不好」。
 
 `QualityAssembler` 是纯函数：同一输入永远得到同一份 JSON，不调用模型、无随机，
 读的三样东西（`ValidationResult` / `ReviewResult` / 采纳结论）在 v1.2.0 之前就都在产物里。
-它只汇总，**不参与**任何校验、审阅或重试判定。
+它只汇总，**不参与**任何校验、审阅或重试判定；维度也只是从审阅结论搬到快照里，
+不在这里重新打分。
 
 快照出现在三个地方，内容一致：Run 根与 `attempts/NN/` 下的 `quality.json`、
 Run 类入口与两个读回接口响应里的 `quality`、前端 Quality Summary 面板。
@@ -510,8 +543,9 @@ mapped / NAT64 地址按内嵌的那个地址判
 
 这些是**刻意不做**的，不是待修的缺陷。每一条都有对应说明：
 
-- **没有多维评审**：Review 只有一个 0–100 总分，没有分维度打分、没有严重度、没有证据定位；
-  统一质量快照只是把同一个总分换个地方放，不多打一次分、不出趋势图
+- **维度只有四个，且只是评价输出**：审阅除了 0–100 整体分只给连贯性 / 叙事 / 人物 / 因果
+  四个基础维度，没有更细的拆解、没有子维度、没有维度阈值、没有维度驱动的重试或修订
+  （整体分即四维均分，重试仍只看 `min_review_score` 一个门槛）
 - **没有 Best-of-N 择优**：取第一个满足策略的 Attempt，不会在多次尝试里挑「最好的」
 - **没有质量门禁**：没有 PASS / FAIL 判定，`quality_status` 只有 `accepted` / `exhausted` 两种
 - **没有商业审阅**：不评估市场适配、读者预期或商业可行性
@@ -529,6 +563,9 @@ mapped / NAT64 地址按内嵌的那个地址判
 
 ## 升级说明
 
+v1.3.0 给审阅结论加了四个可选的基础维度（连贯性 / 叙事 / 人物 / 因果），整体分改为四维均分，
+纯 additive：从 1.2.x 升到 1.3.0 **不需要改任何代码**，1.2.x 写的产物可以直接读，
+1.3.0 写的 Run 回落到 1.2.x 只是多一个被忽略的 `dimensions` 字段。
 v1.2.0 建立了统一质量工程层（`QualityResult` / `quality.json` / API 的 `quality` 字段 /
 前端 Quality Summary 面板），纯 additive：从 1.1.x 升到 1.2.0 **不需要改任何代码**，
 1.1.1 写的产物可以直接读，1.2.0 写的 Run 回落到 1.1.x 也只是多一个被忽略的文件。
@@ -543,7 +580,7 @@ attempt 级 metadata 的 `error` 没有错误时是 `null`（以前按条件写�
 两者都是「字段从可能没有变成一定有」，不会让旧读取方崩掉。
 
 ```bash
-git fetch && git checkout 1.2.1     # tag 不带 v 前缀
+git fetch && git checkout 1.3.0     # tag 不带 v 前缀
 npm install
 cp .env.example .env
 npx tsx scripts/generate-cli.ts run --config configs/example_story.json
@@ -582,6 +619,11 @@ v1.2.0 的质量快照另有六个测试文件（同样只用假组件，不调�
 `test_quality_pipeline`（落盘与内存一致）、`test_quality_api`（三处口径一致、旧 Run 兼容、
 `quality.json` 损坏后的降级、地址关卡回归）、`test_quality_ui`（面板状态推导）。
 
+v1.3.0 的四个基础维度另有两个测试文件：
+`test_quality_dimensions`（维度模型、确定性聚合、可选字段校验、解析、重试门槛只认整体分）、
+`test_quality_dimensions_pipeline`（维度在真实管道里一路带到 `quality.json` 与 metadata，
+修订后取新的维度，没有维度时与 v1.2.x 逐字一致）。
+
 所有测试都不调用真实 LLM：LLM 由注入的桩对象或 `FakeLLM` 替代（`tests/helpers/fixtures.ts`），
 `fetch` 也被桩掉。重试相关断言同样只用桩，从不触发真实模型调用。
 URL 校验的用例用注入的假解析器跑，不真的查 DNS，也不碰任何真实主机。
@@ -612,6 +654,7 @@ URL 校验的用例用注入的假解析器跑，不真的查 DNS，也不碰任
 
 - `src/core/retry-policy.ts`：重试策略与 RetryDecision 的实现
 - `src/core/quality-assembler.ts`：统一质量快照的装配规则（纯函数，不调模型）
+- `src/types/quality-dimensions.ts`：四个基础维度与四维均分的实现（纯算术）
 - `src/lib/validation-rules.ts`：六条硬性校验规则的实现
 - `src/lib/api-error.ts`：稳定错误码与状态码映射
 - `src/lib/safe-text.ts`：错误文本的净化规则（绝对路径替换、凭据打码），只此一份

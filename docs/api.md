@@ -128,19 +128,23 @@
 `artifacts` 恒含 `config` / `beat_plan` / `story` / `metadata` 四个键（值是文件名），
 校验、审阅或质量装配各自成功时追加 `validation` / `review` / `quality`。
 
-`QualityResult`（v1.2.0 新增，纯 additive）：`overall_score`（`review.score`，没有审阅结论时
-是 `null`）、`validation_passed`（`true` / `false` / 校验没跑时的 `null`）、`accepted`、
-`issues`（`QualityIssue[]`）、`suggestions`（`QualitySuggestion[]`）、`summary`。
+`QualityResult`（v1.2.0 新增，纯 additive）：`overall_score`（有维度时是四维均分，否则是
+`review.score`，没有审阅结论时是 `null`）、`validation_passed`（`true` / `false` /
+校验没跑时的 `null`）、`accepted`、`issues`（`QualityIssue[]`）、`suggestions`（`QualitySuggestion[]`）、
+`summary`，以及 v1.3.0 新增的可选 `dimensions`。
 它由 `QualityAssembler` 从已有的校验结论、审阅结论与采纳结论确定性装配，不调用模型、
-不引入新分数（只有一个整体分，没有维度分）。
+不重新打分（维度也只是从审阅结论原样搬过来）。
 
 - `QualityIssue`：`id`（`validation-1` / `review-1`…）、`source`（`validation` / `review`）、
   `category`（校验侧是 issue code，审阅侧统一 `review_problem`）、`message`、可选的 `severity`
 - `QualitySuggestion`：`id`、`source`（`review`；`system` 保留给后续版本，v1.2.0 不产出）、
   `message`
+- `dimensions`（v1.3.0，可选）：四个键 `coherence` / `narrative` / `character` / `causality`，
+  各自 `{score: number, summary: string}`。审阅没给维度（1.3.0 之前的 Run、或模型输出里
+  没有这四个键）时响应里整个 `dimensions` 键不出现，其余字段与当年逐字一致
 
 `ReviewResult` 的 `suggestions` 是 v1.2.0 新增的可选字段：缺失时响应里整个键不出现，
-与 v1.0 / v1.1 的落盘结构逐字一致。
+与 v1.0 / v1.1 的落盘结构逐字一致。`dimensions` 同理（v1.3.0）。
 
 `AttemptSummary`：`attempt_number`、`accepted`、`retry_reason`（`null` 或原因）、
 `review_score`（可为 `null`）、`validation_passed`（可为 `null`）、`repair_count`、`repairs`。
@@ -188,10 +192,14 @@ Run 不存在与 Attempt 不存在共用 `RUN_NOT_FOUND` 这个 code，只能靠
 
 ### `POST /api/review` 与 `POST /api/validate`
 
-顶层直接是 `ReviewResult`（`score` / `summary` / `strengths` / `problems`）或
-`ValidationResult`（`passed` / `issues`）。两者都要求 `story` 非空字符串（`/api/review`）
-或字符串（`/api/validate`，空串会以 `EMPTY_CONTENT` 规则正常返回 200 `passed: false`）。
+顶层直接是 `ReviewResult`（`score` / `summary` / `strengths` / `problems`，v1.3.0 起可能还有
+`dimensions`）或 `ValidationResult`（`passed` / `issues`）。两者都要求 `story` 非空字符串
+（`/api/review`）或字符串（`/api/validate`，空串会以 `EMPTY_CONTENT` 规则正常返回 200 `passed: false`）。
 带 `run_id` 且该 Run 不存在时 404，**不会**调用模型。
+
+审阅者输出里的 `dimensions` 一旦出现就必须四个键齐全、各自 0~100 且带非空短评；
+少一个、多一个（模型自己扩到 35 维也一样）、分数越界，都算审阅输出非法，
+按 `REVIEW_FAILED` 502 返回，不会补 0 也不会挑一个先凑着。
 
 ### `POST /api/repair`
 

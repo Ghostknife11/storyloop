@@ -130,6 +130,48 @@ npm install
 git checkout 1.2.0
 ```
 
+## 从 1.2.x 升级到 1.3.0
+
+**没有任何需要改代码的地方。** v1.3.0 是纯 additive：字段、路由、错误码、CLI 参数与产物布局
+一个都没动，1.2.x 写的产物可以直接读，1.3.0 写的 Run 回落到 1.2.x 也能读（多出来的
+`dimensions` 字段会被安全忽略）。
+
+新增的三样东西：
+
+1. **`ReviewResult` 的可选 `dimensions`**——审阅者在整体分之外再给连贯性 / 叙事 / 人物 /
+   因果四个基础维度各打一个 0–100 分并附一句短评。字段说明见 [api.md](./api.md)。
+2. **`QualityResult` 的可选 `dimensions`**——由审阅结论原样搬运到 `quality.json` 与 API 的
+   `quality` 字段里，装配逻辑不加判断。
+3. **前端 Quality 面板多了一节「维度评分」**——四个进度条 + 各自短评，没有 Fix / Retry 一类
+   操作入口。
+
+需要知道的三件事：
+
+- **整体分的口径收紧了一点。** 有维度时 `overall_score`（以及各级 `review_score` /
+  `before_review_score` / `after_review_score`）等于四维均分，四舍五入到 1 位小数，
+  纯算术、无权重；没有维度时仍然等于 `review.score`。所以同一个 Run 在不同接口看到的
+  整体分还是同一个数。
+- **旧 Run 没有 `dimensions`。** 1.3.0 之前生成的 Run 读出来与当年一致：`quality` 里没有这个键，
+  面板不渲染维度那一节。仓库样例 `examples/example_run/` 就是这个形态。
+- **维度不改变任何决策。** `RetryPolicy` 里仍然只有 `min_review_score` 一个总分门槛，
+  `RepairStrategy` 仍然只按问题类别修一次。多出四个维度只让你看得更细，不会因此多跑一次
+  重试或修订（明细见 [compatibility.md](./compatibility.md) 的「v1.3.0 的四个基础维度」）。
+
+升级后跑一遍 `npm test`：新增的 `tests/test_quality_dimensions.test.ts`（维度模型、聚合、
+可选字段校验、门槛只看整体分）与 `tests/test_quality_dimensions_pipeline.test.ts`
+（维度在真实管道里一路带到快照与 metadata）覆盖这一层，都用假模型，不调真实接口。
+
+```bash
+git fetch && git checkout 1.3.0     # tag 不带 v 前缀
+npm install
+```
+
+回滚到 1.2.1 没有任何代价（纯 additive 的差别只在审阅结论里多一个字段）：
+
+```bash
+git checkout 1.2.1
+```
+
 ## 从 0.9.x 升级到 1.0.0
 
 ### 行为变化（需要注意的两处）

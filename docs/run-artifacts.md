@@ -7,6 +7,10 @@
 > `quality_assembly_status` / `overall_score` / `quality_issue_count`。都是纯新增，
 > 没有任何旧字段改名或改语义。
 >
+> v1.3.0 在原有约束下给 `review.json` 与 `quality.json` 各多了一个**可选**字段：
+> `dimensions`（四个基础维度的分数与短评）。审阅没给维度时整个键不出现，
+> 没有维度的旧 Run 照常读取。
+>
 > 实现：`src/core/pipeline.ts` + `src/storage/artifact-store.ts`
 > 契约测试：`tests/test_contract_artifacts.test.ts`（存在性与必填字段）、
 > `tests/test_contract_docs_sync.test.ts`（本文件的字段表 ↔ 真实产物逐字段一致）
@@ -21,14 +25,14 @@ runs/
     ├── beats.json                     # 本次 Run 使用的 BeatPlan
     ├── story.md                       # 最终入选正文（# 标题 + 空行 + 正文）
     ├── validation.json                # 入选 Attempt 的首次校验结果
-    ├── review.json                    # 入选 Attempt 的首次审阅结果
+    ├── review.json                    # 入选 Attempt 的首次审阅结果（v1.3.0 起可能带维度）
     ├── quality.json                   # 入选 Attempt 的统一质量快照（v1.2.0 新增）
     ├── metadata.json                  # 运行级 metadata
     └── attempts/
         └── 01/                        # 第 1 次尝试，两位数字
             ├── story.md               # 该次尝试的最终正文（有修订时为修订后）
             ├── validation.json        # 该次尝试的首次校验结果
-            ├── review.json            # 该次尝试的首次审阅结果
+            ├── review.json            # 该次尝试的首次审阅结果（v1.3.0 起可能带维度）
             ├── quality.json           # 该次尝试的统一质量快照（v1.2.0 新增）
             ├── metadata.json          # attempt 级 metadata
             ├── initial_story.md       # 只在发生过修订时出现（修订前的原文）
@@ -36,7 +40,7 @@ runs/
                 └── 01/                # 第 1 轮修订
                     ├── story.md       # 修订后的正文
                     ├── validation.json # 修订后的校验结果
-                    ├── review.json    # 修订后的审阅结果
+                    ├── review.json    # 修订后的审阅结果（v1.3.0 起可能带维度）
                     ├── request.json   # 修订请求（repair_number / issue_type / issue_message）
                     └── metadata.json  # repair 级 metadata
 ```
@@ -47,8 +51,9 @@ runs/
 - 运行级目录里除了 `attempts/` 只有那七个文件，没有别的
 - `validation.json` / `review.json` 可能缺失：校验或审阅自身出错时 Pipeline 只写 metadata，
   不写这两个文件（对应 API 响应里字段为 `null`、`*_status` 为 `failed`）。
-  `quality.json` 不受这个影响：装配只需要 validation 与采纳结论，Review 失败时照样落盘，
-  只是 `overall_score` 与 `summary` 为 `null`
+`review.json` / `validation.json` 与 v1.2.0 起新增的 `quality.json` 都不受这个影响：
+装配只需要 validation 与采纳结论，Review 失败时照样落盘，只是 `overall_score` 与 `summary`
+为 `null`
 - 修订目录 `repairs/NN/` 固定五个文件，**不写** `quality.json`：attempt 级那份快照取的
   已经是修订后的结论，Revision 级的同一份内容没有读者（见下面「统一质量快照」）
 - 一切都是 UTF-8 文本；`.md` 是 Markdown，其余是 JSON
@@ -78,12 +83,12 @@ runs/
 | `selected_attempt` | number | 重试循环结束后 | 入选正文来自第几次尝试；全部未达标时是最后一次 |
 | `quality_status` | string | 重试循环结束后 | `accepted` / `exhausted` |
 | `quality_assembly_status` | string | 装配出统一质量快照时 | v1.2.0 新增：`completed`。只表示快照装配完成，与 `quality_status` 的采纳结论是两件事，所以另起这个名字 |
-| `overall_score` | number \| null | 同上 | v1.2.0 新增：统一快照里的总分，等于入选版本的审阅分；没有审阅结论就是 `null`，不由代码自己补分 |
+| `overall_score` | number \| null | 同上 | v1.2.0 新增：统一快照里的总分，等于入选版本的整体分（v1.3.0 起审阅给了四个维度时就是四维均分）；没有审阅结论就是 `null`，不由代码自己补分 |
 | `quality_issue_count` | number | 同上 | v1.2.0 新增：统一快照里 issues 的条数（校验问题 + 审阅问题） |
 | `validation_status` / `review_status` | string | 对应阶段跑到过 | `not_started` / `validating` / `reviewing` / `completed` / `failed` |
 | `validation_passed` | boolean | 入选版本有校验结论 | 硬性规则是否全过 |
 | `validation_issue_count` | number | 入选版本有校验结论 | 问题条数 |
-| `review_score` | number | 入选版本有审阅结论 | 审阅总分 |
+| `review_score` | number | 入选版本有审阅结论 | 审阅整体分：v1.3.0 起有维度时是四维均分，否则就是 `review.score`（与 `overall_score` 同一个口径） |
 | `validation_error` / `review_error` | string | 校验或审阅自身抛异常 | 组件自身失败的原因（已过 `safe-text`）；正文不达标不算 |
 | `error` | string | Run 失败 | Run 级失败原因，已过 `safe-text`；成功时整个字段不出现 |
 | `artifacts` | object | 必有 | 文件名索引：`config` / `beat_plan` / `story` / `metadata`，有结论时再加 `validation` / `review` / `quality` |
@@ -100,7 +105,7 @@ runs/
 | `accepted` | boolean | 必有 | 这一次是否满足 RetryPolicy 并入选 |
 | `retry_reason` | string \| null | 必有 | `generation_error` / `validation_failed` / `review_score_below_threshold`；入选时是 `null` |
 | `validation_passed` | boolean \| null | 必有 | **修订后**的硬性规则结论；没跑到校验就是 `null` |
-| `review_score` | number \| null | 必有 | **修订后**的审阅分；没跑到审阅就是 `null` |
+| `review_score` | number \| null | 必有 | **修订后**的审阅整体分（同上口径）；没跑到审阅就是 `null` |
 | `validation_status` / `review_status` | string | 必有 | 同上，对应那一路的阶段状态 |
 | `repair_count` | number | 必有 | 这次 Attempt 里的修订轮数 |
 | `repairs` | RepairRecord[] | 必有 | 每轮修订的记录；没有修订时是空数组 |
@@ -120,7 +125,7 @@ runs/
 | `repair_number` | number | 必有 | 第几轮修订 |
 | `issue_type` | string | 必有 | 这次修订针对的问题类型，六类之一 |
 | `success` | boolean | 必有 | 修订后重新校验 + 审阅是否满足策略；修订调用本身没跑通也是 `false` |
-| `before_review_score` / `after_review_score` | number \| null | 必有 | 修订前后的审阅分；那一轮没有审阅结论就是 `null` |
+| `before_review_score` / `after_review_score` | number \| null | 必有 | 修订前后的审阅整体分（同上口径）；那一轮没有审阅结论就是 `null` |
 | `before_validation_passed` / `after_validation_passed` | boolean \| null | 必有 | 修订前后的硬性规则结论；那一轮没校验就是 `null` |
 
 同目录的 `request.json` 是修订请求，字段为 `repair_number` / `issue_type` / `issue_message`
@@ -141,14 +146,19 @@ runs/
 `review.json` 是修订前那次审阅）。1.x 内不改这个语义，详见
 [compatibility.md](./compatibility.md) 的「已知的不对称」。
 
-### 统一质量快照（v1.2.0）
+### 统一质量快照（v1.2.0，v1.3.0 增加可选维度）
 
 `quality.json` 是**新增的统一层**，不是 `review.json` 改名，也不替代任何已有产物。它由
 `QualityAssembler` 从已有的「最终校验结论 + 最终审阅结论 + 采纳结论」确定性装配（「最终」=
 这次尝试最后留下的那一版：发生过修订时取修订目录里的那份，见下面「快照取哪一轮的结论」），
 不调用 LLM、不读文件系统、不引入新阈值——同一个输入永远得到同一份快照。字段为
 `overall_score` / `validation_passed` / `accepted` / `issues` / `suggestions` / `summary`，
-详见 [api.md](./api.md) 的 `quality` 字段。
+v1.3.0 起审阅给了四个基础维度时再多一个可选的 `dimensions`（由 `ReviewResult.dimensions`
+原样搬运，不改分、不补维度），详见 [api.md](./api.md) 的 `quality` 字段。
+
+维度只影响「看得见多少」，不影响「怎么决策」：`overall_score` 与各级 `review_score`
+在有维度时一律取四维均分（同一个口径，见 [api.md](./api.md)），而 `RetryPolicy` 仍然只有
+`min_review_score` 一个总分门槛，没有按维度设的阈值，也没有维度驱动的重试或修订。
 
 快照取哪一轮的结论：
 
