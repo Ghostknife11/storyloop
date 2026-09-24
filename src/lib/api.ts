@@ -3,6 +3,7 @@ import type { BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
 import type { QualityResult } from "@/types/quality";
+import type { BeatValidationResult } from "@/types/beat-validation";
 
 /** §34/§38 单个 Attempt 摘要：只带结论，不带完整正文。 */
 export interface AttemptSummaryApi {
@@ -27,12 +28,16 @@ export interface RepairSummaryApi {
 /** §32 Run 响应：run_id / 状态 / 正文 / 实际使用的 BeatPlan / 校验结果 / 评价 / 产物文件名。
  *  v0.7.0 增加重试结论与 Attempt 摘要（§38）。
  *  v0.8.0 增加 repair_count 与每个 Attempt 的 repairs 摘要（§40）。
- *  v1.2.0 增加 quality（§25）：统一质量层是新增字段，原有字段一个不动。 */
+ *  v1.2.0 增加 quality（§25）：统一质量层是新增字段，原有字段一个不动。
+ *  v1.4.0 增加 beat_validation / beat_validation_status（§26）：同样是纯追加。 */
 export interface RunApiResult {
   run_id: string;
   status: string;
   story: string;
   beat_plan: BeatPlan;
+  /** v1.4.0 §26：BeatPlan 结构校验结论；没跑这一步时为 null。 */
+  beat_validation: BeatValidationResult | null;
+  beat_validation_status: string;
   /** §26：硬性有效性检查结果；Validator 自身异常时为 null。 */
   validation: ValidationResult | null;
   validation_status: string;
@@ -223,6 +228,9 @@ export interface RunDetailApi {
   /** §40 Run 级修订总次数。 */
   repair_count: number;
   story: string;
+  /** v1.4.0 §26：BeatPlan 结构校验结论；v1.4.0 之前的 Run 没有 beat-validation.json，为 null。 */
+  beat_validation: BeatValidationResult | null;
+  beat_validation_status: string;
   validation: ValidationResult | null;
   validation_status: string;
   review: ReviewResult | null;
@@ -331,6 +339,21 @@ export async function validateStory(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ config, story, ...(runId ? { run_id: runId } : {}) }),
   }, "校验失败")) as ValidationResult;
+}
+
+/**
+ * v1.4.0 手动校验剧情骨架（Validate Beats）：只跑结构与规则检查，不生成正文、不改写骨架。
+ * 与 Pipeline 里那一次校验同一个实现；这里的结果不写任何产物。
+ */
+export async function validateStoryBeats(
+  config: StoryConfig,
+  plan: BeatPlan,
+): Promise<BeatValidationResult> {
+  return (await requestJson("/api/validate-beats", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ config, beat_plan: plan }),
+  }, "Beat 校验失败")) as BeatValidationResult;
 }
 
 /** §38 手动定点修订结果：完整修订后正文 + 类型 + 成败（notes 是失败原因）。 */

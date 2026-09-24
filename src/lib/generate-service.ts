@@ -7,6 +7,7 @@ import { BeatPlanner } from "@/lib/beat-planner";
 import { StoryGenerator } from "@/lib/story-generator";
 import { StoryValidator } from "@/lib/story-validator";
 import { BasicReviewer } from "@/lib/basic-reviewer";
+import { BeatValidator } from "@/lib/beat-validator";
 import { StoryRepairer } from "@/lib/story-repairer";
 import { RepairStrategy } from "@/core/repair-strategy";
 import { GenerationPipeline, type GenerationResult } from "@/core/pipeline";
@@ -39,6 +40,8 @@ import {
 import { QualityAssembler } from "@/core/quality-assembler";
 import { qualityResultOf, type QualityResult } from "@/types/quality";
 import type { QualityStatus } from "@/core/pipeline";
+import { projectVersion as readProjectVersion } from "@/lib/version";
+import type { BeatValidationResult } from "@/types/beat-validation";
 
 export { ConfigValidationError, UnsupportedConfigVersionError } from "@/types/story-config";
 export { LLMError } from "@/lib/llm";
@@ -48,6 +51,8 @@ export { ReviewValidationError } from "@/types/review-result";
 export { ReviewParseError } from "@/lib/review-parser";
 export { ValidationValidationError } from "@/types/validation-result";
 export { RepairValidationError } from "@/types/repair";
+export { BeatValidationValidationError } from "@/types/beat-validation";
+export { BeatValidationParseError } from "@/lib/beat-validation-parser";
 
 /** 模块加载时锁定项目根，避免测试 chdir 后模板路径漂移。 */
 const PROJECT_ROOT = process.cwd();
@@ -127,12 +132,16 @@ export async function planStory(
  *  v0.6.0 增加 validation / validation_status / validation_error（§26）。
  *  v0.7.0 增加 attempt_count / selected_attempt / quality_status / attempts（§38）。
  *  v0.8.0 增加 repair_count 与 attempts[].repairs 摘要（§40）。
- *  v1.2.0 增加 quality（§25）：新增的是统一质量层，原有字段一个不动。 */
+ *  v1.2.0 增加 quality（§25）：新增的是统一质量层，原有字段一个不动。
+ *  v1.4.0 增加 beat_validation / beat_validation_status（§26）：同样是纯追加。 */
 export interface RunOk {
   run_id: string;
   status: string;
   story: string;
   beat_plan: BeatPlan;
+  /** v1.4.0 §26：BeatPlan 结构校验结论；没跑这一步时为 null。 */
+  beat_validation: BeatValidationResult | null;
+  beat_validation_status: string;
   /** §26：硬性有效性检查结果；Validator 自身异常时为 null。 */
   validation: ValidationResult | null;
   validation_status: string;
@@ -170,6 +179,8 @@ export interface RunDeps {
   reviewer?: BasicReviewer;
   repairer?: StoryRepairer;
   repairStrategy?: RepairStrategy;
+  /** v1.4.0 §5：不注入就没有 BeatPlan 结构校验这一步。 */
+  beatValidator?: BeatValidator;
   artifactStore?: ArtifactStore;
 }
 
@@ -201,9 +212,13 @@ export async function buildPipeline(runtime: GenerateRuntime, deps: RunDeps = {}
     join(PROJECT_ROOT, "prompts", "repair.txt"),
   );
   const repairStrategy = deps.repairStrategy ?? new RepairStrategy();
+  const beatValidator = deps.beatValidator ?? new BeatValidator(
+    llm,
+    join(PROJECT_ROOT, "prompts", "beat_validator.txt"),
+  );
   return new GenerationPipeline(
     planner, generator, validator, reviewer, artifactStore, DEFAULT_RETRY_POLICY,
-    repairer, repairStrategy,
+    repairer, repairStrategy, new QualityAssembler(), readProjectVersion(), beatValidator,
   );
 }
 
@@ -213,6 +228,8 @@ function runOkOf(result: GenerationResult): RunOk {
     status: result.status,
     story: result.story,
     beat_plan: result.beat_plan,
+    beat_validation: result.beat_validation,
+    beat_validation_status: result.beat_validation_status,
     validation: result.validation,
     validation_status: result.validation_status,
     review: result.review,
@@ -432,6 +449,52 @@ export async function validateStory(body: unknown, deps: RunDeps = {}): Promise<
 }
 
 // ---------------------------------------------------------------------------
+// v1.4.0 BeatPlan 结构校验：POST /api/validate-beats
+// 与 Pipeline 内部那一次校验复用同一个 BeatValidator（§62 只新增不重写）。
+// 只读、只判断：不改 BeatPlan、不重排、不据此重新规划（§4）。
+// ---------------------------------------------------------------------------
+
+/** v1.4.0 BeatValidationOutcome：成功回 BeatValidationResult；失败回统一错误体。 */
+export type BeatValidationOutcome =
+  | { status: 200; json: BeatValidationResult }
+  | { status: number; json: ApiErrorBody };
+
+/**
+ * v1.4.0 POST /api/validate-beats 的服务层：{config, beat_plan} → BeatValidationResult。
+ * §7 与 /api/validate 的差别：这里检查的是剧情骨架，失败也不影响任何已存在的 Run
+ * ——不写 beat-validation.json，不覆盖任何产物（Run 里那一份由 Pipeline 自己写）。
+ */
+export async function validateStoryBeats(body: unknown, deps: RunDeps = {}): Promise<BeatValidationOutcome> {
+  try {
+    const raw = (body ?? {}) as Record<string, unknown>;
+    const config = validateStoryConfig(raw.config ?? normalizeLegacy(raw));
+
+    if (raw.beat_plan === undefined || raw.beat_plan === null) {
+      return {
+        status: 400,
+        json: errorBody(
+          "CONFIG_INVALID",
+          "beat_plan is required——提供需要校验的剧情骨架",
+        ),
+      };
+    }
+    const plan = validateBeatPlan(raw.beat_plan);
+
+    const runtime = runtimeOf(raw);
+    const validator = deps.beatValidator ?? new BeatValidator(
+      await clientFor(runtime, deps.llm),
+      join(PROJECT_ROOT, "prompts", "beat_validator.txt"),
+    );
+    const beatValidation = await validator.validate(config, plan);
+    return { status: 200, json: beatValidation };
+  } catch (e) {
+    const err = toApiError(e);
+    logger.error(`beat validation failed (${err.code})`, e);
+    return { status: err.httpStatus, json: err.body() };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // §38 Manual Repair API：POST /api/repair
 // 手动触发一次定点修订——和 Pipeline 内部的 Repair-before-Retry 复用同一个
 // StoryRepairer + RepairStrategy，不引入第二套修订实现（§62 只新增不重写）。
@@ -498,6 +561,9 @@ export interface RunDetail {
   max_repairs_per_attempt: number | null;
   repair_count: number;
   story: string;
+  /** v1.4.0 §26：BeatPlan 结构校验结论；v1.4.0 之前的 Run 没有 beat-validation.json，为 null。 */
+  beat_validation: BeatValidationResult | null;
+  beat_validation_status: string;
   validation: ValidationResult | null;
   validation_status: string;
   review: ReviewResult | null;
@@ -709,6 +775,9 @@ export async function getRun(
       // §40：Run 级 repair_count 从各 attempt 的修订记录累加，与 POST 响应同一口径。
       repair_count: attempts.reduce((sum, a) => sum + a.repair_count, 0),
       story: store.readFinalStory(runId) ?? "",
+      // v1.4.0 §26：骨架校验结论是运行级的，直接读根目录那份；缺文件就是没跑过这一步
+      beat_validation: store.readFinalBeatValidation(runId),
+      beat_validation_status: strOf(meta?.beat_validation_status) ?? "not_started",
       validation: finalValidation,
       validation_status: strOf(meta?.validation_status) ?? "not_started",
       review: finalReview,

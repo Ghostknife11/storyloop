@@ -30,6 +30,8 @@ export const API_ERROR_CODES = [
   "REVIEW_FAILED",
   "REPAIR_FAILED",
   "ARTIFACT_WRITE_FAILED",
+  // v1.4.0：BeatPlan 结构校验自身失败（模型超时 / 输出非法 / 模板缺失）
+  "BEAT_VALIDATION_FAILED",
   "INTERNAL_ERROR",
 ] as const;
 
@@ -103,6 +105,8 @@ const USER_ERROR_NAMES = new Set([
   "BeatPlanValidationError",
   "ReviewValidationError",
   "ValidationValidationError",
+  // v1.4.0：请求体里的 BeatPlan / BeatValidationResult 结构不合法，都是 4xx 用户错误
+  "BeatValidationValidationError",
 ]);
 
 /** §12 把已抛出的异常映射成统一错误；未知异常按内部错误处理，消息不带堆栈。 */
@@ -131,6 +135,9 @@ export function toApiError(e: unknown): ApiError {
     }
     if (inner.name === "ValidatorError") {
       return new ApiError("VALIDATION_FAILED_INTERNAL", `Validation failed. 原因：${safeText(inner.message)}`, 500, runIdOf(e), stageOf(e));
+    }
+    if (inner.name === "BeatValidationParseError") {
+      return new ApiError("BEAT_VALIDATION_FAILED", `Beat validation failed. 原因：${safeText(inner.message)}`, 502, runIdOf(e), stageOf(e));
     }
     if (inner.name === "ArtifactWriteError") {
       return new ApiError("ARTIFACT_WRITE_FAILED", safeText(inner.message), 500, runIdOf(e), stageOf(e));
