@@ -13,6 +13,46 @@ All notable changes to Storyloop.
 
 ---
 
+## [1.1.1] —— 2026-09-24
+
+v1.1.1 是**修订版本**：没有新能力，只修 v1.1.0 那道地址关卡自身的问题。
+约束方向不变（请求体 `baseUrl` 仍然只允许公网地址），产物布局、字段、错误码与 1.1.0 逐字一致。
+
+### Fixed
+
+- **CLI 的 `--base-url` 不再被自己挡**。v1.1.0 把关卡接到服务层的四个入口上，CLI 的 `plan`
+  因为没走服务层而绕过了它，`run` / `review` / `repair` 却都被拦住——同一条命令集里三个子命令拦、
+  一个不拦，而且 `docs/cli.md` 没写 `--base-url` 也受影响。现在 CLI 与 `LLM_BASE_URL` 同级
+  （都是本机受信配置：能跑这条命令的人本来就读得到 `.env`），四个子命令统一按受信输入处理，
+  请求体里不再带 `baseUrl`，客户端由唯一的 `cliClient` 构建。「CLI 指向本地假模型」恢复可用；
+  走 HTTP 的调用方行为完全不变
+- **内嵌 IPv4 的 IPv6 地址改判为按内嵌地址判**。v1.1.0 匹配点分文本的分支因为 WHATWG URL
+  会把 `[::ffff:127.0.0.1]` 规范化成 `[::ffff:7f00:1]` 而永远走不到：环回是被后一个分支的
+  fail-closed 挡下的（行为仍然安全），但合法的公网 mapped 地址也被一起误拒。
+  现在从地址最后两段取内嵌 IPv4，`::ffff:0:0/96`（IPv4-mapped）与 `64:ff9b::/96`（NAT64）
+  都按它判，另补上 `fec0::/10`（站点本地）与 `2002::/16`（6to4 中继）两段——禁令清单只增不减
+- `UnsafeRequestUrlError` 不再借用 `RequestValidationError` 作为运行时 `name`（类名与日志里
+  的错误名不一致）。对外的 `error.code`（`CONFIG_INVALID`）与 400 状态码不变
+
+### Documentation
+
+- `docs/api.md`：「`baseUrl` 覆盖的地址限制」补全 IPv6 规则，并新增「已知限制：校验只覆盖
+  第一次解析」——**重定向**与 **DNS rebinding** 两条路径当前没有堵死，写清楚以免误以为已经堵上
+- `docs/cli.md`：新增「`--base-url` 的信任级」，说明 CLI 与请求体的差别及回归测试位置
+- `docs/compatibility.md`：新增「v1.1.1 对同一道关卡的修正」
+- `docs/upgrade.md`：新增「从 1.1.0 升级到 1.1.1」
+
+### Tests
+
+- `tests/test_cli.test.ts` 新增「v1.1.1 CLI 入口的 baseUrl 信任级」：`plan` / `run` / `review`
+  指向本机地址时结局一致（因为连不上而失败，而不是被地址关卡拒掉），并守住「客户端只有一个
+  构建点、请求体不带 baseUrl」
+- `tests/test_url_guard.test.ts` 补 mapped / NAT64 / 站点本地 / 6to4 四类地址的判定，
+  以及「内嵌公网 IPv4 的 mapped 地址要放行」；错误名用例改为核对类名与 `name` 一致
+- `tests/test_api_error.test.ts` 的用户错误名清单同步换成 `UnsafeRequestUrlError`
+
+---
+
 ## [1.1.0] —— 2026-09-23
 
 v1.1.0 是**安全收紧版本**：堵掉「请求体 `baseUrl` 覆盖」这条会把服务端 `LLM_API_KEY`
