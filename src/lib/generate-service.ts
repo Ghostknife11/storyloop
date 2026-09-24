@@ -14,7 +14,7 @@ import { ArtifactStore } from "@/storage/artifact-store";
 import { logger } from "@/lib/logger";
 import { appSettings } from "@/lib/app-config";
 import { errorBody, toApiError, type ApiErrorBody } from "@/lib/api-error";
-import type { ReviewResult } from "@/types/review-result";
+import { reviewOverallScore, type ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
 import type { RepairDetail, RepairIssueType, RepairResult, RepairSummary } from "@/types/repair";
 import {
@@ -649,7 +649,7 @@ function attemptSummaryFromDisk(
     attempt_number: n,
     accepted: typeof meta?.accepted === "boolean" ? meta.accepted : false,
     retry_reason: reasonOf(meta?.retry_reason),
-    review_score: review ? review.score : intOf(meta?.review_score),
+    review_score: review ? reviewOverallScore(review) : intOf(meta?.review_score),
     validation_passed: validation ? validation.passed : null,
     repair_count: repairs.length,
     repairs,

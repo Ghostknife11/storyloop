@@ -14,7 +14,7 @@
  */
 
 import type { ValidationResult } from "@/types/validation-result";
-import type { ReviewResult } from "@/types/review-result";
+import { reviewOverallScore, type ReviewResult } from "@/types/review-result";
 
 /** §3 RetryPolicy：max_attempts 含首次生成在内（§3/§71）。 */
 export interface RetryPolicy {
@@ -192,7 +192,9 @@ function qualityOf(input: RetryDecisionInput, policy: RetryPolicy): RetryDecisio
   if (input.reviewer_error) return ACCEPT;
 
   // §11.3 / §13 只有一个总分阈值，没有多维质量门禁。
-  if (input.review && input.review.score < policy.min_review_score) {
+  // v1.3.0：有维度时门槛比的是四维均分（与 overall_score、UI 显示同一个口径），
+  // 不是任何一个单独维度；也没有按维度分别设阈值。
+  if (input.review && reviewOverallScore(input.review) < policy.min_review_score) {
     return retry("review_score_below_threshold");
   }
 

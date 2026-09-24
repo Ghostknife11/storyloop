@@ -1,4 +1,4 @@
-import type { ReviewResult } from "@/types/review-result";
+import { reviewOverallScore, type ReviewResult } from "@/types/review-result";
 
 /**
  * §32 分数展示：只显示「74 / 100」。
@@ -30,7 +30,8 @@ export function reviewPanelState(input: {
   if (input.review) {
     return {
       kind: "ready",
-      scoreText: formatScore(input.review.score),
+      // v1.3.0 §18：有维度时整体分取四维均分，和 Quality 面板、重试门槛同一个口径。
+      scoreText: formatScore(reviewOverallScore(input.review)),
       summary: input.review.summary,
       strengths: input.review.strengths,
       problems: input.review.problems,

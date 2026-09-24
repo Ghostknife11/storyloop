@@ -1,6 +1,6 @@
 import type { StoryConfig } from "@/types/story-config";
 import type { BeatPlan } from "@/types/beat-plan";
-import type { ReviewResult, ReviewStatus } from "@/types/review-result";
+import { reviewOverallScore, type ReviewResult, type ReviewStatus } from "@/types/review-result";
 import type { ValidationResult, ValidationStatus } from "@/types/validation-result";
 import type { RunContext, RunStatus } from "@/core/run-context";
 import { createRunContext, transitionStage, failRun } from "@/core/run-context";
@@ -447,7 +447,7 @@ export class GenerationPipeline {
       attempt_number: attemptNumber,
       accepted,
       retry_reason: decision.reason,
-      review_score: check.review ? check.review.score : null,
+      review_score: check.review ? reviewOverallScore(check.review) : null,
       validation_passed: check.validation ? check.validation.passed : null,
       validation_status: check.validation_status,
       review_status: check.review_status,
@@ -649,7 +649,7 @@ export class GenerationPipeline {
 
       const repairNumber = repairs.length + 1;
       const beforeValidation = check.validation;
-      const beforeScore = check.review ? check.review.score : null;
+      const beforeScore = check.review ? reviewOverallScore(check.review) : null;
 
       // §30：初始正文只在第一次修订前保存；attempt 根目录的 story.md 始终是最新版。
       if (repairs.length === 0) {
@@ -714,7 +714,7 @@ export class GenerationPipeline {
         before_validation: beforeValidation,
         after_validation: after.validation,
         before_review_score: beforeScore,
-        after_review_score: after.review ? after.review.score : null,
+        after_review_score: after.review ? reviewOverallScore(after.review) : null,
         success,
       });
 
@@ -728,7 +728,7 @@ export class GenerationPipeline {
         issue_type: target.issue_type,
         success,
         before_review_score: beforeScore,
-        after_review_score: after.review ? after.review.score : null,
+        after_review_score: after.review ? reviewOverallScore(after.review) : null,
         before_validation_passed: beforeValidation ? beforeValidation.passed : null,
         after_validation_passed: after.validation ? after.validation.passed : null,
       });
@@ -772,7 +772,7 @@ export class GenerationPipeline {
     if (patch.validation_error) meta.validation_error = patch.validation_error;
     if (patch.review_status) meta.review_status = patch.review_status;
     if (patch.review_error) meta.review_error = patch.review_error;
-    if (patch.review) meta.review_score = patch.review.score;
+    if (patch.review) meta.review_score = reviewOverallScore(patch.review);
     if (patch.quality) {
       // §28/§29：不复用 quality_status（它已经是 accepted / exhausted），
       // 统一质量层的状态另起 quality_assembly_status 这个名字。
