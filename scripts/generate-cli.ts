@@ -34,10 +34,9 @@ import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseStoryConfig } from "@/lib/config-io";
 import { parseBeatPlan } from "@/lib/beat-parser";
-import { BeatPlanner } from "@/lib/beat-planner";
 import { clientFromEnv } from "@/lib/llm";
 import {
-  startRun, startRunFromPlan, reviewStory, validateStory, repairStory, type RunOk,
+  planStory, startRun, startRunFromPlan, reviewStory, validateStory, repairStory, type RunOk,
 } from "@/lib/generate-service";
 import { ArtifactStore } from "@/storage/artifact-store";
 import { REPAIR_ISSUE_TYPES, validateRepairRecord, type RepairRecord } from "@/types/repair";
@@ -45,6 +44,7 @@ import { errorMessageOf } from "@/lib/api-error";
 import { projectVersion } from "@/lib/version";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
+import type { BeatPlan } from "@/types/beat-plan";
 import type { RepairResult } from "@/types/repair";
 import 'dotenv/config';
 
@@ -84,7 +84,7 @@ const RUN_USAGE = [
   "  --config <story.json>             必填：故事配置（StoryConfig）",
   "  --beats <beats.json>              可选：手动模式，用编辑过的 BeatPlan 直接生成",
   "  --model <M>                       可选：覆盖模型名（API Key 只来自服务端 LLM_API_KEY）",
-  "  --base-url <url>                  可选：覆盖 LLM_BASE_URL",
+  "  --base-url <url>                  可选：覆盖 LLM_BASE_URL（本机受信配置，不查公网地址限制）",
   "  --temperature <T>                 可选：温度，缺省用服务端配置",
   "  --max-attempts <1..5>             可选：最多几次生成尝试（含首次），缺省 2",
   "  --min-score <0..100>              可选：审阅分数下限，低于就重试，缺省 70",
@@ -102,7 +102,7 @@ const PLAN_USAGE = [
   "  --config <story.json>   必填：故事配置（StoryConfig）",
   "  --out <beats.json>      可选：BeatPlan 输出路径，缺省 plan_<时间戳>.beats.json",
   "  --model <M>             可选：覆盖模型名",
-  "  --base-url <url>        可选：覆盖 LLM_BASE_URL",
+  "  --base-url <url>        可选：覆盖 LLM_BASE_URL（本机受信配置，不查公网地址限制）",
   "  --temperature <T>       可选：温度，缺省用服务端配置",
   "",
   "  退出码：0 正常结束；1 运行时失败；2 参数或配置不合法。",
@@ -115,7 +115,7 @@ const REVIEW_USAGE = [
   "  --config <story.json>   必填：故事配置（StoryConfig）",
   "  --story <story.md>      必填：要审阅的正文（putStory 写的「# 标题 / 正文」格式）",
   "  --model <M>             可选：覆盖模型名",
-  "  --base-url <url>        可选：覆盖 LLM_BASE_URL",
+  "  --base-url <url>        可选：覆盖 LLM_BASE_URL（本机受信配置，不查公网地址限制）",
   "  --temperature <T>       可选：温度，缺省用服务端配置",
   "",
   "  退出码：0 审阅跑完（低分也是 0）；1 运行时失败；2 参数或配置不合法。",
@@ -145,7 +145,7 @@ const REPAIR_USAGE = [
   "  --issue-message <text>      必填：要修的问题原文（Validation issue 或 Reviewer problem）",
   "  --out <story.md>            可选：把修订后的正文写到文件（缺省只打到标准输出）",
   "  --model <M>                 可选：覆盖模型名",
-  "  --base-url <url>            可选：覆盖 LLM_BASE_URL",
+  "  --base-url <url>            可选：覆盖 LLM_BASE_URL（本机受信配置，不查公网地址限制）",
   "  --temperature <T>           可选：温度，缺省用服务端配置",
   "",
   "  只修订正文，不改 StoryConfig / BeatPlan，也不决定是否重试。",
@@ -441,6 +441,22 @@ function runtimeOf(args: ParsedArgs) {
 }
 
 /**
+ * §26/§71 CLI 对 baseUrl 的信任级与服务端 LLM_BASE_URL 相同：能跑这条命令的人本来就读得到
+ * 本机 .env，把 --base-url 塞进请求体只会让它撞上「只允许公网地址」那道关卡，
+ * 结果是 CLI 再也连不上本地假模型，而安全性一点没变（换成 LLM_BASE_URL 照样能指）。
+ * 所以请求体只带非敏感的 model / temperature，地址交给下面那个注入客户端。
+ */
+function bodyRuntime(args: ParsedArgs) {
+  const runtime = runtimeOf(args);
+  return { model: runtime.model, temperature: runtime.temperature };
+}
+
+/** 用 CLI 的 --model / --base-url / --temperature 构建客户端，作为受信配置注入服务层。 */
+function cliClient(args: ParsedArgs) {
+  return clientFromEnv(runtimeOf(args));
+}
+
+/**
  * 读并校验 StoryConfig：读不了 / 校验不过都是退出码 2（配置问题，不是运行时问题）。
  * parseStoryConfig 内部就是 JSON.parse + validateStoryConfig，异常文本已经是面向用户的。
  */
@@ -546,7 +562,10 @@ async function commandReview(args: ParsedArgs, io: CliIo): Promise<number> {
   if (story === null) return EXIT_USAGE;
 
   io.out("[cli] 审阅正文……");
-  const { status, json } = await reviewStory({ config, story, ...runtimeOf(args) });
+  const { status, json } = await reviewStory(
+    { config, story, ...bodyRuntime(args) },
+    { llm: cliClient(args) },
+  );
   if (status !== 200) {
     io.err(`失败：${errorMessageOf(json)}`);
     return EXIT_RUNTIME;
@@ -578,14 +597,17 @@ async function commandRepair(args: ParsedArgs, io: CliIo): Promise<number> {
   if (!plan) return EXIT_USAGE;
 
   io.out(`[cli] 定点修订（${issueType}）……`);
-  const { status, json } = await repairStory({
-    config,
-    beat_plan: plan,
-    story,
-    issue_type: issueType,
-    issue_message: issueMessage,
-    ...runtimeOf(args),
-  });
+  const { status, json } = await repairStory(
+    {
+      config,
+      beat_plan: plan,
+      story,
+      issue_type: issueType,
+      issue_message: issueMessage,
+      ...bodyRuntime(args),
+    },
+    { llm: cliClient(args) },
+  );
   if (status !== 200) {
     io.err(`失败：${errorMessageOf(json)}`);
     return EXIT_RUNTIME;
@@ -610,11 +632,14 @@ async function commandPlan(args: ParsedArgs, io: CliIo): Promise<number> {
 
   const config = readConfig(configPath, io);
   if (!config) return EXIT_USAGE;
-  const runtime = runtimeOf(args);
 
-  const planner = new BeatPlanner(clientFromEnv(runtime));
   io.out("[cli] 规划剧情骨架……");
-  const plan = await planner.plan(config, runtime.temperature ?? 0.7);
+  const { status, json } = await planStory(config, cliClient(args));
+  if (status !== 200) {
+    io.err(`失败：${errorMessageOf(json)}`);
+    return EXIT_RUNTIME;
+  }
+  const plan = json as BeatPlan;
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
   const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
@@ -635,7 +660,6 @@ async function commandRun(args: ParsedArgs, io: CliIo): Promise<number> {
 
   const config = readConfig(configPath, io);
   if (!config) return EXIT_USAGE;
-  const runtime = runtimeOf(args);
 
   let beatPlan: ReturnType<typeof parseBeatPlan> | undefined;
   const beatsPath = flag(args.flags, "--beats");
@@ -664,13 +688,19 @@ async function commandRun(args: ParsedArgs, io: CliIo): Promise<number> {
 
   const started = Date.now();
   const { status, json } = beatPlan
-    ? await startRunFromPlan({
-      config,
-      beat_plan: beatPlan,
-      ...runtime,
-      ...(policy.policy ? { retry_policy: policy.policy } : {}),
-    })
-    : await startRun({ config, ...runtime, ...(policy.policy ? { retry_policy: policy.policy } : {}) });
+    ? await startRunFromPlan(
+        {
+          config,
+          beat_plan: beatPlan,
+          ...bodyRuntime(args),
+          ...(policy.policy ? { retry_policy: policy.policy } : {}),
+        },
+        { llm: cliClient(args) },
+      )
+    : await startRun(
+        { config, ...bodyRuntime(args), ...(policy.policy ? { retry_policy: policy.policy } : {}) },
+        { llm: cliClient(args) },
+      );
 
   if (status !== 200) {
     // PipelineError 已带 run_id 与失败阶段（§28）
