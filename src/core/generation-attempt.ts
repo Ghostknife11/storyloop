@@ -8,7 +8,7 @@
  */
 
 import type { ValidationResult } from "@/types/validation-result";
-import type { ReviewResult } from "@/types/review-result";
+import { reviewOverallScore, type ReviewResult } from "@/types/review-result";
 import type { RepairRecord, RepairSummary } from "@/types/repair";
 import { repairSummary, validateRepairRecord } from "@/types/repair";
 import { RETRY_REASONS, type RetryReason } from "@/core/retry-policy";
@@ -147,13 +147,15 @@ export function validateGenerationAttempt(raw: unknown): GenerationAttempt {
   };
 }
 
-/** §38 Attempt → AttemptSummary：UI / API 只暴露摘要，不暴露全部正文。 */
+/** §38 Attempt → AttemptSummary：UI / API 只暴露摘要，不暴露全部正文。
+ *  v1.3.0 起 review_score 走 reviewOverallScore——与 RetryPolicy 比的门槛分、
+ *  metadata 记的分、quality.overall_score 显示的分是同一个数（§18）。 */
 export function attemptSummary(attempt: GenerationAttempt): AttemptSummary {
   return {
     attempt_number: attempt.attempt_number,
     accepted: attempt.accepted,
     retry_reason: attempt.retry_reason,
-    review_score: attempt.review ? attempt.review.score : null,
+    review_score: attempt.review ? reviewOverallScore(attempt.review) : null,
     validation_passed: attempt.validation ? attempt.validation.passed : null,
     repair_count: attempt.repairs.length,
     repairs: attempt.repairs.map(repairSummary),

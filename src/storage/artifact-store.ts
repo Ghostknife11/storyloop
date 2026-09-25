@@ -1,11 +1,11 @@
 import { copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync, renameSync, existsSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import type { StoryConfig } from "@/types/story-config";
 import type { BeatPlan } from "@/types/beat-plan";
-import type { ReviewResult } from "@/types/review-result";
-import type { ValidationResult } from "@/types/validation-result";
-import type { QualityResult } from "@/types/quality";
-import type { BeatValidationResult } from "@/types/beat-validation";
+import { reviewResultOf, type ReviewResult } from "@/types/review-result";
+import { validationResultOf, type ValidationResult } from "@/types/validation-result";
+import { qualityResultOf, type QualityResult } from "@/types/quality";
+import { beatValidationResultOf, type BeatValidationResult } from "@/types/beat-validation";
 import { attemptDirectoryName } from "@/core/generation-attempt";
 import {
   repairDirectoryName,
@@ -213,12 +213,12 @@ export class ArtifactStore {
    * 也就是最后一次真正跑过校验 / 审阅的修订目录。修订失败时这两个文件不存在，读回 null。
    */
   readRepairValidation(runId: string, attemptNumber: number, repairNumber: number): ValidationResult | null {
-    return this.readJson(runId, this.repairFile(attemptNumber, repairNumber, "validation.json")) as ValidationResult | null;
+    return validationResultOf(this.readJson(runId, this.repairFile(attemptNumber, repairNumber, "validation.json")));
   }
 
   /** v1.2.1：同 readRepairValidation，取修订后重新审阅的那一份结论。 */
   readRepairReview(runId: string, attemptNumber: number, repairNumber: number): ReviewResult | null {
-    return this.readJson(runId, this.repairFile(attemptNumber, repairNumber, "review.json")) as ReviewResult | null;
+    return reviewResultOf(this.readJson(runId, this.repairFile(attemptNumber, repairNumber, "review.json")));
   }
 
   // ---------------------------------------------------------------------------
@@ -265,12 +265,15 @@ export class ArtifactStore {
     return this.readText(runId, this.attemptFile(attemptNumber, INITIAL_STORY));
   }
 
+  /** §23 Attempt 级产物的读回：repairs 一并读出来，GET 才能给出修复摘要（§40）。
+   *  v1.4.1：磁盘上的结论按 schema 归一化后再返回——文件被手改坏时给 null，
+   *  不让坏数据一路带到响应体里，更不让读接口 500（compatibility §16）。 */
   readAttemptValidation(runId: string, attemptNumber: number): ValidationResult | null {
-    return this.readJson(runId, this.attemptFile(attemptNumber, "validation.json")) as ValidationResult | null;
+    return validationResultOf(this.readJson(runId, this.attemptFile(attemptNumber, "validation.json")));
   }
 
   readAttemptReview(runId: string, attemptNumber: number): ReviewResult | null {
-    return this.readJson(runId, this.attemptFile(attemptNumber, "review.json")) as ReviewResult | null;
+    return reviewResultOf(this.readJson(runId, this.attemptFile(attemptNumber, "review.json")));
   }
 
   readFinalStory(runId: string): string | null {
@@ -278,25 +281,25 @@ export class ArtifactStore {
   }
 
   readFinalValidation(runId: string): ValidationResult | null {
-    return this.readJson(runId, "validation.json") as ValidationResult | null;
+    return validationResultOf(this.readJson(runId, "validation.json"));
   }
 
   readFinalReview(runId: string): ReviewResult | null {
-    return this.readJson(runId, "review.json") as ReviewResult | null;
+    return reviewResultOf(this.readJson(runId, "review.json"));
   }
 
   /** v1.2.0 §26：v1.2.0 之前的 Run 没有这个文件，读到 null 由调用方临时装配。 */
   readFinalQuality(runId: string): QualityResult | null {
-    return this.readJson(runId, "quality.json") as QualityResult | null;
+    return qualityResultOf(this.readJson(runId, "quality.json"));
   }
 
   /** v1.4.0 §26：v1.4.0 之前的 Run 没有这个文件，读到 null 由界面整段隐藏。 */
   readFinalBeatValidation(runId: string): BeatValidationResult | null {
-    return this.readJson(runId, "beat-validation.json") as BeatValidationResult | null;
+    return beatValidationResultOf(this.readJson(runId, "beat-validation.json"));
   }
 
   readAttemptQuality(runId: string, attemptNumber: number): QualityResult | null {
-    return this.readJson(runId, this.attemptFile(attemptNumber, "quality.json")) as QualityResult | null;
+    return qualityResultOf(this.readJson(runId, this.attemptFile(attemptNumber, "quality.json")));
   }
 
   // ---------------------------------------------------------------------------
@@ -313,8 +316,12 @@ export class ArtifactStore {
       const source = join(dir, filename);
       if (!existsSync(source)) continue;
       const target = this.rootFile(runId, filename);
+      // §21/promote 与其它写盘同一套原子语义：先写同目录临时文件再 rename，
+      // 进程中断时Run 根目录不会留下复制了一半的 story.md / review.json
+      const tmpPath = this.tmpPathFor(target);
       try {
-        copyFileSync(source, target);
+        copyFileSync(source, tmpPath);
+        renameSync(tmpPath, target);
       } catch (e) {
         throw new ArtifactWriteError(filename, e);
       }
@@ -366,7 +373,7 @@ export class ArtifactStore {
   private putText(runId: string, filename: string, content: string): string {
     const dir = this.runDir(runId);
     const finalPath = this.resolveInRun(dir, filename);
-    const tmpPath = join(dir, `.${filename.split("/").join("_")}.tmp`);
+    const tmpPath = this.tmpPathFor(finalPath);
     try {
       // §23：attempts/NN 由首次写入惰性创建
       mkdirSync(join(finalPath, ".."), { recursive: true });
@@ -376,6 +383,12 @@ export class ArtifactStore {
       throw new ArtifactWriteError(filename, e);
     }
     return finalPath;
+  }
+
+  /** 临时文件与目标同目录同前缀，只多一个前导点：中断时残留的 `.story.md.tmp`
+   *  落在它自己该在的那一层，不会挤到 Run 根目录里冒充产物。 */
+  private tmpPathFor(finalPath: string): string {
+    return join(join(finalPath, ".."), `.${basename(finalPath)}.tmp`);
   }
 
   private readJson(runId: string, filename: string): Record<string, unknown> | null {

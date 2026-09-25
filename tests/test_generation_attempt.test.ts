@@ -150,4 +150,22 @@ describe("attemptSummary（§24/§38）", () => {
     expect(s.review_score).toBeNull();
     expect(s.validation_passed).toBeNull();
   });
+
+  // v1.4.1：有维度时摘要里的分数必须是四维均分，与 quality.overall_score、
+  // RetryPolicy 比的门槛分、attempt metadata 记的分是同一个数（review-result §18）。
+  it("v1.4.1 有维度时 review_score 取四维均分，而不是 score 原值", () => {
+    const withDimensions: ReviewResult = {
+      ...review,
+      score: 90,
+      dimensions: {
+        coherence: { score: 80, summary: "连贯。" },
+        narrative: { score: 82, summary: "叙事。" },
+        character: { score: 84, summary: "人物。" },
+        causality: { score: 86, summary: "因果。" },
+      },
+    };
+    expect(attemptSummary(attempt({ review: withDimensions })).review_score).toBe(83);
+    // 没有维度时退回整体分，行为不变
+    expect(attemptSummary(attempt({ review })).review_score).toBe(74);
+  });
 });

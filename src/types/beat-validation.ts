@@ -123,3 +123,16 @@ export function validateBeatValidationResult(raw: unknown): BeatValidationResult
   }
   return { passed, issues, summary };
 }
+
+/**
+ * §33 v1.4.1 读回用的宽容版 schema：磁盘上的 beat-validation.json 可能被手改坏。
+ * 读接口的承诺是「不失败，最差 null」（compatibility §16），
+ * 所以这里不抛异常：结构认不出来就当作这次校验没留下结论，界面整段隐藏。
+ */
+export function beatValidationResultOf(raw: unknown): BeatValidationResult | null {
+  try {
+    return validateBeatValidationResult(raw);
+  } catch {
+    return null;
+  }
+}

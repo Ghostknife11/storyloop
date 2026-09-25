@@ -208,6 +208,22 @@ describe("ArtifactStore（§13/§14/§63）", () => {
     expect(files.some((f) => f.endsWith(".tmp"))).toBe(false);
   });
 
+  // v1.4.1：临时文件必须与目标同目录同前缀。旧实现把 attempts/01/story.md 的临时文件
+  // 拉平成 Run 根目录下的 .attempts_01_story.md.tmp——中断时残留物落在错误的那一层，
+  // 会被当成 Run 级产物目录里的杂项。
+  it("v1.4.1 attempt 级临时文件写在 attempt 目录里，不落到 Run 根目录", () => {
+    const { store, root } = withStore();
+    store.createRunDirectory(RUN_ID);
+    const attemptDir = join(runDir(root, RUN_ID), "attempts", "01");
+    store.putAttemptStory(RUN_ID, 1, config.title, "第一次正文");
+    // 把 attempt 目录里的 .story.md.tmp 占成目录，逼这次写入失败（与 validation_api 测试同一招）
+    mkdirSync(join(attemptDir, ".story.md.tmp"), { recursive: true });
+    expect(() => store.putAttemptStory(RUN_ID, 1, config.title, "第二次正文")).toThrow(ArtifactWriteError);
+    // 残留只可能在 attempt 目录里，不会挤到 Run 根目录
+    expect(existsSync(join(attemptDir, ".story.md.tmp"))).toBe(true);
+    expect(readdirSync(runDir(root, RUN_ID)).some((f) => f.endsWith(".tmp"))).toBe(false);
+  });
+
   it("§22 成功 Run 的目录就是 config / beats / story / validation / review / metadata", () => {
     const { store, root } = withStore();
     store.createRunDirectory(RUN_ID);
@@ -296,6 +312,21 @@ describe("ArtifactStore — attempt artifacts（§50/§23/§27/§28）", () => {
     const { store, root } = withStore();
     expect(() => store.promoteAttempt(RUN_ID, 3)).toThrow();
     expect(existsSync(join(runDir(root, RUN_ID), "story.md"))).toBe(false);
+  });
+
+  // v1.4.1：promote 也要走「先写临时文件再 rename」（docs/run-artifacts：所有写盘都是原子操作）。
+  // 旧实现直接 copyFileSync 到目标路径，进程中断会在 Run 根目录留下复制了一半的 review.json。
+  it("v1.4.1 promote 是临时文件 + rename：rename 失败时目标不被半份文件替换", () => {
+    const { store, root } = withStore();
+    store.putAttemptStory(RUN_ID, 1, config.title, "第一次正文");
+    store.putAttemptReview(RUN_ID, 1, review);
+    // 把 Run 根目录的 review.json 占成目录，让 promote 的 rename 必然失败
+    mkdirSync(join(runDir(root, RUN_ID), "review.json"), { recursive: true });
+    expect(() => store.promoteAttempt(RUN_ID, 1)).toThrow(ArtifactWriteError);
+    // 目标位置上没有出现复制了一半的 review.json——旧内容（这里是占位目录）原样留在那里
+    expect(readdirSync(join(runDir(root, RUN_ID), "review.json"))).toEqual([]);
+    // 残留的是文档写明的「同目录同名前导点」临时文件，而不是拍平到别处的名字
+    expect(existsSync(join(runDir(root, RUN_ID), ".review.json.tmp"))).toBe(true);
   });
 
   it("§28 Windows 兼容：promote 用复制实现，目录里没有符号链接 / junction", () => {
@@ -638,5 +669,83 @@ describe("ArtifactStore — §22 UTF-8", () => {
     const bytes = readFileSync(join(runDir(root, RUN_ID), "story.md"));
     expect(bytes[0]).not.toBe(0xef);
     expect(bytes.toString("utf8")).toContain("陈岚");
+  });
+});
+
+// v1.4.1：读回路径的宽容度。磁盘上的结论文件可能被手改坏（半份 JSON、缺维度、
+// 类型不对、整个是数组）。读接口的承诺是「不失败，最差 null」——所以这里
+// 认不出来的文件一律给 null，而不是把坏数据原样抛给调用方或让接口 500。
+describe("ArtifactStore — v1.4.1 读回容错", () => {
+  function withCorrupted(runId: string, filename: string, content: string) {
+    const { store, root } = withStore();
+    store.createRunDirectory(runId);
+    writeFileSync(join(runDir(root, runId), filename), content, "utf8");
+    return { store, root };
+  }
+
+  it("review.json 缺一个维度 → null，不抛异常", () => {
+    const { store } = withCorrupted(
+      RUN_ID,
+      "review.json",
+      JSON.stringify({
+        ...review,
+        dimensions: {
+          coherence: { score: 80, summary: "连贯。" },
+          narrative: { score: 82, summary: "叙事。" },
+          character: { score: 84, summary: "人物。" },
+        },
+      }),
+    );
+    expect(store.readFinalReview(RUN_ID)).toBeNull();
+  });
+
+  it("review.json 是数组 / 半份 JSON → null，不抛异常", () => {
+    expect(withCorrupted(RUN_ID, "review.json", "[1,2,3]").store.readFinalReview(RUN_ID)).toBeNull();
+    expect(withCorrupted(RUN_ID, "review.json", '{"score": 74,').store.readFinalReview(RUN_ID)).toBeNull();
+  });
+
+  it("validation.json 的 code 不在白名单 → null，不抛异常", () => {
+    const { store } = withCorrupted(
+      RUN_ID,
+      "validation.json",
+      JSON.stringify({ passed: false, issues: [{ code: "MADE_UP_RULE", severity: "error", message: "不存在。" }] }),
+    );
+    expect(store.readFinalValidation(RUN_ID)).toBeNull();
+  });
+
+  it("beat-validation.json 结构坏了 → null，不抛异常", () => {
+    const { store } = withCorrupted(RUN_ID, "beat-validation.json", JSON.stringify({ passed: true }));
+    expect(store.readFinalBeatValidation(RUN_ID)).toBeNull();
+  });
+
+  it("quality.json 字段类型不对 → null，不抛异常", () => {
+    const { store } = withCorrupted(
+      RUN_ID,
+      "quality.json",
+      JSON.stringify({ accepted: "yes", overall_score: "80" }),
+    );
+    expect(store.readFinalQuality(RUN_ID)).toBeNull();
+  });
+
+  it("attempt 级的坏文件同样给 null", () => {
+    const { store, root } = withStore();
+    store.createRunDirectory(RUN_ID);
+    store.putAttemptStory(RUN_ID, 1, config.title, "第一次正文");
+    writeFileSync(
+      join(runDir(root, RUN_ID), "attempts", "01", "review.json"),
+      JSON.stringify({ score: 74, summary: "总结。", strengths: ["强"], problems: "不是数组" }),
+      "utf8",
+    );
+    expect(store.readAttemptReview(RUN_ID, 1)).toBeNull();
+    expect(store.readAttemptValidation(RUN_ID, 1)).toBeNull();
+  });
+
+  it("合法文件读回来与写入时逐字一致（容错不改变正常路径）", () => {
+    const { store } = withStore();
+    store.createRunDirectory(RUN_ID);
+    store.putReview(RUN_ID, review);
+    store.putValidation(RUN_ID, failed);
+    expect(store.readFinalReview(RUN_ID)).toEqual(review);
+    expect(store.readFinalValidation(RUN_ID)).toEqual(failed);
   });
 });

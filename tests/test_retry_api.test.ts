@@ -1,4 +1,4 @@
-import { mkdtempSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -313,6 +313,45 @@ describe("GET /api/runs/{run_id}/attempts/{attempt_number}（§39）", () => {
       } as never);
       expect(res.status).toBe(400);
     }
+  });
+});
+
+// v1.4.1：读接口对「磁盘上的结论被手改坏」的承诺是不失败、最差 null
+// （docs/compatibility：读接口不失败）。指 v1.3.0 起有维度的 review.json：
+// 旧实现会把坏文件原样 cast 成 ReviewResult，聚合维度时直接 TypeError → 500。
+describe("v1.4.1 读回容错：坏结论文件不让接口 500", () => {
+  it("attempt 的 review.json 缺一个维度 → 200，review 为 null", async () => {
+    const dir = withTmpDir();
+    const created = await runWith({ config }, [STORY], [passed], [{ ...review, score: 88 }]);
+    const runId = String((created.json as { run_id: string }).run_id);
+    writeFileSync(
+      join(dir, "runs", runId, "attempts", "01", "review.json"),
+      JSON.stringify({ ...review, dimensions: { coherence: { score: 80, summary: "连贯。" } } }),
+      "utf8",
+    );
+
+    const run = await getRun({} as never, { params: Promise.resolve({ run_id: runId }) } as never);
+    expect(run.status).toBe(200);
+    const runBody = await readJson(run);
+    const attempts = runBody.attempts as Array<Record<string, unknown>>;
+    expect(attempts[0].review_score).toBe(88);
+
+    const attempt = await getRunAttempt({} as never, {
+      params: Promise.resolve({ run_id: runId, attempt_number: "1" }),
+    } as never);
+    expect(attempt.status).toBe(200);
+    expect((await readJson(attempt)).review).toBeNull();
+  });
+
+  it("运行根目录的 validation.json 是半份 JSON → 200，validation 为 null", async () => {
+    const dir = withTmpDir();
+    const created = await runWith({ config }, [STORY], [passed], [{ ...review, score: 88 }]);
+    const runId = String((created.json as { run_id: string }).run_id);
+    writeFileSync(join(dir, "runs", runId, "validation.json"), '{"passed": true,', "utf8");
+
+    const run = await getRun({} as never, { params: Promise.resolve({ run_id: runId }) } as never);
+    expect(run.status).toBe(200);
+    expect((await readJson(run)).validation).toBeNull();
   });
 });
 

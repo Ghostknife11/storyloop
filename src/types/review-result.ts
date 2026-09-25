@@ -67,6 +67,20 @@ export function reviewOverallScore(review: ReviewResult): number {
 }
 
 /**
+ * §18 v1.4.1 读回用的宽容版 schema：磁盘上的 review.json 可能被手改坏，
+ * 也可能来自不合法 JSON。读接口的承诺是「不失败，最差 null」（compatibility §16），
+ * 所以这里不抛异常，只回答「这份结论能不能用」，并且只认已知字段——
+ * 认不出的键不进响应，缺字段按解析失败处理，绝不补默认值冒充真实评价。
+ */
+export function reviewResultOf(raw: unknown): ReviewResult | null {
+  try {
+    return validateReviewResult(raw);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * §12 维度 schema 校验：出现就必须四个齐全、各自 0 ~ 100 且带非空短评。
  * 缺维度、多维度（模型自作聪明扩到 35 维）、类型不对，一律按解析失败处理——
  * 不补 0、不挑一个先凑着，因为补出来的数会被当成真实评价参与聚合与展示。

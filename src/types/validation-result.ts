@@ -95,3 +95,16 @@ export function validateValidationResult(raw: unknown): ValidationResult {
   const passed = typeof r.passed === "boolean" ? r.passed : validationPassed(issues);
   return { passed, issues };
 }
+
+/**
+ * §33 v1.4.1 读回用的宽容版 schema：磁盘上的 validation.json 可能被手改坏。
+ * 读接口的承诺是「不失败，最差 null」（compatibility §16），
+ * 所以这里不抛异常：结构认不出来就当作这份结论不存在，由调用方按 failed / null 处理。
+ */
+export function validationResultOf(raw: unknown): ValidationResult | null {
+  try {
+    return validateValidationResult(raw);
+  } catch {
+    return null;
+  }
+}
