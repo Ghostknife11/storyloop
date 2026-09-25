@@ -109,6 +109,17 @@ describe("§29 CLI Help", () => {
     const c = collector();
     expect(await runCli(["-h"], c.io)).toBe(EXIT_OK);
   });
+
+  // v1.4.1：docs/cli.md 写的是「每个命令都支持 --help / -h：用法打到标准输出，退出码 0」。
+  // 旧实现从头扫参数，遇到无法识别的参数就 break，导致 `run --bogus --help` 变成退出码 2。
+  it("v1.4.1 --help 出现在无法识别的参数之后也照样给用法，退出码 0", async () => {
+    const c = collector();
+    expect(await runCli(["run", "--bogus", "--help"], c.io)).toBe(EXIT_OK);
+    expect(c.lines.join("\n")).toContain("--config <story.json>");
+    const d = collector();
+    expect(await runCli(["repair", "--nope", "-h"], d.io)).toBe(EXIT_OK);
+    expect(d.lines.join("\n")).toContain("--issue-type");
+  });
 });
 
 describe("§30 CLI Exit Code — 参数或配置不合法 = 2", () => {
@@ -357,5 +368,86 @@ describe("v1.1.1 CLI 入口的 baseUrl 信任级", () => {
     // 注入客户端前若把关卡打开了，v1.1.0 的 CLI 回归就会出现：plan 拦、run 不拦
     expect((source.match(/clientFromEnv\(/g) ?? []).length).toBe(1);
     expect((source.match(/cliClient\(args\)/g) ?? []).length).toBeGreaterThanOrEqual(5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v1.4.1：--temperature 的真实适用范围。规划与生成跟随它（HTTP 那条路一直如此），
+// 审阅（0.3）与修订（0.5）用的是各自固定的温度，命令行上给了必须明说不生效，
+// 而不是默默收下。全部用 stub 掉的 fetch，绝不打真实付费 API。
+// ---------------------------------------------------------------------------
+
+describe("v1.4.1 --temperature 透传与提示", () => {
+  const realFetch = globalThis.fetch;
+  const realKey = process.env.LLM_API_KEY;
+
+  beforeEach(() => {
+    process.env.LLM_API_KEY = "test-key-not-real";
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    if (realKey === undefined) delete process.env.LLM_API_KEY;
+    else process.env.LLM_API_KEY = realKey;
+  });
+
+  /** 接住 LLM 请求，把请求体记下来，并返回 OpenAI 形状的假响应。 */
+  function stubFetch(content: unknown) {
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as never;
+    return bodies;
+  }
+
+  it("plan 把 --temperature 带进请求体（与 UI 那条路同一口径）", async () => {
+    const { configPath } = writeFiles();
+    const bodies = stubFetch(BEATS);
+    const c = collector();
+    const code = await runCli(["plan", "--config", configPath, "--temperature", "0.42"], c.io);
+    expect(code, c.errors.join("\n")).toBe(EXIT_OK);
+    // 温度一路带到模型调用：旧实现只把 config 当请求体，命令行上的温度被整段丢掉
+    expect(bodies.some((b) => b.temperature === 0.42)).toBe(true);
+  });
+
+  it("review 收到 --temperature 时明确说它不生效，模型调用仍用固定 0.3", async () => {
+    const { configPath, goodPath } = writeFiles();
+    const review = {
+      score: 88,
+      summary: "故事整体完整，主线清楚。",
+      strengths: ["冲突建立迅速"],
+      problems: ["节奏略拖"],
+    };
+    const bodies = stubFetch(review);
+    const c = collector();
+    const code = await runCli(
+      ["review", "--config", configPath, "--story", goodPath, "--temperature", "0.42"],
+      c.io,
+    );
+    expect(code, c.errors.join("\n")).toBe(EXIT_OK);
+    expect(c.lines.join("\n")).toContain("--temperature 0.42 对审阅不生效");
+    expect(bodies.some((b) => b.temperature === 0.3)).toBe(true);
+    expect(bodies.some((b) => b.temperature === 0.42)).toBe(false);
+  });
+
+  it("repair 收到 --temperature 时明确说它不生效，模型调用仍用固定 0.5", async () => {
+    const { configPath, goodPath, beatsPath } = writeFiles();
+    const bodies = stubFetch("修订后的正文。");
+    const r = collector();
+    const code = await runCli(
+      [
+        "repair", "--config", configPath, "--beats", beatsPath, "--story", goodPath,
+        "--issue-type", "ending", "--issue-message", "故事缺少明确结局。", "--temperature", "0.42",
+      ],
+      r.io,
+    );
+    expect(code, r.errors.join("\n")).toBe(EXIT_OK);
+    expect(r.lines.join("\n")).toContain("--temperature 0.42 对定点修订不生效");
+    expect(bodies.some((b) => b.temperature === 0.5)).toBe(true);
+    expect(bodies.some((b) => b.temperature === 0.42)).toBe(false);
   });
 });

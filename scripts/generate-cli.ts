@@ -116,8 +116,9 @@ const REVIEW_USAGE = [
   "  --story <story.md>      必填：要审阅的正文（putStory 写的「# 标题 / 正文」格式）",
   "  --model <M>             可选：覆盖模型名",
   "  --base-url <url>        可选：覆盖 LLM_BASE_URL（本机受信配置，不查公网地址限制）",
-  "  --temperature <T>       可选：温度，缺省用服务端配置",
+  "  --temperature <T>       可选：温度（审阅用固定温度，给了会明确忽略）",
   "",
+  "  审阅用的温度固定为 0.3，与生成温度相互独立：--temperature 对 review 不生效。",
   "  退出码：0 审阅跑完（低分也是 0）；1 运行时失败；2 参数或配置不合法。",
 ].join("\n");
 
@@ -146,8 +147,9 @@ const REPAIR_USAGE = [
   "  --out <story.md>            可选：把修订后的正文写到文件（缺省只打到标准输出）",
   "  --model <M>                 可选：覆盖模型名",
   "  --base-url <url>            可选：覆盖 LLM_BASE_URL（本机受信配置，不查公网地址限制）",
-  "  --temperature <T>           可选：温度，缺省用服务端配置",
+  "  --temperature <T>           可选：温度（修订用固定温度，给了会明确忽略）",
   "",
+  "  修订用的温度固定为 0.5，与生成温度相互独立：--temperature 对 repair 不生效。",
   "  只修订正文，不改 StoryConfig / BeatPlan，也不决定是否重试。",
   "  退出码：0 修订跑完（success=false 也是 0）；1 运行时失败；2 参数或配置不合法。",
 ].join("\n");
@@ -213,15 +215,15 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const rest = command ? argv.slice(1) : argv;
   const flags: Record<string, string> = {};
   const switches = new Set<string>();
-  let help = false;
   let unknown: string | undefined;
 
-  for (let i = 0; i < rest.length; i++) {
+  // §29：--help 出现在参数串任何位置都算请求用法（cli.md：每个命令都支持 --help / -h），
+  // 所以先扫一遍它，再让下面的循环因为无法识别的参数提前 break。
+  const help = rest.some((token) => token === "--help" || token === "-h");
+
+  for (let i = 0; i < rest.length && unknown === undefined; i++) {
     const token = rest[i];
-    if (token === "--help" || token === "-h") {
-      help = true;
-      continue;
-    }
+    if (token === "--help" || token === "-h") continue;
     if ((BOOLEAN_FLAGS as readonly string[]).includes(token)) {
       switches.add(token);
       continue;
@@ -237,7 +239,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
       continue;
     }
     unknown = token;
-    break;
   }
   return { command, help, flags, switches, unknown };
 }
@@ -457,6 +458,17 @@ function cliClient(args: ParsedArgs) {
 }
 
 /**
+ * v1.4.1：审阅（0.3）/ 修订（0.5）用的是各自固定的温度，与生成温度相互独立，
+ * 请求体里带的 temperature 服务端不读。命令行上收了却不吭声会让人以为生效了，
+ * 所以这里明确打一行说明已忽略，而不是默默丢掉的。
+ */
+function noteIgnoredTemperature(args: ParsedArgs, what: string, io: CliIo): void {
+  const temperature = runtimeOf(args).temperature;
+  if (temperature === undefined) return;
+  io.out(`[cli] 注意：--temperature ${temperature} 对${what}不生效（温度固定，与生成温度相互独立），已忽略`);
+}
+
+/**
  * 读并校验 StoryConfig：读不了 / 校验不过都是退出码 2（配置问题，不是运行时问题）。
  * parseStoryConfig 内部就是 JSON.parse + validateStoryConfig，异常文本已经是面向用户的。
  */
@@ -562,6 +574,7 @@ async function commandReview(args: ParsedArgs, io: CliIo): Promise<number> {
   if (story === null) return EXIT_USAGE;
 
   io.out("[cli] 审阅正文……");
+  noteIgnoredTemperature(args, "审阅", io);
   const { status, json } = await reviewStory(
     { config, story, ...bodyRuntime(args) },
     { llm: cliClient(args) },
@@ -597,6 +610,7 @@ async function commandRepair(args: ParsedArgs, io: CliIo): Promise<number> {
   if (!plan) return EXIT_USAGE;
 
   io.out(`[cli] 定点修订（${issueType}）……`);
+  noteIgnoredTemperature(args, "定点修订", io);
   const { status, json } = await repairStory(
     {
       config,
@@ -634,7 +648,9 @@ async function commandPlan(args: ParsedArgs, io: CliIo): Promise<number> {
   if (!config) return EXIT_USAGE;
 
   io.out("[cli] 规划剧情骨架……");
-  const { status, json } = await planStory(config, cliClient(args));
+  // §26：--model / --temperature 与其它子命令一样要透传进请求体，
+  // 否则命令行上给了温度，规划却照旧用 0.7（UI 那条路一直是带的）。
+  const { status, json } = await planStory({ ...config, ...bodyRuntime(args) }, cliClient(args));
   if (status !== 200) {
     io.err(`失败：${errorMessageOf(json)}`);
     return EXIT_RUNTIME;

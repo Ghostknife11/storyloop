@@ -79,6 +79,8 @@ storygen plan --config <story.json> [--out <beats.json>] [--model M] [--temperat
 | `--config` | 是 | StoryConfig JSON 文件 |
 | `--out` | 否 | BeatPlan 输出路径，缺省 `plan_<时间戳>.beats.json` |
 
+`--temperature` 与 HTTP `/api/plan` 同一口径：规划用的就是请求体里这个温度。
+
 ### review
 
 ```text
@@ -87,6 +89,9 @@ storygen review --config <story.json> --story <story.md> [--model M] [--temperat
 
 只审阅，不重试、不写盘。`--story` 是 `putStory` 写的「`# 标题` + 空行 + 正文」格式，
 CLI 会去掉 H1 标题行再送审。
+
+审阅用的温度**固定为 0.3**，与生成温度相互独立：`--temperature` 对 review 不生效，
+给了会在开头明确打一行「已忽略」，不会静默收下。
 
 ### validate
 
@@ -110,11 +115,16 @@ storygen repair --config <story.json> --beats <beats.json> --story <story.md>
 | `--issue-message` | 是 | 要修的问题原文 |
 | `--out` | 否 | 把修订后的正文写文件；缺省只打到标准输出 |
 
+修订用的温度**固定为 0.5**，与生成温度相互独立：`--temperature` 对 repair 不生效，
+给了会在开头明确打一行「已忽略」。
+
 ## 参数解析规则
 
 - 只认 `--flag value` 与布尔开关两种形式；未知 flag 一律算参数错误（退出码 2）
 - 数值型 flag 解析不出有限数就是参数错误（例如 `--temperature abc`），不会静默用缺省值
 - 布尔开关：`--help`、`-h`、`--enable-repair`、`--no-repair`、`--no-retry-on-validation-failure`
+- `--help` / `-h` 出现在参数串任何位置都算请求用法：用法打到标准输出、退出码 0，
+  即便前面还有无法识别的参数（v1.4.1 修正：旧实现会被那个参数挡住，变成退出码 2）
 
 ## 配置来源
 
