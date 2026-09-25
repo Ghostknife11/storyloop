@@ -1,4 +1,4 @@
-# 示例 Run（v1.5.0 布局）
+# 示例 Run（v1.6.0 布局）
 
 这个目录是一次**真实 Pipeline 运行**的产物，由测试用 FakeLLM 重新生成后写死时间戳，
 用来展示当前版本的 Run 产物布局，不含任何真实凭据或个人数据。
@@ -30,3 +30,11 @@ v1.5.0 起多了两份 `commercial-review.json`（Run 根目录与 `attempts/01/
 它与 `review.json` / `quality.json` 是**两套独立评价**，不互换、不合并，也不驱动重试或
 修订——71.5 分不会让这次 Run 多跑一次。修订目录 `attempts/01/repairs/01/` 同样
 不写 `commercial-review.json`：attempt 级那份已经是修订后正文的结论。
+
+v1.6.0 起在 Run 根目录多一份 `run-manifest.json`：这次 Run 的**出身清单**——跑在哪个
+版本上、用了哪个模型、哪六份提示词（各带一个版本号与原文 SHA-256）、六个阶段各自的温度、
+重试策略、每次 Attempt 入选与否，以及每个产物文件的路径与内容摘要。它与 `metadata.json`
+并排放，互不替代：metadata 记「这次发生了什么」，清单记「这次是拿什么跑出来的」。
+清单里没有 `metadata.json` 与它自己——它记不了自己的摘要。摘要都是照磁盘上那份文件现算的，
+所以根目录这份 `story.md` 与 `attempts/01/story.md` 的 `sha256` 逐字相同（promote 过来的）。
+`baseUrl` 本身不写，只写来源类别。字段含义见 [docs/run-artifacts.md](../../docs/run-artifacts.md)。

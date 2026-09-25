@@ -221,6 +221,39 @@ npm install
 git checkout 1.3.0
 ```
 
+## 从 1.5.2 升级到 1.6.0
+
+**没有任何需要改代码的地方。** 1.6.0 是纯增量：没有删字段、没有改字段名、没有改路由与错误码，
+产物布局、CLI、`quality.json` 装配口径与 1.5.2 逐字一致。要做的是零件，但有一次「读得到
+更多东西」的新行为：每次 Run 多一份 `run-manifest.json`，两个 Run 类响应各多一个可选字段
+`manifest`。
+
+1. **Run 根目录多一个文件**：`run-manifest.json`。运行级固定文件数从九个变成十个；
+   `attempts/` 与 `repairs/` 下一份都没多。如果你的工具按「运行级正好九个文件」硬编码，
+   现在要按十个算——更稳的做法是忽略不认识的文件名，而不是数个数。
+2. **两个响应各多一个可选字段**：`POST /api/runs` 与 `GET /api/runs/<run_id>` 都有
+   `manifest`，值为那份清单本身；旧 Run、或者写清单这一步自身失败时是 `null`。
+   解析响应时请把它当可选字段处理，不要假设它一定存在。
+3. **v1.6.0 之前生成的 Run 没有清单**：读接口返回 `null`，UI 的 Run Provenance 面板整个
+   隐藏，磁盘上**不会**被补写——与 1.2.0 之前没有 `quality.json`、1.5.0 之前没有
+   `commercial-review.json` 同一套规则。
+4. **清单里没有凭据**：模型条目只含模型名、provider 与 baseUrl 分类，baseUrl 原文、
+   API Key、Authorization 头都不落盘；`topP` / `maxTokens` 这类客户端没有下发的参数也不写。
+   如果你此前自己想办法记录「这次用的是什么模型」，从这一版起可以从产物里直接读。
+
+```bash
+git fetch && git checkout 1.6.0     # tag 不带 v 前缀
+npm install
+```
+
+回滚到 1.5.2 的代价为零：多出来的 `run-manifest.json` 与 `manifest` 字段被旧版本忽略，
+旧版本不会因为多一个文件而读不了 Run；只是重新变成「看不出这次用的是什么版本与参数」。
+新增的 `tests/test_run_manifest.test.ts` 在回滚后会红，这正是它要挡住的事。
+
+```bash
+git checkout 1.5.2
+```
+
 ## 从 1.5.1 升级到 1.5.2
 
 **没有任何需要改代码的地方。** 1.5.2 是一次界面修订：没有新能力、没有新文件、新字段或新路由，

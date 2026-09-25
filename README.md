@@ -267,6 +267,7 @@ runs/
     ├── commercial-review.json  # 被选中那一次 Attempt 的商业可读性结论（v1.5.0 新增，跑过这一步才有）
     ├── quality.json     # 被选中那一次 Attempt 的统一质量快照（v1.2.0 新增）
     ├── metadata.json    # 运行级 metadata
+    ├── run-manifest.json  # 这次 Run 的出身清单（v1.6.0 新增，只在运行级一份）
     └── attempts/
         ├── 01/
         │   ├── story.md          # 该次尝试的正文（发生过修订时为修订后的版本）
@@ -316,6 +317,19 @@ runs/
 只有连正文都拿不到时，Run 才以 `generating` 阶段失败结束。
 
 完整的字段表与「什么情况下缺文件」见 [docs/run-artifacts.md](docs/run-artifacts.md)。
+
+### Run 出身清单（v1.6.0）
+
+运行级除了 `metadata.json` 还多了 `run-manifest.json`，回答「这份故事是拿什么跑出来的」：
+用的是哪个代码版本与 commit、哪个模型、各阶段 temperature、六个提示词各自的版本与内容摘要、
+每次 Attempt 的结局（是否入选 / 为什么重试 / 修了几轮），以及这批产物的 SHA-256 清单。
+它自带 `schemaVersion`、用 camelCase，与 snake_case 的 metadata 契约物理隔离；不顶替
+`metadata.json`，也不改它的任何一个字段。清单只记元数据，不搬运正文与结论文字；模型条目只留
+模型名与 provider 分类，**baseUrl 原文不落盘**；客户端没有下发的 `topP` / `maxTokens` 也不写。
+
+API 侧 `POST /api/runs` 与 `GET /api/runs/<run_id>` 各多一个 `manifest` 字段，就是这份清单。
+v1.6.0 之前生成的 Run 没有它，读接口返回 `null`，界面面板整个隐藏。清单只为一次 Run 自证
+出身：不做跨 Run 对比、不跑基准、不统计成功率（那些能力保留给后续版本）。
 
 ## RetryPolicy
 

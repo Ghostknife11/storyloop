@@ -47,6 +47,7 @@ Git tag 不带 `v` 前缀（`0.9.1`、`1.0.0`）；GitHub Release 标题带 `v` 
 | BeatValidationResult（v1.4.0） | 追加可选字段；新文件 `beat-validation.json`，`issues[].code` 可以新增取值 |
 | Run 产物 | metadata 可以新增字段；文件名与目录层级不变 |
 | QualityResult（v1.2.0） | 追加可选字段；`quality.json` 是新增文件，不影响既有文件 |
+| RunManifest（v1.6.0） | 追加可选字段；靠自带 `schemaVersion` 走自己的演进节奏，与 snake_case 的 metadata 契约不混用 |
 | HTTP API | 追加路由；既存路由只加字段 |
 | CLI | 追加命令与参数；既存参数语义不变 |
 | 环境变量 | 追加变量；既有变量含义不变 |
@@ -255,6 +256,31 @@ attempt 级的四类文件上，run 级文件不带前缀。另外 `--help` 出�
 以上全部只改「读到的内容」与「写盘方式」：没有新增字段、没有删除字段、没有改路由、
 没有改错误码、没有新文件。1.4.0 及以前生成的全部 Run 读出来逐字一致，唯一例外是
 「模型给了维度」的 attempt 摘要分数——而那正是 v1.3.0 文档承诺的口径。
+
+## v1.6.0 的 Run 出身清单（纯 additive）
+
+v1.6.0 新增 `run-manifest.json` 与两个响应字段 `manifest`，没有删任何字段、没有改字段名、
+没有改路由与错误码。三层 metadata 契约、`quality.json` 装配口径、CLI 与既有响应字段逐字未动。
+
+- **新文件只在运行级一份。** `run-manifest.json` 与 `metadata.json` 并列写在 Run 根目录；
+  `attempts/` 与 `repairs/` 下都没有它。运行级固定文件数从九个变十个，两层子目录的文件数不变。
+- **自带 `schemaVersion`，字段是 camelCase。** 与 v1.0.0 冻结的 snake_case metadata 契约
+  物理隔离，因此扩展清单不需要解释「为什么改了一个既有字段的含义」。
+- **清单不搬运内容。** 只记元数据：代码版本与 commit、模型名 / provider / baseUrl 分类、
+  各阶段 temperature 与 RetryPolicy 快照、六个提示词的版本与内容摘要、每次 Attempt 的结局、
+  登记产物的 SHA-256。正文、审阅结论的任何文字都不进清单。
+- **凭据不进清单。** baseUrl 原文不落盘（只留「服务器配置 / 请求公有覆盖」这个分类）；
+  `topP` / `maxTokens` 这类本次客户端没有下发的参数一律不写；`project.commit` 只在环境真的
+  给出 git SHA 时才有，从不为了填满字段去跑 git。
+- **写清单失败不让 Run 失败。** 这一步抛异常时只记一行 warning 并把 `manifest` 置为 `null`，
+  故事、校验、审阅、质量一个结论都不受影响。
+- **读不到就是 `null`。** v1.6.0 之前生成的 Run 没有这个文件，`manifest` 返回 `null`、
+  Run Provenance 面板整个隐藏，磁盘上不会被补写——与 `quality.json`（1.2.0）与
+  `commercial-review.json`（1.5.0）同一套规则。
+
+它明确**不是**实验框架：不做跨 Run 对比、不跑基准、不统计成功率、不做自适应调参
+（`BenchmarkRunner` / `AdaptiveGeneration` / `SelfOptimization` 一类能力保留给后续版本）。
+清单只为一次 Run 自证出身。
 
 ## v1.5.2 的界面修订（只换样式类名，零数据影响）
 

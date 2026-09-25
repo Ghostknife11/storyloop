@@ -13,6 +13,75 @@ All notable changes to Storyloop.
 
 ---
 
+## [1.6.0] —— 2026-09-25
+
+v1.6.0 回答一个此前只能靠翻代码才能回答的问题：**这份故事是拿什么跑出来的？** 每次 Run 现在
+除了 `metadata.json` 还多写一份 `run-manifest.json`——用哪个代码版本与 commit、哪个模型、
+各阶段 temperature、六个提示词各自的版本与内容摘要、每次 Attempt 的结局，以及这批产物的
+SHA-256 清单。它落在 Run 根目录，**只有一份**，`attempts/` 与 `repairs/` 下都没有。
+
+它是新增文件，不顶替也不改 `metadata.json` 的任何一个字段：三层 metadata 契约、`quality.json`
+装配口径、产物布局、路由、错误码、CLI 与已有响应字段全部逐字未动。清单自带 `schemaVersion`、
+字段用 camelCase，与 v1.0.0 冻结的 snake_case metadata 契约物理隔离——将来扩展清单不需要
+碰任何既有字段的语义。
+
+这不是实验框架：不做跨 Run 对比、不跑基准、不统计成功率、不做自适应调参。清单只为一次 Run
+自证出身，读接口把它原样挂在 `manifest` 字段上，界面折成一个面板。
+
+### Added
+
+- **`run-manifest.json`（运行级新增的第十个固定文件）**：一次 Run 的出身清单，与
+  `metadata.json` 并列写在 Run 根目录。字段为 `schemaVersion` / `runId` / `project`（`version` + 可选
+  `commit`）/ `models` / `prompts` / `parameters` / `attempts` / `artifacts`。写盘走
+  `ArtifactStore.putManifest`，与其它产物同一套「先写 `.名字.tmp` 再 rename」的原子写入
+- **`RunManifest` 模型与校验**（`src/types/run-manifest.ts`）：`schemaVersion` 恒为 `"1"`；
+  `validateRunManifest` 对坏数据抛 `RunManifestError`，`runManifestOf` 返回 `null` 不抛——
+  与 v1.0.0 起其它产物校验同一套「读坏 ≠ 500」的规则
+- **`prompts` 小节**（`src/lib/tracking/prompt-registry.ts`）：六个提示词文件
+  （`planner` / `generator` / `beat-validator` / `reviewer` / `commercial-reviewer` / `repairer`）
+  各自的 `version` 与内容 SHA-256 `digest`。提示词在仓库里，所以摘要可复算；脏读取一律返回
+  `null`，清单照样能写
+- **`artifacts` 小节**（`src/lib/tracking/manifest-builder.ts`）：逐个登记真实存在的产物
+  并回读文件算 SHA-256，**不存在的文件不写占位行**。清单自己不出现在自己登记的条目里
+  （记不了自己的摘要），也不登记三层 `metadata.json`——那归 metadata 契约管
+- **`models` 小节**：只记模型名、provider 与 baseUrl 分类（`server-configured` /
+  `request-public-override`）。**baseUrl 原文不落盘**，也没有 key、没有 Authorization 头
+- **写清单失败不让 Run 失败**（`src/core/pipeline.ts`）：`buildRunManifest` / `putManifest`
+  抛异常时只 `logger.warning` 记一行并把 `manifest` 置为 `null`——故事、校验、审阅、质量
+  一个结论都不受影响。这是「多一步 provenance」不该反过来决定 Run 成败的意思
+- **两个 API 字段**：`POST /api/runs` 的 `RunOk.manifest` 与
+  `GET /api/runs/<run_id>` 的 `RunDetail.manifest`，都是可选，缺清单时是 `null`
+- **`Run Provenance` 面板**（`src/components/manifest-panel.tsx`）：折叠在 Run 结果下方，
+  列 Project 版本 / commit、模型、六个提示词的版本与截断摘要、六项 temperature、
+  `RetryPolicy` 快照、每次 Attempt 的结局与所在文件。没有清单的 Run 面板整个隐藏
+- `examples/example_run/run-manifest.json`：样例 Run 的清单，17 个产物条目带真实
+  SHA-256；根目录 `story.md` 与 `attempts/01/story.md` 摘要相同（promote 不变式的又一例证）
+
+### Changed
+
+- `examples/example_run/metadata.json` 的 `project_version` 跟进到 `1.6.0`（与 1.4.0 →
+  1.5.0 加 `commercial-review.json` 时同一套做法）
+- 样例 Run 的 `README.md` 说明 v1.6.0 布局，新增一节讲 `run-manifest.json`
+
+### Security
+
+- **清单里不写凭据**：模型条目只有模型名 / provider / baseUrl 分类，没有 baseUrl 原文、
+  没有 API Key、没有 Authorization 头；`topP` / `maxTokens` 这类本次没有下发的参数一律不写
+  （`LLMClient.generate` 只发 `{model, messages, temperature}`）
+- `project.commit` 只在环境真的给出 git SHA 时才有，**从不为了填满字段去跑 git**
+
+### Compatibility
+
+- 1.5.2 → 1.6.0 无破坏性变更，也不需要迁移：没有删字段、没有改字段名、没有改路由与错误码。
+  v1.6.0 之前生成的 Run 没有 `run-manifest.json`，读接口的 `manifest` 返回 `null`，面板隐藏，
+  磁盘上不会被补写
+- 运行级固定文件数从九个变成十个（多的是 `run-manifest.json`）；`attempts/` 与 `repairs/`
+  一层文件都没多，老 Run 的每层文件数与 1.5.2 逐字一致
+- 明细见 [docs/upgrade.md](./docs/upgrade.md) 的「从 1.5.2 升级到 1.6.0」与
+  [docs/compatibility.md](./docs/compatibility.md) 的「v1.6.0 的清单」
+
+---
+
 ## [1.4.0] —— 2026-09-25
 
 v1.4.0 在写正文之前加了一道 **BeatPlan 结构校验**：剧情骨架生成后先过一次结构检查——

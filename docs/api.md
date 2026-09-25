@@ -3,6 +3,8 @@
 > 本文件是 v1.0.0 冻结的 HTTP API：路径、方法、请求体、响应字段、错误码与状态码。
 > 1.x 版本不得删路由、改字段名、改状态码含义；扩展只能是新增路由或新增可选字段。
 >
+> v1.6.0 只在两个 Run 类响应上各追加一个可选字段 `manifest`，路由、错误码与既有字段逐字未动。
+>
 > 契约测试：`tests/test_contract_api.test.ts`（同时守护路由清单本身）
 
 ## 通用约定
@@ -127,6 +129,7 @@
 | `commercial_review` | CommercialReviewResult \| null | v1.5.0 新增：商业可读性审阅结论；没跑到这一步或自身失败时是 `null` |
 | `commercial_review_status` | string | v1.5.0 新增，取值同 `validation_status` 四值 |
 | `commercial_review_error` | string | 可选，仅在商业审阅自身失败时出现 |
+| `manifest` | RunManifest \| null | v1.6.0 新增：这次 Run 的出身清单；写清单这一步自身失败、或旧 Run 没有 `run-manifest.json` 时是 `null` |
 
 这三个字段是纯追加，`validation` / `review` / `quality` 三个字段逐字未动。商业分数不单独占一个
 响应字段：`commercial_review.score` 就是它，与 `metadata.json` 的 `commercial_score`、
@@ -192,6 +195,8 @@ v1.5.1 起 `commercial_review_status` 一律取 metadata 里的真话：Run 在�
 这一步之后才失败时，读回的是 `completed` 配 `commercial_review: null`（结论本体只在
 promote 之后才出现在运行根目录，失败路径从不 promote）。v1.5.0 那会儿这种情况会读成
 `not_started`，等于否认磁盘上 `attempts/NN/commercial-review.json` 的存在。
+v1.6.0 起再多一个 `manifest`：读 `runs/<run_id>/run-manifest.json`，原样返回；没有这个文件
+（v1.6.0 之前的 Run）或形状不认识时是 `null`，磁盘上不会被补写。
 `run_id` 为 `""`、`.`、`..` 或含路径分隔符时 400；Run 不存在 404 `RUN_NOT_FOUND`。
 
 `quality` 按三级兜底取，三级都是同一版正文（入选 Attempt 最终留下的那一版）：

@@ -16,6 +16,11 @@
 > `commercial_review_error`。商业可读性审阅与结构审阅是**两份独立的结论**，
 > 不是 `review.json` 改名，也不改 `quality.json` 的任何一个字段。
 >
+> v1.6.0 在这一约束下新增了 `run-manifest.json`（只在 Run 根目录一份）与两个 API 字段
+> `manifest`（POST /api/runs 与 GET /api/runs/{id} 各一个）。它是这次 Run 的**出身清单**，
+> 自带 `schemaVersion`，用 camelCase——与 v1.0.0 冻结的 snake_case metadata 契约物理隔离，
+> 改它不需要动任何既有字段的语义。
+>
 > 实现：`src/core/pipeline.ts` + `src/storage/artifact-store.ts`
 > 契约测试：`tests/test_contract_artifacts.test.ts`（存在性与必填字段）、
 > `tests/test_contract_docs_sync.test.ts`（本文件的字段表 ↔ 真实产物逐字段一致）
@@ -35,6 +40,7 @@ runs/
     ├── commercial-review.json         # 入选 Attempt 的商业可读性结论（v1.5.0 新增；跳过或审阅自身失败时缺失）
     ├── quality.json                   # 入选 Attempt 的统一质量快照（v1.2.0 新增）
     ├── metadata.json                  # 运行级 metadata
+    ├── run-manifest.json               # 这次 Run 的出身清单（v1.6.0 新增；只在 Run 根目录一份）
     └── attempts/
         └── 01/                        # 第 1 次尝试，两位数字
             ├── story.md               # 该次尝试的最终正文（有修订时为修订后）
@@ -56,7 +62,10 @@ runs/
 固定规则：
 
 - attempt 与 repair 目录名都是两位数字 `01`、`02`…（上限 99）
-- 运行级目录里除了 `attempts/` 只有那九个文件，没有别的
+- 运行级目录里除了 `attempts/` 只有那十个文件，没有别的
+- `run-manifest.json`（v1.6.0 新增）**只在 Run 根目录一份**：`attempts/` 与 `repairs/` 下都没有它。
+  清单里登记的产物路径可以指向这两层，但它自己不出现在自己登记的条目里（记不了自己的摘要），
+  也不登记任何 `metadata.json`——那三层文件由 metadata 契约负责，清单只管「跑了什么」
 - `beat-validation.json`（v1.4.0 新增）是**运行级独有**的一份：BeatPlan 在第一个 Attempt
   之前校验一次，`attempts/` 与 `repairs/` 下都没有它。骨架结构带 `error` 级 issue 时 Run
   在这里就结束了，此时运行级目录只有 `config.json` / `beats.json` /
@@ -261,16 +270,51 @@ BeatPlan 只校验一次，不随重试重跑，`attempts/` 与 `repairs/` 下�
 v1.5.0 之前产生的 Run 没有 `commercial-review.json`：读接口返回 `null`、status 兜底
 `not_started`，磁盘上不会补写（[compatibility.md](./compatibility.md)）。
 
+### 运行级 run-manifest.json（v1.6.0 新增）
+
+`run-manifest.json` 回答一个问题：**这份故事是拿什么跑出来的？** 它把一次 Run 的版本、
+模型、参数、提示词、每次 Attempt 的结局与落盘产物的摘要汇成一份清单，放在 Run 根目录
+（`metadata.json` 旁边，**只有一份**）。它是新增文件，不顶替 `metadata.json`，也不改
+`metadata.json` 的任何一个字段——三层 metadata 契约一字未动。
+
+清单自带 `schemaVersion`，字段是 camelCase——与 v1.0.0 冻结的 snake_case metadata
+契约物理隔离，将来扩展清单不需要碰既有字段的语义。
+
+| 字段 | 说明 |
+|---|---|
+| `schemaVersion` | 清单元数据版本，当前为 `"1"` |
+| `runId` | 与 `metadata.json` 的 `run_id` 一致 |
+| `project` | `{version, commit}`：`version` 来自包版本，`commit` 只在能拿到 git SHA 时才有 |
+| `models` | 本次 Run 实际用到的模型条目（generation / repair 等，按阶段） |
+| `prompts` | 六个提示词文件各自的 `version` 与内容 `digest` |
+| `parameters` | 各阶段 temperature 与本次生效的 `RetryPolicy` 参数 |
+| `attempts` | 每次 Attempt 的编号、是否入选、重试原因，以及该次发生的修订 |
+| `artifacts` | 清单登记的全部产物的路径与 SHA-256 摘要 |
+
+三条硬规则：
+
+- **不重复内容**：清单登记「跑了什么」，不搬运故事正文、审阅结论的任何文字。
+- **不碰凭据**：只记模型名、provider 与 baseUrl 的分类（服务器配置 / 请求公有覆盖），
+  **baseUrl 原文不落盘**；`topP` / `maxTokens` 这类本次客户端没有下发的字段一律不写。
+- **不是实验框架**：清单只为一次 Run 自证出身，不做跨 Run 对比、不跑基准、不统计成功率。
+
+读接口把 manifest 原样挂在 `manifest` 字段里（没有清单的旧 Run 返回 `null`），界面折叠成
+一个面板，列出版本 / 模型 / 参数 / 每次 Attempt，摘要一律截断显示。
+
 ## 安全约定
 
 - 产物里不写 API Key、不写 Bearer token
 - 错误文本会过 `src/lib/safe-text.ts`：本机绝对路径替换为 `<path>`、凭据样式的字符串打码
 - `runs/` 与 `outputs/` 在 `.gitignore` 里，不进仓库；仓库里只有 `examples/example_run/` 这个合成样例
+- `run-manifest.json` 里的模型条目只含模型名 / provider / baseUrl 分类，没有 baseUrl 原文、
+  没有 key、没有 Authorization 头；登记不到的产物不写占位行
 
 ## 不做什么
 
 - 不做跨 Run 的版本库、不做产物 diff、不做 run 重放（`ExperimentRunner` 一类能力保留给后续版本）
 - 不做失败归因统计与因果图（`FailureAttribution` / `CausalGraph` 同理）
+- `run-manifest.json` 不做基准对比、不统计成功率、不做自适应调参（`BenchmarkRunner` /
+  `AdaptiveGeneration` / `SelfOptimization` 一类能力保留给后续版本）
 - `quality.json` 只是把已有结论汇到一起：不额外打分、不设 PASS/FAIL 阈值、不做多维评分
 - 不写 `.tmp` 之外的中间文件（原子写入产生的临时文件见上面的「固定规则」）
 
