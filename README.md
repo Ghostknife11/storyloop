@@ -69,8 +69,13 @@ StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts
   `QualityResult`（`quality.json` + API 的 `quality` 字段 + 前端 Quality Summary 面板），
   不调用模型、不新增分数
 - **Run Artifacts**：产物统一落在 `runs/<run_id>/`，每次 Attempt、每次修订单独归档
+- **Run Provenance（Run 出身清单，v1.6.0）**：每次 Run 在 `metadata.json` 旁多落一份
+  `run-manifest.json`，写清跑在哪个代码版本与 commit 上、用的哪个模型、六份提示词各自的版本与
+  内容摘要、各阶段 temperature 与重试策略、每次 Attempt 的结局，以及这批产物的 SHA-256。
+  API 的 `manifest` 字段与前端 Run Provenance 面板读的是同一份。它只为一次 Run 自证出身：
+  不做跨 Run 对比、不跑基准、不统计成功率
 - **现代 Web UI**：六阶段进度、Attempt 计数、修订明细、Validation / Review / Commercial
-  Review 面板、Run ID 与产物清单
+  Review / Run Provenance 面板、Run ID 与产物清单
 - **OpenAI-compatible LLM**：OpenAI / DeepSeek / 硅基流动 / 任意兼容端点
 - **可编辑 Prompt 模板**：`prompts/*.txt` 直接改，重启生效
 - **稳定 CLI**：`run` / `plan` / `review` / `validate` / `repair` 五个命令，与 API 共用同一套逻辑
@@ -696,7 +701,9 @@ mapped / NAT64 地址按内嵌的那个地址判
 - **没有商业可行性预测**：商业可读性审阅（v1.5.0）只评价文本本身可观察的读者体验
   （Hook / Pacing / Engagement / Payoff），不评估市场适配、读者规模、销量或商业结果，
   也没有「爆款概率」一类的数字
-- **没有实验框架与基准测试**：没有 A/B、没有评分回归集、没有模型对比工具
+- **没有实验框架与基准测试**：没有 A/B、没有评分回归集、没有模型对比工具；
+  v1.6.0 的 `run-manifest.json` 也只是把一次 Run 的出身记下来，不做跨 Run 比较、不跑基准、
+  不统计成功率
 - **没有高级可观测性**：只做工程日志（等级 + `run_id` / `attempt` / `repair` 上下文 + 脱敏），
   没有 Metrics / Trace / Prometheus / OpenTelemetry / Dashboard
 - **没有失败归因与因果图**：修订只按类别改一次，不回答「为什么会失败」、
@@ -711,6 +718,15 @@ mapped / NAT64 地址按内嵌的那个地址判
 
 ## 升级说明
 
+v1.6.0 新增 **Run 出身清单** `run-manifest.json`：每次 Run 除了 `metadata.json` 还多写一份
+记录「这份故事是拿什么跑出来的」——代码版本与 commit、模型、各阶段 temperature、六份提示词的
+版本与内容摘要、每次 Attempt 的结局、以及这批产物的 SHA-256。它只在 Run 根目录一份，
+自带 `schemaVersion`、用 camelCase，与 snake_case 的 metadata 契约物理隔离。纯 additive：
+从 1.5.x 升到 1.6.0 **不需要改任何代码**，1.5.x 写的产物可以直接读（`manifest` 读作 `null`
+、Run Provenance 面板整个隐藏）。要紧的有三条：运行级固定文件数从九个变十个；两个 Run 类
+响应各多一个可选字段 `manifest`；清单里不写凭据——baseUrl 原文、API Key 都不落盘，
+`topP` / `maxTokens` 这类客户端没有下发的参数也不写。回滚到 1.5.2 的代价为零，
+多出来的文件与字段被旧版本忽略。逐版说明见 [docs/upgrade.md](./docs/upgrade.md)。
 v1.5.2 是一次界面修订：没有新能力、没有新文件、新字段或新路由，只改 `src/**/*.tsx` 里的
 样式类名。从 1.5.1 升到 1.5.2 **不需要改任何代码**，1.5.1 写的产物可以直接读。要紧的有三条：
 Story Config 外框不再让内容溢出到边框外（两列布局补 `min-h-0`，两列各自 `min-h-0` +

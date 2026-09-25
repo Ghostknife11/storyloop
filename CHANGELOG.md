@@ -77,6 +77,8 @@ SHA-256 清单。它落在 Run 根目录，**只有一份**，`attempts/` 与 `r
   磁盘上不会被补写
 - 运行级固定文件数从九个变成十个（多的是 `run-manifest.json`）；`attempts/` 与 `repairs/`
   一层文件都没多，老 Run 的每层文件数与 1.5.2 逐字一致
+- **测试总量：1133 passed / 72 files**（1.5.2 为 1104 / 71）。新增
+  `tests/test_run_manifest.test.ts` 29 条，全部只用假模型 / 假组件与合成样例，不调真实接口
 - 明细见 [docs/upgrade.md](./docs/upgrade.md) 的「从 1.5.2 升级到 1.6.0」与
   [docs/compatibility.md](./docs/compatibility.md) 的「v1.6.0 的清单」
 
