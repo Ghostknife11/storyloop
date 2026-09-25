@@ -22,8 +22,6 @@
 import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
 import { validateRetryPolicy, type RetryPolicy } from "@/core/retry-policy";
-import { PROMPT_ROLES, type PromptRole } from "@/types/run-manifest";
-import { PROMPT_VERSIONS } from "@/lib/tracking/prompt-registry";
 import type { ExperimentProvenance } from "@/types/run-manifest";
 
 export type { ExperimentProvenance };
@@ -75,23 +73,23 @@ export interface ExperimentBaseConfig {
   modelConfig?: ModelSelection;
   generationParameters?: GenerationParameters;
   retryPolicy?: RetryPolicy;
-  /** 基准提示词版本；键是 PROMPT_ROLES 里的角色，值必须是已登记的版本。 */
-  promptVersions?: Partial<Record<PromptRole, string>>;
 }
 
 /**
  * TASK §14 Variant 覆盖：强类型白名单。
  *
- * 只有五个字段真的会改变生成行为：model / temperature / 提示词版本 /
- * retry.maxAttempts / retry.minReviewScore。别的键（含 topP / maxTokens / baseUrl /
- * apiKey / 任意 JSON patch）一律在预检时拒绝，不静默忽略——静默忽略会让一份定义
- * 声称自己改了某个变量，而样本其实什么都没改。
+ * 白名单里只有四项真的会改变一次生成：model、temperature、retry.maxAttempts、
+ * retry.minReviewScore。别的键一律在预检时拒绝，不静默忽略——静默忽略会让一份定义
+ * 声称自己改了某个变量，而样本其实什么都没改。已知「改了但没用」的键：
+ *   - topP / maxTokens：LLMClient 的请求体只发 model / messages / temperature；
+ *   - prompts.<role>：六个阶段各读一个固定提示词文件，登记表里每个角色只有一版，
+ *     没有第二个版本可选（提示词差异由 Manifest 的 prompts 块如实记录）；
+ *   - baseUrl：地址只由服务端 LLM_BASE_URL 决定，见 ModelSelection 的说明。
  */
 export interface ExperimentOverrides {
   model?: string;
   generation?: { temperature?: number };
   retry?: { maxAttempts?: number; minReviewScore?: number };
-  prompts?: Partial<Record<PromptRole, string>>;
 }
 
 /** TASK §13 一个 Variant：相对 Base 的一组明确修改。id 稳定，不依赖数组下标。 */
@@ -303,26 +301,6 @@ function unknownKeys(raw: Record<string, unknown>, allowed: readonly string[], f
   }
 }
 
-/** §46 提示词版本必须引用登记表里已经存在的版本。 */
-function promptVersionsOf(raw: unknown, field: string): Partial<Record<PromptRole, string>> {
-  const r = objOf(raw, field);
-  const out: Partial<Record<PromptRole, string>> = {};
-  for (const [role, version] of Object.entries(r)) {
-    if (!(PROMPT_ROLES as readonly string[]).includes(role)) {
-      throw new ExperimentValidationError(`${field}.${role} 不是已登记的提示词角色（${PROMPT_ROLES.join(" / ")}）`);
-    }
-    const value = strOf(version, `${field}.${role}`, 16);
-    const registered = PROMPT_VERSIONS[role as PromptRole];
-    if (value !== registered) {
-      throw new ExperimentValidationError(
-        `${field}.${role} 指定的版本 ${value} 不存在（当前已登记版本：${registered}）`,
-      );
-    }
-    out[role as PromptRole] = value;
-  }
-  return out;
-}
-
 /** §14 生成参数覆盖：只认 temperature。topP / maxTokens 明确拒绝，并说明原因。 */
 function generationOverridesOf(raw: unknown): ExperimentOverrides["generation"] {
   const r = objOf(raw, "overrides.generation");
@@ -358,9 +336,24 @@ function retryOverridesOf(raw: unknown): ExperimentOverrides["retry"] {
   return out;
 }
 
+/**
+ * 改了也不会生效的键：单独一条分支把理由说清楚。
+ * 它们不是「暂时没接上」，而是当前版本里确实没有任何一行代码会因为它们而不同。
+ */
+const NO_EFFECT_OVERRIDE_REASONS: Record<string, string> = {
+  prompts:
+    "提示词差异不是实验变量：六个阶段各读一个固定提示词文件，登记表里每个角色只有一版，" +
+    "没有第二个版本可选；真实用到的提示词由每个 Run 的 Manifest prompts 块如实记录",
+  topP: "LLMClient 的请求体只发送 model / messages / temperature，topP 不会出现在任何一次请求里",
+  maxTokens: "LLMClient 的请求体只发送 model / messages / temperature，maxTokens 不会出现在任何一次请求里",
+  baseUrl:
+    "地址不是实验变量：实验一律走服务端 LLM_BASE_URL（只接受公网 HTTP/HTTPS），" +
+    "定义里带地址等于给 v1.1.0 的 SSRF 关卡开一个绕过的入口",
+};
+
 function overridesOf(raw: unknown, field: string): ExperimentOverrides {
   const r = objOf(raw, field);
-  unknownKeys(r, ["model", "generation", "retry", "prompts"], field);
+  unknownKeys(r, ["model", "generation", "retry"], field);
   const out: ExperimentOverrides = {};
   const model = optStrOf(r.model, `${field}.model`, 120);
   if (model !== undefined) out.model = model;
@@ -368,7 +361,10 @@ function overridesOf(raw: unknown, field: string): ExperimentOverrides {
     out.generation = generationOverridesOf(r.generation);
   }
   if (r.retry !== undefined && r.retry !== null) out.retry = retryOverridesOf(r.retry);
-  if (r.prompts !== undefined && r.prompts !== null) out.prompts = promptVersionsOf(r.prompts, `${field}.prompts`);
+  for (const key of Object.keys(r)) {
+    const reason = NO_EFFECT_OVERRIDE_REASONS[key];
+    if (reason) throw new ExperimentValidationError(`${field}.${key} 不允许作为实验变量：${reason}`);
+  }
   return out;
 }
 
@@ -384,7 +380,7 @@ function variantOf(raw: unknown, index: number): ExperimentVariant {
 
 function baseConfigOf(raw: unknown): ExperimentBaseConfig {
   const r = objOf(raw, "base");
-  unknownKeys(r, ["storyConfig", "beatPlanMode", "beatPlan", "modelConfig", "generationParameters", "retryPolicy", "promptVersions"], "base");
+  unknownKeys(r, ["storyConfig", "beatPlanMode", "beatPlan", "modelConfig", "generationParameters", "retryPolicy"], "base");
 
   const storyConfig = validateStoryConfig(r.storyConfig);
   const mode = r.beatPlanMode;
@@ -421,9 +417,6 @@ function baseConfigOf(raw: unknown): ExperimentBaseConfig {
   }
   if (r.retryPolicy !== undefined && r.retryPolicy !== null) {
     base.retryPolicy = validateRetryPolicy(r.retryPolicy);
-  }
-  if (r.promptVersions !== undefined && r.promptVersions !== null) {
-    base.promptVersions = promptVersionsOf(r.promptVersions, "base.promptVersions");
   }
   return base;
 }
