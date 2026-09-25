@@ -6,6 +6,10 @@ import { reviewResultOf, type ReviewResult } from "@/types/review-result";
 import { validationResultOf, type ValidationResult } from "@/types/validation-result";
 import { qualityResultOf, type QualityResult } from "@/types/quality";
 import { beatValidationResultOf, type BeatValidationResult } from "@/types/beat-validation";
+import {
+  commercialReviewResultOf,
+  type CommercialReviewResult,
+} from "@/types/commercial-review";
 import { attemptDirectoryName } from "@/core/generation-attempt";
 import {
   repairDirectoryName,
@@ -20,6 +24,8 @@ import {
  * v0.8.0 新增 Repair 级产物（§29-§32）与 initial_story.md（§30）：同样是纯追加。
  * v1.2.0 新增 quality.json（§20/§21）并把它加入 promote 清单（§57）：同样是纯追加，
  * 只是多一个由 QualityAssembler 装配出来的统一质量快照。
+ * v1.5.0 新增 commercial-review.json（TASK §16/§17）：商业可读性结论同样进 promote 清单，
+ * 于是运行根那一份永远与入选正文一一对应。
  */
 
 /** §23/§60 attempt 根目录名；§28 Windows 不可靠目录层级命名，这里固定 ASCII。 */
@@ -124,6 +130,15 @@ export class ArtifactStore {
     return this.putJson(runId, "beat-validation.json", beatValidation);
   }
 
+  /**
+   * v1.5.0 TASK §16 运行级商业可读性结论：与 quality.json 同一套覆盖写语义。
+   * 实际写入走 promoteAttempt 从入选 Attempt 复制过来（与 story.md 同一机制），
+   * 这里保留同形方法供手动审阅入口直接覆盖运行根那一份。
+   */
+  putCommercialReview(runId: string, commercialReview: CommercialReviewResult): string {
+    return this.putJson(runId, "commercial-review.json", commercialReview);
+  }
+
   putMetadata(runId: string, metadata: Record<string, unknown>): string {
     return this.putJson(runId, "metadata.json", metadata);
   }
@@ -164,6 +179,19 @@ export class ArtifactStore {
    */
   putAttemptQuality(runId: string, attemptNumber: number, quality: QualityResult): string {
     return this.putJson(runId, this.attemptFile(attemptNumber, "quality.json"), quality);
+  }
+
+  /**
+   * v1.5.0 TASK §17 Attempt 级商业可读性结论。与同目录 story.md 严格对应：
+   * 这次尝试发生过修订时写的是修订后那一版的结论（调用方保证），
+   * 因此它描述的就是 attempts/NN/story.md 这份正文。
+   */
+  putAttemptCommercialReview(
+    runId: string,
+    attemptNumber: number,
+    commercialReview: CommercialReviewResult,
+  ): string {
+    return this.putJson(runId, this.attemptFile(attemptNumber, "commercial-review.json"), commercialReview);
   }
 
   /** §24 Attempt metadata：编号 / 是否被接受 / 重试原因 / 分数 / 校验结论。 */
@@ -298,8 +326,23 @@ export class ArtifactStore {
     return beatValidationResultOf(this.readJson(runId, "beat-validation.json"));
   }
 
+  /** v1.5.0 TASK §32：v1.5.0 之前的 Run 没有这个文件，读到 null 由界面整段隐藏。 */
+  readFinalCommercialReview(runId: string): CommercialReviewResult | null {
+    return commercialReviewResultOf(this.readJson(runId, "commercial-review.json"));
+  }
+
   readAttemptQuality(runId: string, attemptNumber: number): QualityResult | null {
     return qualityResultOf(this.readJson(runId, this.attemptFile(attemptNumber, "quality.json")));
+  }
+
+  /** v1.5.0 TASK §17：某一次尝试的商业可读性结论；没有这个文件（旧 Run / 没跑这一步）时为 null。 */
+  readAttemptCommercialReview(
+    runId: string,
+    attemptNumber: number,
+  ): CommercialReviewResult | null {
+    return commercialReviewResultOf(
+      this.readJson(runId, this.attemptFile(attemptNumber, "commercial-review.json")),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -312,7 +355,15 @@ export class ArtifactStore {
     // §67：绝对路径不进异常消息，调用方本来就知道 runs 根在哪
     if (!existsSync(dir)) throw new Error(`Attempt ${attemptNumber} 不存在`);
 
-    for (const filename of ["story.md", "validation.json", "review.json", "quality.json"]) {
+    for (const filename of [
+      "story.md",
+      "validation.json",
+      "review.json",
+      "quality.json",
+      // v1.5.0 TASK §16/§39：商业结论跟着入选正文一起晋升，
+      // 于是运行根那一份永远描述 selected attempt 的 story.md（没有这个文件时就跳过）。
+      "commercial-review.json",
+    ]) {
       const source = join(dir, filename);
       if (!existsSync(source)) continue;
       const target = this.rootFile(runId, filename);

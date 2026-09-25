@@ -1,4 +1,4 @@
-# 示例 Run（v1.4.0 布局）
+# 示例 Run（v1.5.0 布局）
 
 这个目录是一次**真实 Pipeline 运行**的产物，由测试用 FakeLLM 重新生成后写死时间戳，
 用来展示当前版本的 Run 产物布局，不含任何真实凭据或个人数据。
@@ -21,3 +21,12 @@ v1.4.0 起在 Run 根目录多一份 `beat-validation.json`：BeatPlan 在生成
 样例里这次校验**通过**（`passed: true`），只带一条 `ENDING_NOT_PREPARED` 的 warning——
 结局要的那句「三分钟去向」在前三拍里没有铺垫；warning 不阻断生成，所以后面照常进了
 生成循环。字段含义见 [docs/run-artifacts.md](../../docs/run-artifacts.md)。
+
+v1.5.0 起多了两份 `commercial-review.json`（Run 根目录与 `attempts/01/`）：由**独立的**
+`CommercialReviewer` 对最终正文做的商业可读性审阅，四个固定维度（H / P / E / Pf）各给
+0 ~ 100 分加一段短评，`score` 是这四个维度的确定性均分（82+68+74+62 → 71.5）。
+根目录那份由入选 Attempt 的结论 promote 过来，与最终入选的 `story.md` 严格对应，
+`metadata.json` 上的 `commercial_review_status` / `commercial_score` 也由它派生。
+它与 `review.json` / `quality.json` 是**两套独立评价**，不互换、不合并，也不驱动重试或
+修订——71.5 分不会让这次 Run 多跑一次。修订目录 `attempts/01/repairs/01/` 同样
+不写 `commercial-review.json`：attempt 级那份已经是修订后正文的结论。
