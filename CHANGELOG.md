@@ -190,7 +190,7 @@ v1.4.1 是**修订版本**：没有新能力、没有新文件、没有新字段
 - `tests/test_beat_validation_pipeline.test.ts` 新增 1 条：校验器抛异常时
   `GenerationResult` 带 `beat_validation_error`，没异常与没注入时都没有这个键
 - `tests/test_ui_artifacts.test.ts` 新增 4 条产物清单前缀用例与 2 条 `RunOk` 可选字段用例
-- **测试总量：1009 passed / 66 files**（1.4.0 为 986 / 65）。全部用例仍只用假模型 / 假组件，
+- **测试总量：1012 passed / 66 files**（1.4.0 为 986 / 65）。全部用例仍只用假模型 / 假组件，
   不调真实接口、不碰真实主机
 
 ### Compatibility
