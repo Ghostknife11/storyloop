@@ -8,7 +8,7 @@ export class ReviewParseError extends Error {
 }
 
 /** §15 允许的轻量清理：trim + 移除 markdown code fence。 */
-function stripFence(raw: string): string {
+export function stripFence(raw: string): string {
   let text = raw.trim();
   const fence = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/);
   if (fence) text = fence[1].trim();
