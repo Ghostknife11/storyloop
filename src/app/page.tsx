@@ -30,6 +30,7 @@ import {
   RunApiError, type RepairDetailApi, type RunApiResult,
 } from "@/lib/api";
 import { configFilename, parseStoryConfig, serializeStoryConfig } from "@/lib/config-io";
+import { attemptArtifactPath } from "@/lib/artifacts-view";
 import { retryPolicyOf, useSettings } from "@/lib/settings-store";
 import {
   GENRE_PRESETS, STYLE_PRESETS, STORY_CONFIG_VERSION, TARGET_WORDS_DEFAULT,
@@ -222,6 +223,9 @@ export default function GeneratePage() {
   const reReviewingRef = useRef(false);
   const revalidatingRef = useRef(false);
   const beatValidatingRef = useRef(false);
+  /** §36 快速切换 Attempt 会并发多个读回请求：用递增序号认领最后一次点击，
+   *  先发出的请求后返回时直接丢弃，免得面板停在早先点开的那个 Attempt 上。 */
+  const viewAttemptSeq = useRef(0);
   const stepperTimers = useRef<number[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -495,13 +499,15 @@ export default function GeneratePage() {
     try {
       const review = await reviewStory(
         formToConfig(form),
-        result.story,
+        baseStory,
         {
           model: settings.model || undefined,
           baseUrl: settings.baseUrl || undefined,
           temperature: settings.temperature,
         },
-        result.run_id,
+        // §30：只有当前展示的正是 Run 落盘的那一版，才覆盖 run 目录里的 review.json；
+        // 看别的 Attempt 或手动修订后的版本时只重新审阅，不动磁盘上的结论。
+        shownStoryIsRunStory ? result.run_id : undefined,
       );
       // §30：服务端已覆盖该 Run 的 review.json，前端同步展示最新评价
       setReviewOverride(review);
@@ -520,7 +526,12 @@ export default function GeneratePage() {
     revalidatingRef.current = true;
     setRevalidating(true);
     try {
-      const validation = await validateStory(formToConfig(form), result.story, result.run_id);
+      const validation = await validateStory(
+        formToConfig(form),
+        baseStory,
+        // 同 Review Again：非 Run 落盘的那一版只重新校验，不覆盖 validation.json
+        shownStoryIsRunStory ? result.run_id : undefined,
+      );
       // §27：服务端已覆盖该 Run 的 validation.json，前端同步展示最新校验结果
       setValidationOverride(validation);
       toast.success(validation.passed ? "Validation：Passed" : "Validation：Failed");
@@ -566,14 +577,16 @@ export default function GeneratePage() {
     }
   }
 
+  // §37：复制 / 下载的必须是当前展示的那一版正文（可能是某次 Attempt 或手动修订后的版本），
+  // 而不是永远导出入选 Attempt 的正文。
   const handleCopy = () => {
     if (!result) return;
-    navigator.clipboard.writeText(`# ${runTitle}\n\n${result.story}`).then(() => toast.success("Copied"));
+    navigator.clipboard.writeText(`# ${runTitle}\n\n${shownStory}`).then(() => toast.success("Copied"));
   };
 
   const handleDownload = () => {
     if (!result) return;
-    const blob = new Blob([`# ${runTitle}\n\n${result.story}`], { type: "text/markdown;charset=utf-8" });
+    const blob = new Blob([`# ${runTitle}\n\n${shownStory}`], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -611,14 +624,18 @@ export default function GeneratePage() {
     if (!result) return;
     // 点回被选中的 Attempt：直接回到 RunOk 里的最终结果，不再请求一次
     if (attemptNumber === result.selected_attempt) {
+      viewAttemptSeq.current += 1;
       setViewAttempt(null);
       setLoadingAttempt(null);
       void loadAttemptInfo(result, attemptNumber);
       return;
     }
     setLoadingAttempt(attemptNumber);
+    const seq = (viewAttemptSeq.current += 1);
     try {
       const detail = await fetchRunAttempt(result.run_id, attemptNumber);
+      // §36：这期间又点了别的 Attempt，这次响应就过期了
+      if (seq !== viewAttemptSeq.current) return;
       setViewAttempt({
         number: attemptNumber,
         story: detail.story,
@@ -658,6 +675,9 @@ export default function GeneratePage() {
   const shownQuality = viewAttempt ? viewAttempt.quality : result?.quality ?? null;
   /** §36：当前看的是哪一次 Attempt。 */
   const viewingAttempt = viewAttempt?.number ?? result?.selected_attempt ?? 0;
+  /** §36/§30：当前展示的正是 Run 落盘的那一版（入选 Attempt、没有手动修订）时为 true。
+   *  只有这时 Review Again / Validate Again 才覆盖 run 目录里的结论。 */
+  const shownStoryIsRunStory = !viewAttempt && !repairOverride;
   /** §36：当前 Attempt 的修订记录（只有真的修过才有内容）。 */
   const shownRepairs = attemptInfo?.repairs ?? [];
   /** §37：只有「当前看的这次 Attempt 修过」才给 Before / After 两个 Tab。 */
@@ -1144,9 +1164,7 @@ export default function GeneratePage() {
                       <ul className="mt-1 space-y-0.5">
                         {Object.entries(result.artifacts).map(([key, file]) => (
                           <li key={key} className="text-[11px] font-mono text-muted-foreground">
-                            {key} → {viewAttempt && viewAttempt.number !== result.selected_attempt
-                              ? `attempts/${String(viewAttempt.number).padStart(2, "0")}/${file}`
-                              : file}
+                            {key} → {attemptArtifactPath(key, file, viewingAttempt, result.selected_attempt)}
                           </li>
                         ))}
                       </ul>
