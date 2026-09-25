@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { GenerationPipeline } from "@/core/pipeline";
+import { GenerationPipeline, PipelineError } from "@/core/pipeline";
 import { ArtifactStore } from "@/storage/artifact-store";
 import { BeatPlanner } from "@/lib/beat-planner";
 import { StoryGenerator } from "@/lib/story-generator";
@@ -429,3 +429,142 @@ describe("v1.5.0 与结构审阅产物互不干扰（§12/§26）", () => {
     expect(existsSync(join(runDirOf(dirB, withCommercial.run_id), "commercial-review.json"))).toBe(true);
   });
 });
+
+/**
+ * v1.5.1 失败路径：Run 没跑完时 commercial_review_status 说真话。
+ *
+ * Run 失败时 promote 从未执行，运行根目录没有 commercial-review.json，所以结论本体不能写；
+ * 但「这一步到底跑没跑成」是已经发生过的事实——attempt 目录里躺着的那份文件就是证据。
+ * v1.5.0 首发时这里硬写 COMMERCIAL_CHECK_SKIPPED，于是「第一次尝试商业审阅跑成了、
+ * 第二次尝试生成失败」的 Run，metadata 声称这一步从没跑过。用假的 not_started 掩盖
+ * 已经发生过的一步，比少写一个字段更糟：读接口与 UI 都据此把整个面板藏掉。
+ */
+describe("v1.5.1 失败路径：状态不许谎称这一步没跑过", () => {
+  /** 允许定点修订时，重试前会多出几次调用；关掉它，调用顺序才是可数的。 */
+  const NO_REPAIR: RetryPolicy = { ...DEFAULT_RETRY_POLICY, enable_repair: false };
+
+  /** 数着第几次调用：第 failAt 次 generate 时抛错，其余交给 FakeLLM 的预设响应。 */
+  function failAtNth(llm: FakeLLM, failAt: number, message: string) {
+    let calls = 0;
+    return {
+      generate: async (prompt: string, temperature = 0.8, system?: string): Promise<string> => {
+        calls += 1;
+        if (calls === failAt) throw new Error(message);
+        return llm.generate(prompt, temperature, system);
+      },
+    };
+  }
+
+  /** 跑一个注定失败的 Run，把 run_id 交出来：失败路径的产物全靠它定位。 */
+  async function runFailingAt(
+    llm: FakeLLM,
+    failAt: number,
+    message: string,
+    commercialReviewer?: CommercialReviewer,
+  ): Promise<string> {
+    const client = failAtNth(llm, failAt, message);
+    const pipeline = new GenerationPipeline(
+      new BeatPlanner(client as never),
+      new StoryGenerator(client as never),
+      new StoryValidator(),
+      new BasicReviewer(client as never),
+      new ArtifactStore(),
+      NO_REPAIR,
+      new StoryRepairer(client as never),
+      new RepairStrategy(),
+      // qualityAssembler / projectVersion / beatValidator 走默认或缺省；
+      // 商业审阅者是第 12 个参数（§12：两个审阅者并列，各拿各的结论）
+      undefined,
+      undefined,
+      undefined,
+      commercialReviewer,
+    );
+    try {
+      await pipeline.run(SAMPLE_CONFIG);
+    } catch (e) {
+      if (e instanceof PipelineError) return e.runId;
+      throw e;
+    }
+    throw new Error("这个 Run 本该失败");
+  }
+
+  it("第一次尝试商业审阅跑成、第二次生成失败：status=completed，但不写结论本体", async () => {
+    const dir = withTmpDir();
+    // 关掉修订后调用顺序可数：1 规划、2 第一次正文、3 第一次结构审阅、4 第二次正文。
+    const runId = await runFailingAt(
+      new FakeLLM([PLAN_REPLY, SAMPLE_STORY, LOW_REVIEW]),
+      4,
+      "stream broken: attempt 2 /Users/knife/secret",
+      spyReviewer().reviewer,
+    );
+
+    const runDir = runDirOf(dir, runId);
+    // 第一次尝试确实写过那份文件——它是这一步跑成过的物证
+    expect(existsSync(join(runDir, "attempts", "01", "commercial-review.json"))).toBe(true);
+
+    const meta = readJson(join(runDir, "metadata.json"));
+    expect(meta.status).toBe("failed");
+    // v1.5.1：状态说真话，不是 not_started
+    expect(meta.commercial_review_status).toBe("completed");
+    // 但结论本体一个字段都不写：promote 从未执行，根目录那份文件不存在
+    expect(meta.commercial_score).toBeUndefined();
+    expect((meta.artifacts as Record<string, string>).commercial_review).toBeUndefined();
+    expect(existsSync(join(runDir, "commercial-review.json"))).toBe(false);
+  });
+
+  it("失败路径的 error 文本同样过 safe-text：本机路径不落盘", async () => {
+    const dir = withTmpDir();
+    const runId = await runFailingAt(
+      new FakeLLM([PLAN_REPLY, SAMPLE_STORY, LOW_REVIEW]),
+      4,
+      "stream broken: attempt 2 /Users/knife/secret",
+      spyReviewer().reviewer,
+    );
+
+    const meta = readJson(join(runDirOf(dir, runId), "metadata.json"));
+    expect(String(meta.error)).not.toMatch(/\/Users\//);
+    expect(String(meta.error)).not.toMatch(/[A-Za-z]:\\/);
+  });
+
+  it("商业审阅自己失败后又遇到生成失败：status=failed 且 error 保留", async () => {
+    const dir = withTmpDir();
+    const throwingReviewer = new CommercialReviewer({
+      generate: async () => {
+        throw new Error("commercial reviewer exploded");
+      },
+    } as never);
+    const runId = await runFailingAt(
+      new FakeLLM([PLAN_REPLY, SAMPLE_STORY, LOW_REVIEW]),
+      4,
+      "stream broken",
+      throwingReviewer,
+    );
+
+    const runDir = runDirOf(dir, runId);
+    const meta = readJson(join(runDir, "metadata.json"));
+    expect(meta.commercial_review_status).toBe("failed");
+    expect(String(meta.commercial_review_error)).toContain("commercial reviewer exploded");
+    expect(meta.commercial_score).toBeUndefined();
+    // 这一路失败时连 attempt 目录那份都不写，根目录更不会有
+    expect(existsSync(join(runDir, "commercial-review.json"))).toBe(false);
+    expect(existsSync(join(runDir, "attempts", "01", "commercial-review.json"))).toBe(false);
+  });
+
+  it("一个 Attempt 都没跑到就失败：仍然是从没跑过的 not_started", async () => {
+    const dir = withTmpDir();
+    const runId = await runFailingAt(
+      new FakeLLM([PLAN_REPLY, SAMPLE_STORY, LOW_REVIEW]),
+      1,
+      "planning exploded",
+      spyReviewer().reviewer,
+    );
+
+    const runDir = runDirOf(dir, runId);
+    const meta = readJson(join(runDir, "metadata.json"));
+    expect(meta.commercial_review_status).toBe("not_started");
+    expect(meta.commercial_review_error).toBeUndefined();
+    expect(meta.commercial_score).toBeUndefined();
+    expect(existsSync(join(runDir, "attempts", "01", "commercial-review.json"))).toBe(false);
+  });
+});
+

@@ -278,6 +278,24 @@ function commercialCheckPatch(check: CommercialCheck): Partial<MetaPatch> {
 }
 
 /**
+ * v1.5.1 失败路径专用：只写这一步**到底跑没跑成**，不写结论本体。
+ *
+ * Run 失败时 promote 从未执行，运行根目录没有 commercial-review.json，所以这里不能带上
+ * `commercial_review`——那会让 metadata 的 `artifacts` 索引列出一个不存在的文件，
+ * 也会让 `commercial_score` 凭空出现。
+ *
+ * 但状态必须是真的：v1.5.0 首发时这里硬写 `COMMERCIAL_CHECK_SKIPPED`，于是「第一次尝试
+ * 商业审阅跑成了、第二次尝试生成失败」的 Run，metadata 会声称这一步从没跑过，
+ * 而 attempts/01/commercial-review.json 就在磁盘上。用假的 not_started 掩盖已经发生过的
+ * 一步，比少写一个字段更糟：读接口与 UI 都据此把整个面板藏掉。
+ */
+function commercialStatusPatch(check: CommercialCheck): Partial<MetaPatch> {
+  const patch: Partial<MetaPatch> = { commercial_review_status: check.commercial_review_status };
+  if (check.commercial_review_error) patch.commercial_review_error = check.commercial_review_error;
+  return patch;
+}
+
+/**
  * §3/§25 GenerationPipeline：把一次完整生成组织成一个 Run。
  * v0.7.0 固定顺序（§19）：
  *   Config → Planning → [ Attempt n: Generate → Save Story → Validate → Review → Decide → Retry? ] → Finalize
@@ -345,6 +363,9 @@ export class GenerationPipeline {
     let beatPlan: BeatPlan | undefined = suppliedPlan;
     const policy = validateRetryPolicy(retryPolicyArg ?? this.retryPolicy);
     const beatCheck: BeatCheck = { ...BEAT_CHECK_SKIPPED };
+    // v1.5.1：与 beatCheck 同一套「跨 Attempt 记住最后一次真实结论」的可变持有者。
+    // 缺了它，失败路径只能二选一：写一个假的 not_started，或者干脆不写这个字段。
+    const commercialLast: CommercialCheck = { ...COMMERCIAL_CHECK_SKIPPED };
 
     try {
       this.artifactStore.createRunDirectory(rid);
@@ -367,7 +388,7 @@ export class GenerationPipeline {
       // §19 重试循环：硬上限来自 policy.max_attempts（§15 禁止无限重试）。
       const records: AttemptRecord[] = [];
       for (let attemptNumber = 1; attemptNumber <= policy.max_attempts; attemptNumber++) {
-        const record = await this.runAttempt(ctx, rid, config, beatPlan, runtime, policy, attemptNumber);
+        const record = await this.runAttempt(ctx, rid, config, beatPlan, runtime, policy, attemptNumber, commercialLast);
         records.push(record);
         // §9：Attempt 结束时记一条 run/attempt 级日志，重试与采纳在日志里可定位
         logger
@@ -465,7 +486,10 @@ export class GenerationPipeline {
           this.metaFor(ctx, runtime, {
             ...policyPatch(policy),
             ...beatCheckPatch(beatCheck),
-            ...commercialCheckPatch(COMMERCIAL_CHECK_SKIPPED),
+            // v1.5.1：状态说真话（这步跑成了就是 completed、它自己失败了就是 failed、
+            // 一次都没跑到才是 not_started），但不带结论本体——运行根目录那份文件
+            // 要等 promote，而 promote 在失败路径上从未执行。
+            ...commercialStatusPatch(commercialLast),
           }),
         );
       } catch {
@@ -559,6 +583,8 @@ export class GenerationPipeline {
     runtime: GenerateRuntime | undefined,
     policy: RetryPolicy,
     attemptNumber: number,
+    /** v1.5.1 跨 Attempt 的真实状态持有者：与 beatCheck 同一个套路，由 runStages 传入并就地更新。 */
+    commercialLast: CommercialCheck,
   ): Promise<AttemptRecord> {
     let story: string | null = null;
     let generationError: string | null = null;
@@ -633,6 +659,11 @@ export class GenerationPipeline {
       commercial = await this.reviewCommercial(
         ctx, rid, config, story, attemptNumber, runtime, policy, check.validation,
       );
+      // v1.5.1：不管这一步是跑成了、失败了还是被跳过，都把最后一次的真实结果记下来，
+      // 失败路径的 metadata 要用它说实话。
+      commercialLast.commercial_review = commercial.commercial_review;
+      commercialLast.commercial_review_status = commercial.commercial_review_status;
+      commercialLast.commercial_review_error = commercial.commercial_review_error;
     }
 
     // §5/§16：accepted 表示这一次满足了策略，与 retry_reason 互斥。
