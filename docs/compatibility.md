@@ -256,6 +256,29 @@ attempt 级的四类文件上，run 级文件不带前缀。另外 `--help` 出�
 没有改错误码、没有新文件。1.4.0 及以前生成的全部 Run 读出来逐字一致，唯一例外是
 「模型给了维度」的 attempt 摘要分数——而那正是 v1.3.0 文档承诺的口径。
 
+## v1.5.1 的修订（失败路径说真话，仍然纯 additive）
+
+v1.5.1 没有新能力，只修 1.5.0 引入的两处「文档承诺与实现对不上」：
+
+- **失败的 Run 不再把 `commercial_review_status` 谎写成 `not_started`。** 1.5.0 的失败路径
+  无条件写 `not_started`，于是「第一次尝试商业审阅跑成了、第二次尝试生成失败」的 Run，
+  metadata 声称这一步从没跑过，而 `attempts/01/commercial-review.json` 就在磁盘上。
+  1.5.1 起写真实状态：跑成了是 `completed`、这一步自己失败了是 `failed`、
+  一次都没跑到才是 `not_started`（与 `beat_validation_status` 同一套口径）。
+- **结论本体仍然不写。** 失败路径从不执行 promote，运行根目录没有
+  `commercial-review.json`，所以失败路径只写 `commercial_review_status` 与
+  `commercial_review_error`，不带 `commercial_review`。由此 `commercial_score` 与
+  `artifacts.commercial_review` 在失败路径上依旧缺席——不会为了「说真话」而索引一个
+  不存在的文件。
+- **读侧随之变化。** Run 详情的 `commercial_review_status` 本来就读 metadata，
+  所以「Attempt 跑成过这一步之后 Run 才失败」现在读回 `completed` 配
+  `commercial_review: null`；`not_started` 只留给真的从没跑到的那一类（含 1.5.0 之前的老 Run，
+  它们没有这个字段，读接口兜底 `not_started`，磁盘不补写）。
+
+产物布局、字段集、路由、错误码与 CLI 参数一个都没动：`commercial_review_status` 一直是
+运行级 metadata 的既有字段，1.5.1 改的只是失败路径写进它的值。1.5.0 与 1.5.1 写的 Run
+可以互相读。
+
 ## v1.5.0 的商业可读性审阅（additive，两套审阅并行）
 
 v1.5.0 加了第二个审阅者：`CommercialReviewer` 从「读者会不会继续读下去」的角度看同一篇

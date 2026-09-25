@@ -697,6 +697,13 @@ mapped / NAT64 地址按内嵌的那个地址判
 
 ## 升级说明
 
+v1.5.1 是一次修订：没有新能力、没有新文件、新字段或新路由，只修 1.5.0 里两处「文档承诺与
+实现对不上」的地方。从 1.5.0 升到 1.5.1 **不需要改任何代码**，1.5.0 写的产物可以直接读。
+要紧的有两条：失败的 Run 不再把 `commercial_review_status` 谎写成 `not_started`（这一步
+跑成了就是 `completed`、它自己失败了就是 `failed`，结论本体仍不写，因为失败路径从不 promote）；
+看非入选 Attempt 时产物清单里的 `commercial_review` 现在指到 attempt 目录那份，不再把入选
+Attempt 的结论当成当前这份。回滚到 1.5.0 的代价为零。逐版说明见
+[docs/upgrade.md](./docs/upgrade.md)。
 v1.5.0 加了**商业可读性审阅**：与结构审阅完全并列的第二个审阅者，产出
 `CommercialReviewResult`（`commercial-review.json` + API 的 `commercial_review` 字段 +
 前端 Commercial Review 面板 + `POST /api/review/commercial`）。纯 additive：

@@ -89,7 +89,7 @@ runs/
 |---|---|---|---|
 | `run_id` | string | 必有 | 目录名，同时是 API 里的标识 |
 | `project_version` | string | 必有 | 仓库版本号，与 `VERSION` 文件一致 |
-| `status` | string | 必有 | 运行阶段：`planning` / `generating` / `saving` / `validating` / `reviewing` / `reviewing_commercial` / `repairing` / `revalidating` / `rereviewing` / `completed` / `failed` |
+| `status` | string | 必有 | v1.5.1 起按 `RunStatus` 逐字列全：`created` / `planning` / `validating_beat_plan` / `generating` / `saving` / `validating` / `reviewing` / `reviewing_commercial` / `repairing` / `revalidating` / `rereviewing` / `completed` / `failed`（此前漏了最前面两个，实际会出现在第一次推进阶段之前与 BeatPlan 结构校验期间） |
 | `current_stage` | string | 必有 | 写这份 metadata 时正处于的阶段，比 `status` 更细（例如 `Attempt 2 — Repairing`）；失败时 `status` 是 `failed`，这里留着失败发生的阶段 |
 | `started_at` / `finished_at` | string (ISO 8601) | `started_at` 必有；`finished_at` 只在 `completed` / `failed` | 起止时间 |
 | `model` | string | 必有 | 本次真正生效的模型名（请求覆盖 → 环境变量 → 缺省值） |
@@ -106,15 +106,15 @@ runs/
 | `validation_issue_count` | number | 入选版本有校验结论 | 问题条数 |
 | `review_score` | number | 入选版本有审阅结论 | 审阅整体分：v1.3.0 起有维度时是四维均分，否则就是 `review.score`（与 `overall_score` 同一个口径） |
 | `validation_error` / `review_error` | string | 校验或审阅自身抛异常 | 组件自身失败的原因（已过 `safe-text`）；正文不达标不算 |
-| `beat_validation_status` | string | BeatPlan 结构校验跑到过 | v1.4.0 新增：`not_started` / `validating` / `completed` / `failed` |
+| `beat_validation_status` | string | 必有 | v1.4.0 新增：`not_started` / `validating` / `completed` / `failed`。**始终落盘**——没注入校验器、或 Run 在写正文之前就失败时也是 `not_started`，读 metadata 就看出这一步到底跑没跑过（v1.5.1 修正此前「跑到过」的写法） |
 | `beat_validation_passed` | boolean | 有结构校验结论 | v1.4.0 新增：结论里有没有 error 级问题（只有 warning 也算通过） |
 | `beat_validation_issue_count` | number | 有结构校验结论 | v1.4.0 新增：命中了几条结构规则 |
 | `beat_validation_error` | string | Beat 校验器自身抛异常 | v1.4.0 新增：校验器自身失败的原因；**骨架不达标不算错误**，那种情况 `beat_validation_passed` 是 `false`、这个字段不出现 |
-| `commercial_review_status` | string | 商业可读性审阅跑到过 | v1.5.0 新增：`not_started` / `reviewing` / `completed` / `failed`。与 `review_status` 是两条独立的路，谁也不挡谁 |
+| `commercial_review_status` | string | 必有 | v1.5.0 新增：`not_started` / `reviewing` / `completed` / `failed`。与 `review_status` 是两条独立的路，谁也不挡谁。**始终落盘**：这一步自己失败了是 `failed`、跑成了是 `completed`、一次都没跑到（没注入审阅者，或 Run 在正文之前就失败）才是 `not_started`——v1.5.1 修正了此前失败路径一律写成 `not_started` 的写法，那时连 attempts/01/ 里那份商业结论都会被这个字段否认 |
 | `commercial_score` | number | 有商业可读性结论 | v1.5.0 新增：四个维度（Hook / Pacing / Engagement / Payoff）的均分，与 `commercial-review.json` 里的 `score`、API 的 `commercial_review.score` 同一个口径；这一步没跑成时整个字段不出现 |
 | `commercial_review_error` | string | 商业审阅者自身抛异常 | v1.5.0 新增：这一步自身失败的原因；**商业分低不算错误**，那种情况结论照常落盘、这个字段不出现 |
 | `error` | string | Run 失败 | Run 级失败原因，已过 `safe-text`；成功时整个字段不出现 |
-| `artifacts` | object | 必有 | 文件名索引：`config` / `beat_plan` / `story` / `metadata`，有结论时再加 `beat_validation` / `validation` / `review` / `commercial_review` / `quality` |
+| `artifacts` | object | 必有 | 文件名索引，键序即 `artifactsOf` 的写入序：`config` / `beat_plan` / `story` / `metadata`，有结论时再加 `beat_validation` / `validation` / `review` / `quality` / `commercial_review`（v1.5.1 修正此前把 `commercial_review` 排在 `quality` 前的写法） |
 
 运行级 `metadata.json` 是**整体快照**：每次阶段推进都整份重写，不与上一次合并。因此在中断
 现场读到的 metadata 还可能带着过程态字段（例如 Attempt 刚开始时的 `attempt_number`），

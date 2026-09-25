@@ -221,6 +221,42 @@ npm install
 git checkout 1.3.0
 ```
 
+## 从 1.5.0 升级到 1.5.1
+
+**没有任何需要改代码的地方。** 1.5.1 是一次修订：没有新能力、没有新文件、新字段或新路由，
+只修了两处「文档承诺与实现对不上」以及连带的文档错误。产物布局、API、CLI、错误码与 1.5.0
+逐字一致，1.5.0 与 1.5.1 写的 Run 可以互相读。
+
+要紧的有三条：
+
+1. **失败的 Run 不再谎称商业审阅没跑过。** 1.5.0 里，一个「第一次尝试商业审阅跑成了、
+   第二次尝试生成失败」的 Run，`metadata.json` 会把 `commercial_review_status` 写成
+   `not_started`——而 `attempts/01/commercial-review.json` 就在磁盘上。1.5.1 改成写真实状态
+   （这一步跑成了就是 `completed`、它自己失败了就是 `failed`、一次都没跑到才是 `not_started`），
+   与 `beat_validation_status` 同一套口径。结论本体仍然不写：失败路径从不执行 promote，
+   运行根目录那份文件不存在，`commercial_score` 与 `artifacts.commercial_review` 依旧缺席。
+   读侧（Run 详情 API 与前端面板）本来就从 metadata 取这个字段，所以现在也会读到 `completed`
+   配 `commercial_review: null`——面板因此照常隐藏，但状态不再否认已经发生过的一步。
+2. **看非入选 Attempt 时，产物清单里的 `commercial_review` 指到 attempt 目录那份。**
+   1.5.0 把 `commercial-review.json` 加进了 promote 清单，但前端产物清单的前缀规则漏了这个键，
+   于是看 `attempts/03` 时清单会把入选 Attempt 的商业结论当成当前这份显示。1.5.1 把它并入
+   promote 清单的五个键，与 `story` / `review` / `quality` 同一套规则。
+3. **文档改回与实现一致。** `docs/run-artifacts.md` 的 `artifacts` 键序（`commercial_review`
+   排在 `quality` 之后，与 `artifactsOf` 的写入序一致）、`commercial_review_status` 与
+   `beat_validation_status` 的出现条件（始终落盘，不是「跑到过才有」）、`status` 的阶段清单
+   （补上漏掉的 `created` 与 `validating_beat_plan`）。
+
+```bash
+git fetch && git checkout 1.5.1     # tag 不带 v 前缀
+npm install
+```
+
+回滚到 1.5.0 的代价为零：1.5.1 没有新增任何东西，只是把两个字段写对、一处路径算对。
+
+```bash
+git checkout 1.5.0
+```
+
 ## 从 1.4.1 升级到 1.5.0
 
 **没有任何需要改代码的地方。** 全是 additive：既有字段、路由、错误码、CLI 参数与产物布局

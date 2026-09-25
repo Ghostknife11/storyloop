@@ -311,6 +311,66 @@ v1.5.0 加了**商业可读性审阅**：与结构审阅（Co/N/C/Ca 四维）�
 
 ---
 
+## [1.5.1] —— 2026-09-25
+
+v1.5.1 是一次修订：没有新能力、没有新文件、新字段或新路由，只把 1.5.0 里两处「文档承诺与
+实现对不上」的地方改回文档承诺的样子，并修掉连带的文档错误。产物布局、API、CLI、错误码
+与 1.5.0 逐字一致，1.5.0 与 1.5.1 写的 Run 可以互相读。
+
+### Fixed
+
+- **失败的 Run 不再谎称商业可读性审阅没跑过**（`src/core/pipeline.ts`）。1.5.0 的失败路径
+  无条件写 `commercial_review_status: "not_started"`，于是「第一次尝试商业审阅跑成了、
+  第二次尝试生成失败」的 Run，metadata 会声称这一步从没跑过——而
+  `attempts/01/commercial-review.json` 就在磁盘上。用一个假状态掩盖已经发生过的一步，
+  比少写一个字段更糟：读接口读的是这个字段，前端面板也据此整个隐藏。现在跨 Attempt 记住
+  最后一次真实结果（与 v1.1.0 起 `beatCheck` 同一套可变持有者套路），这一步跑成了就是
+  `completed`、它自己失败了就是 `failed`、一次都没跑到才是 `not_started`
+- **结论本体仍然不写**：失败路径从不执行 promote，运行根目录没有 `commercial-review.json`，
+  所以只写状态与错误原因，不带 `commercial_review`。由此 `commercial_score` 与
+  `artifacts.commercial_review` 依旧缺席，不会出现「元数据索引一个不存在的文件」这种新谎
+- **看非入选 Attempt 时，产物清单里的 `commercial_review` 指到 attempt 目录那份**
+  （`src/lib/artifacts-view.ts`）。1.5.0 把 `commercial-review.json` 加进了 promote 清单
+  （Run 根与各 attempt 目录各一份），但前端产物清单的前缀规则漏了这个键，于是看
+  `attempts/03` 时清单会把入选 Attempt 的商业结论当成当前这一份显示。现在它与
+  `story` / `validation` / `review` / `quality` 同一套规则
+
+### Changed
+
+- **`docs/run-artifacts.md` 的 `artifacts` 键序**改成与 `artifactsOf` 的写入序一致：
+  `commercial_review` 排在 `quality` 之后，不是之前
+- **`commercial_review_status` 与 `beat_validation_status` 的出现条件**改成「必有」：
+  两者始终落盘，没跑到时是 `not_started`，不是只有「跑到过」才出现
+- **`status` 的阶段清单**补上漏掉的 `created` 与 `validating_beat_plan`，与 `RunStatus`
+  逐字一致
+- **`docs/api.md` 写清 Run 详情的 `commercial_review_status` 语义**：v1.5.1 起一律取
+  metadata 里的真话，「Attempt 跑成过这一步之后 Run 才失败」读回的是 `completed` 配
+  `commercial_review: null`；`not_started` 只留给真的从没跑到的那一类 Run（含 1.5.0 之前
+  的老 Run）
+
+### Added
+
+- 回归测试 4 条（`tests/test_commercial_review_pipeline.test.ts`，新建
+  「失败路径：状态不许谎称这一步没跑过」小节）：跑成过又失败 → `completed` 且不写结论本体；
+  商业审阅自身失败后又遇到生成失败 → `failed` 且错误保留；一个 Attempt 都没跑到就失败 →
+  仍然是 `not_started`；失败路径的 `error` 文本同样过 safe-text
+- `tests/test_ui_artifacts.test.ts` 补 2 条 `commercial_review` 的前缀断言
+- [docs/upgrade.md](./docs/upgrade.md) 新增「从 1.5.0 升级到 1.5.1」；README 的升级说明
+  与 [docs/compatibility.md](./docs/compatibility.md) 各加一节
+
+### Compatibility
+
+- 1.5.0 → 1.5.1 无破坏性变更，也不需要迁移：既有字段、路由、错误码、CLI 参数与产物布局
+  一个都没动，1.5.0 写的产物可以直接读。只有 `metadata.json` 的
+  `commercial_review_status` 在失败路径上可能读到不同值（从假的 `not_started` 变成真话），
+  这是修 bug 而不是改契约
+- **测试总量：1091 passed / 70 files**（1.5.0 为 1087 / 70）。全部用例仍只用假模型 / 假组件，
+  不调真实接口、不碰真实主机
+- 明细见 [docs/upgrade.md](./docs/upgrade.md) 的「从 1.5.0 升级到 1.5.1」与
+  [docs/compatibility.md](./docs/compatibility.md) 的「v1.5.1 的修订」
+
+---
+
 ## [1.3.0] —— 2026-09-24
 
 v1.3.0 给审阅结论加了**四个基础质量维度**（连贯性 / 叙事 / 人物 / 因果），让同一篇正文的质量

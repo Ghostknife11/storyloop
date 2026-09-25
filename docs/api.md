@@ -188,6 +188,10 @@ v1.4.0 起还多两个读回字段 `beat_validation`（BeatValidationResult 或 
 v1.5.0 起再多两个：`commercial_review`（CommercialReviewResult 或 `null`）与
 `commercial_review_status`（四值）：没有 `commercial-review.json` 的旧 Run 读出 `null` 与
 `not_started`，磁盘上不会被补写。
+v1.5.1 起 `commercial_review_status` 一律取 metadata 里的真话：Run 在某个 Attempt 已经跑成
+这一步之后才失败时，读回的是 `completed` 配 `commercial_review: null`（结论本体只在
+promote 之后才出现在运行根目录，失败路径从不 promote）。v1.5.0 那会儿这种情况会读成
+`not_started`，等于否认磁盘上 `attempts/NN/commercial-review.json` 的存在。
 `run_id` 为 `""`、`.`、`..` 或含路径分隔符时 400；Run 不存在 404 `RUN_NOT_FOUND`。
 
 `quality` 按三级兜底取，三级都是同一版正文（入选 Attempt 最终留下的那一版）：
