@@ -66,6 +66,9 @@ export interface GenerationResult {
   /** v1.4.0 §4：BeatPlan 的结构校验结论；没注入 BeatValidator 时是 null。 */
   beat_validation: BeatValidationResult | null;
   beat_validation_status: BeatValidationStatus;
+  /** v1.4.1 §26：BeatValidator 自身异常时的安全摘要；与 validation_error / review_error 同口径。
+   *  只校验这一步跳过（没有注入 BeatValidator）时是 null。 */
+  beat_validation_error: string | null;
   story: string;
   validation: ValidationResult | null;
   validation_status: ValidationStatus;
@@ -359,6 +362,7 @@ export class GenerationPipeline {
         beat_plan: beatPlan,
         beat_validation: beatCheck.beat_validation,
         beat_validation_status: beatCheck.beat_validation_status,
+        beat_validation_error: beatCheck.beat_validation_error,
         story: selected.attempt.story ?? "",
         validation: selected.attempt.validation,
         validation_status: selected.validation_status,

@@ -38,6 +38,8 @@ export interface RunApiResult {
   /** v1.4.0 §26：BeatPlan 结构校验结论；没跑这一步时为 null。 */
   beat_validation: BeatValidationResult | null;
   beat_validation_status: string;
+  /** v1.4.1 §26：BeatValidator 自身异常时的安全摘要；跳过这一步时没有这个键。 */
+  beat_validation_error?: string;
   /** §26：硬性有效性检查结果；Validator 自身异常时为 null。 */
   validation: ValidationResult | null;
   validation_status: string;

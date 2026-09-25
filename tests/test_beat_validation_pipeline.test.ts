@@ -241,6 +241,32 @@ describe("v1.4.0 BeatValidator 自身异常：只记 failed，Run 照常（§12�
     expect(result.quality_status).toBe("accepted");
     expect(metaOf(dir, result.run_id).status).toBe("completed");
   });
+
+  // v1.4.1：docs/api.md 一直把 beat_validation_error 列在 Run 响应里，但响应体上
+  // 从来没有这个字段——与 validation_error / review_error 不同口径。这里补上落点。
+  it("v1.4.1 校验器抛异常时 GenerationResult 带 beat_validation_error，没异常时没有这个键", async () => {
+    const broken = await pipelineWith(new FakeLLM([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW]), new ArtifactStore(), {
+      validate: () => {
+        throw new Error("结构校验模型超时");
+      },
+    }).run(SAMPLE_CONFIG);
+    expect(broken.beat_validation_error).toContain("结构校验模型超时");
+
+    const healthy = await pipelineWith(
+      new FakeLLM([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW]),
+      new ArtifactStore(),
+      beatValidatorOf(SAMPLE_BEAT_VALIDATION),
+    ).run(SAMPLE_CONFIG);
+    expect(healthy.beat_validation_error).toBeNull();
+
+    // 没注入 BeatValidator：这一步等于不存在，同样没有错误摘要
+    const skipped = await pipelineWith(
+      new FakeLLM([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW]),
+      new ArtifactStore(),
+      undefined,
+    ).run(SAMPLE_CONFIG);
+    expect(skipped.beat_validation_error).toBeNull();
+  });
 });
 
 describe("v1.4.0 没注入 BeatValidator：这一路等于不存在（§5）", () => {

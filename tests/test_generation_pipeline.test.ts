@@ -239,7 +239,7 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
     expect(Object.keys(result).sort()).toEqual([
       "artifacts", "attempt_count", "attempts", "beat_plan",
       // v1.4.0：BeatPlan 结构校验结论同样是正式字段
-      "beat_validation", "beat_validation_status",
+      "beat_validation", "beat_validation_error", "beat_validation_status",
       "config", "finished_at",
       "quality", "quality_status", "review", "review_error", "review_status", "run_id",
       "selected_attempt", "started_at", "status", "story",

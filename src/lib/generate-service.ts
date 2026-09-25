@@ -142,6 +142,9 @@ export interface RunOk {
   /** v1.4.0 §26：BeatPlan 结构校验结论；没跑这一步时为 null。 */
   beat_validation: BeatValidationResult | null;
   beat_validation_status: string;
+  /** v1.4.1 §26：BeatValidator 自身异常时的安全摘要；
+   *  只校验这一步跳过（没有注入 BeatValidator）时整个键不出现。 */
+  beat_validation_error?: string;
   /** §26：硬性有效性检查结果；Validator 自身异常时为 null。 */
   validation: ValidationResult | null;
   validation_status: string;
@@ -245,6 +248,8 @@ function runOkOf(result: GenerationResult): RunOk {
   };
   if (result.validation_error) ok.validation_error = result.validation_error;
   if (result.review_error) ok.review_error = result.review_error;
+  // v1.4.1 §26：与 validation_error / review_error 同一套「有错误才带这个键」的约定
+  if (result.beat_validation_error) ok.beat_validation_error = result.beat_validation_error;
   return ok;
 }
 
