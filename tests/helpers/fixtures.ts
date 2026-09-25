@@ -19,7 +19,9 @@ import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult, ValidationIssueCode } from "@/types/validation-result";
 import type { BeatValidationResult } from "@/types/beat-validation";
+import type { CommercialReviewResult } from "@/types/commercial-review";
 import { LLMError, LLMTimeoutError } from "@/lib/llm";
+import { CommercialReviewer } from "@/lib/commercial-reviewer";
 import type { ApiErrorDetail } from "@/lib/api-error";
 
 // ---------------------------------------------------------------------------
@@ -62,6 +64,23 @@ export const SAMPLE_REVIEW: ReviewResult = {
 
 export const SAMPLE_VALIDATION: ValidationResult = { passed: true, issues: [] };
 
+/** v1.5.0：一份四个维度齐全的商业可读性结论。
+ *  四维 (82 + 68 + 74 + 62) / 4 = 71.5——落盘的 score 由 validateCommercialReviewResult
+ *  重新聚合写入，与这里的 71.5 一致，模型自报的 71 会被覆盖。 */
+export const SAMPLE_COMMERCIAL_REVIEW: CommercialReviewResult = {
+  score: 71.5,
+  summary: "开篇三句内进入冲突，中段略拖，结尾收得住。",
+  strengths: ["第一段就抛出失踪悬念"],
+  problems: ["中段推理过程重复"],
+  suggestions: ["把中段两次排查合并成一次带新信息的排查"],
+  dimensions: {
+    hook: { score: 82, summary: "开场即冲突，读完想往下看。" },
+    pacing: { score: 68, summary: "中段排查过程拖了两轮。" },
+    engagement: { score: 74, summary: "主角动机明确，动力持续住了。" },
+    payoff: { score: 62, summary: "结局收得干脆但回报略赶。" },
+  },
+};
+
 /** v1.4.0：一份结构完整的 BeatPlan 的合格结论——SAMPLE_BEAT_PLAN 就该是这个结果。 */
 export const SAMPLE_BEAT_VALIDATION: BeatValidationResult = {
   passed: true,
@@ -95,6 +114,16 @@ export const INVALID_OUTPUT = validationFailed("INVALID_OUTPUT", "正文不是�
 
 export function reviewOf(score: number, problems: string[] = []): ReviewResult {
   return { score, summary: "总结。", strengths: ["强"], problems };
+}
+
+/** v1.5.0：一个永远返回同一条商业可读性结论的假商业审阅者。
+ *  服务层测试不注入它，buildPipeline 就会自己造一个指向真实端点的客户端（§47 绝不允许），
+ *  所以走服务层的用例一律通过这里给一个假件。FakeLLM 对单条回复会一直重复返回，
+ *  调用多少次都够用。 */
+export function commercialReviewerOf(commercial?: CommercialReviewResult): CommercialReviewer {
+  return new CommercialReviewer(
+    new FakeLLM([JSON.stringify(commercial ?? SAMPLE_COMMERCIAL_REVIEW)]) as never,
+  );
 }
 
 // ---------------------------------------------------------------------------
