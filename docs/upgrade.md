@@ -221,6 +221,57 @@ npm install
 git checkout 1.3.0
 ```
 
+## 从 1.5.1 升级到 1.5.2
+
+**没有任何需要改代码的地方。** 1.5.2 是一次界面修订：没有新能力、没有新文件、新字段或新路由，
+全部改动集中在 `src/**/*.tsx` 的样式类名上。产物布局、API、CLI、错误码与 1.5.1 逐字一致，
+1.5.1 与 1.5.2 写的 Run 可以互相读。
+
+要紧的有四条：
+
+1. **Story Config 外框不再让内容溢出到边框外。** 两列布局原先没有 `min-h-0`，配置列作为
+   grid 子项被拉到整行高（1440×900 下实测 737px），而它自己的内容有 1110px，父级
+   `overflow` 又是默认的 `visible`，于是多出的部分直接画在圆角边框外面——框看着只到一半，
+   内容却一路拖到屏幕外，滚动条也不出现。1.5.2 给两列布局加 `min-h-0`，左右两列都补
+   `min-h-0` + `overflow-y-auto`，内容超高时在自己的框内滚动。
+2. **界面颜色改用主题 token，浅色模式不再是坏的。** 1.5.1 及以前有一部分颜色是写死给深色
+   背景用的：`border-white/10` 盖在白卡片上等于没有边框，`bg-white/[0.03]` 的卡片底色
+   在浅色下看不见，`text-zinc-300` 的正文压在近白底上读不清。1.5.2 全部换成
+   `border-border` / `bg-muted*` / `text-foreground` / `bg-input` / `bg-card`，让浅色与深色
+   两套主题下都成立——`globals.css` 里 `--border`、`--card`、`--muted` 本来就是两套值，
+   写死的那一层只会让两边都不对。
+3. **原生 `<select>` 的边框在浅色模式下是隐形的，现在补齐。** 浅色主题里 `--border` 与
+   `--input` 是同一个值（`oklch(0.92 0.01 280)`），所以「`bg-input` 的底 + `border-input`
+   的线」互相抵消：题材下拉框和 Targeted Repair 的 Issue Type 下拉框看起来没有边框，
+   像贴在卡片上的一块。1.5.2 把两者改成与 `<Input>` 完全一致的输入态——`border-input`
+   配 `bg-transparent`、只在深色下垫 `dark:bg-input/30`——并把写死的
+   `focus:ring-violet-500/30` 换成 `focus-visible:ring-ring/50`。
+4. **右列结果区现在能滚到底，Quality / Validation / Review / Commercial Review 都可达。**
+   右列的「生成结果」面板原先挂着 `flex-1 min-h-[280px]`：在一个 `overflow-y-auto` 的
+   容器里它会拿到一个确定高度，于是它自己的内容溢出永远不会变成该容器的滚动高度。
+   实测右列高 737px，而那些面板的标题排到了 755～2629px——`scrollHeight` 等于
+   `clientHeight`，一像素都滚不动。1.5.2 把它改成 `grow shrink-0`：`flex-basis` 回到
+   `auto`，按内容量出高度，没结果时 `grow` 填满剩余空间、有结果时 `shrink-0` 顶住压缩；
+   同时去掉正文 `<ScrollArea>` 上写死的 `h-full`，右列只保留一个滚动面。左右两列的表现
+   从此一致：内容超高就在自己的圆角框内滚动。
+
+嵌套圆角的错档（外层 `rounded-3xl` 33.6px 里套 `rounded-2xl` 27.2px、内缩却只有 20px）
+与 300/400 档强调色缺 `dark:` 前缀两处也一并修了：内嵌面板改为 `rounded-lg`，
+强调色改成「浅色 600 档、深色 dark:300 档」的成对写法。
+
+```bash
+git fetch && git checkout 1.5.2     # tag 不带 v 前缀
+npm install
+```
+
+回滚到 1.5.1 的代价为零：1.5.2 没有新增任何东西，只是换掉样式类名；回滚后浅色模式会重新
+出现上述几处界面问题，右列那几个面板也会重新变成滚不到，但接口、产物与业务行为一个字节都
+不变。新增的 `tests/test_ui_theme_tokens.test.ts` 在回滚后会红 37 处，这正是它要挡住的事。
+
+```bash
+git checkout 1.5.1
+```
+
 ## 从 1.5.0 升级到 1.5.1
 
 **没有任何需要改代码的地方。** 1.5.1 是一次修订：没有新能力、没有新文件、新字段或新路由，

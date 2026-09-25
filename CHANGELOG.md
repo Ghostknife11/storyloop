@@ -371,6 +371,78 @@ v1.5.1 是一次修订：没有新能力、没有新文件、新字段或新路�
 
 ---
 
+## [1.5.2] —— 2026-09-25
+
+v1.5.2 是一次界面修订：没有新能力、没有新文件、新字段或新路由，只看界面本身哪里不对。
+全部改动集中在 `src/**/*.tsx` 与 `src/app/globals.css` 未涉及的主题 token 使用方式上——
+产物布局、API、CLI、错误码与 1.5.1 逐字一致，1.5.1 与 1.5.2 写的 Run 可以互相读。
+
+问题分三类。一类是**浅色模式下整个界面是坏的**：一部分颜色是写死给深色背景用的
+（`border-white/10`、`bg-white/[0.03]`、`text-zinc-300`、`bg-zinc-800/60`），在浅色底上
+面板边框看不见、卡片底色等于没有、正文浅灰压在近白底上读不清，题材下拉框直接是一块黑。
+第二类是**外框不包裹内容**：Story Config 那一列作为 grid 子项被拉到整行高（实测 737px），
+而它自己的内容有 1110px，父级又没有设 `overflow`，于是多出的 373px 直接渲染在圆角边框外面。
+第三类是**右列根本滚不动**：右列里「生成结果」面板挂着 `flex-1`，在一个
+`overflow-y-auto` 的容器里会拿到确定高度，它自己的内容溢出就永远不会变成该容器的滚动高度。
+实测右列高 737px，而 Attempts / Quality / Validation / Review / Commercial Review
+这些标题排到了 755～2629px——`scrollHeight` 等于 `clientHeight`，一像素都滚不动，
+那几块面板渲染出来了却没人能看见。
+
+### Fixed
+
+- **Story Config 外框不再让内容溢出到边框外**（`src/app/page.tsx`）。两列布局改成
+  `min-h-0`，左右两列都补 `min-h-0` + `overflow-y-auto`：配置列内容超高时在自己的圆角框内
+  滚动，而不是继续往下长、把 CORE STORY / PROTAGONIST / STYLE 三块画到框外。原先右列写的是
+  `min-h-[320px]` 且 `overflow: visible`，才会有「框看着只到一半、内容却拖到屏幕外」的效果
+- **界面颜色统一改用主题 token，浅色与深色两套主题下都成立**。`border-white/5` /
+  `border-white/10` / `border-border/50` 一律换成 `border-border`；`bg-white/[0.02-0.04]` /
+  `bg-white/5` / `bg-white/10` / `bg-black/20` 换成 `bg-muted/40` / `bg-muted/50` / `bg-muted`；
+  `text-zinc-200` / `text-zinc-300` 换成 `text-foreground`；`bg-zinc-800/60` / `bg-zinc-900`
+  换成 `bg-input` / `bg-card`。侧栏也不再为深色单独盖一层 `dark:bg-zinc-900/70` 与
+  `dark:border-white/10`——`--border` 与 `--card` 本身已经是两套主题各自的值，再覆盖一遍
+  只会让两边都不对
+- **原生 `<select>` 的边框在浅色模式下是隐形的**（`src/app/page.tsx`、`src/components/repair-panel.tsx`）。
+  `globals.css` 里浅色主题的 `--border` 与 `--input` 是同一个值
+  （`oklch(0.92 0.01 280)`），所以「`bg-input` 的底 + `border-input` 的线」这两层互相抵消，
+  题材下拉与 Targeted Repair 的 Issue Type 下拉看起来没有边框、像贴在卡片上的一块。
+  现在改成与 `src/components/ui/input.tsx` 完全一致的输入态：`border-input` 配
+  `bg-transparent`、只在深色下垫 `dark:bg-input/30`，焦点环也从写死的
+  `focus:ring-violet-500/30` 换成 `focus-visible:ring-ring/50`，不再跟主题打架
+- **右列结果区现在能滚到底**（`src/app/page.tsx`）。「生成结果」面板从
+  `flex-1 min-h-[280px]` 改成 `grow shrink-0`：`flex-basis` 回到 `auto`，按内容量出高度，
+  没有结果时用 `grow` 把剩下的空间填满、不会塌成一条标题栏，有结果时靠 `shrink-0`
+  顶住不被压缩——内容溢出右列的圆角框时由右列自己滚动，Attempts / Repair Applied /
+  Manual Targeted Repair / Quality / Validation / Review / Commercial Review 全部可达。
+  同时把正文那个 `<ScrollArea>` 上的 `h-full` 去掉，右列只保留一个滚动面，
+  不再出现「外层滚不动、里层 156px 的小窗口里塞 2982px 内容」的双层滚动
+- **嵌套圆角不再错档**。外层 `rounded-3xl`（33.6px）里套 `rounded-2xl`（27.2px）、而内缩只有
+  20px——内圆角应当小于「外圆角减内缩量」，否则两段弧线在拐角处打架。CORE STORY /
+  PROTAGONIST / STYLE 三块内嵌面板改为 `rounded-lg`，与 12px 的间距对齐
+- **强调色的浅色档补上 dark: 前缀**。`text-violet-300` / `text-emerald-400` 一类 300/400 档
+  在浅色底上对比不足，统一改成「浅色用 600 档、深色用 dark:300 档」的成对写法，与
+  `globals.css` 的两套 token 对齐
+
+### Added
+
+- **新增回归测试 `tests/test_ui_theme_tokens.test.ts`**（13 个用例），把上面每一条钉住：
+  源码里不许再出现写死的白 / 锌色边框与底色、`bg-black/*` 只允许出现在整屏遮罩上、
+  300/400 档强调色必须带 `dark:` 前缀、两列主工作区必须同时有 `min-h-0` 与
+  `overflow-y-auto`、三个内嵌面板必须用 `rounded-lg`、原生 select 必须用输入态 token
+  （`border-input` 配 `bg-transparent`，浅色下不许出现 `bg-input`、「生成结果」面板必须是
+  `grow shrink-0` 而不是 `flex-1`、正文滚动区不许写死高度）。
+  拿 1.5.1 的源码跑这批断言会红 37 处，1.5.2 为 0
+
+### Notes
+
+- **测试总量：1104 passed / 71 files**（1.5.1 为 1091 / 70）。全部用例仍只用假模型 / 假组件，
+  不调真实接口、不碰真实主机
+- 界面之外一行代码没动：`src/core`、`src/lib`、`src/storage`、`src/app/api`、`scripts/`
+  与全部产物字段均与 1.5.1 一致，本次发布不涉及任何数据迁移
+- 明细见 [docs/upgrade.md](./docs/upgrade.md) 的「从 1.5.1 升级到 1.5.2」与
+  [docs/compatibility.md](./docs/compatibility.md) 的「v1.5.2 的界面修订」
+
+---
+
 ## [1.3.0] —— 2026-09-24
 
 v1.3.0 给审阅结论加了**四个基础质量维度**（连贯性 / 叙事 / 人物 / 因果），让同一篇正文的质量

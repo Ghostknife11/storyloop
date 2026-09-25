@@ -697,6 +697,16 @@ mapped / NAT64 地址按内嵌的那个地址判
 
 ## 升级说明
 
+v1.5.2 是一次界面修订：没有新能力、没有新文件、新字段或新路由，只改 `src/**/*.tsx` 里的
+样式类名。从 1.5.1 升到 1.5.2 **不需要改任何代码**，1.5.1 写的产物可以直接读。要紧的有三条：
+Story Config 外框不再让内容溢出到边框外（两列布局补 `min-h-0`，两列各自 `min-h-0` +
+`overflow-y-auto`，内容超高时在自己的圆角框内滚动）；界面颜色改用主题 token，
+浅色模式不再是一层看不见的边框配读不清的浅灰正文（`border-border` / `bg-muted*` /
+`text-foreground` / `bg-input` / `bg-card`）；右列结果区原来**一像素都滚不动**——
+`scrollHeight` 等于 `clientHeight`，Attempts / Quality / Validation / Review /
+Commercial Review 全渲染在框外且不可达，修好后右列和左列一样在自己的圆角框内滚到底。
+回滚到 1.5.1 的代价为零。逐版说明见
+[docs/upgrade.md](./docs/upgrade.md)。
 v1.5.1 是一次修订：没有新能力、没有新文件、新字段或新路由，只修 1.5.0 里两处「文档承诺与
 实现对不上」的地方。从 1.5.0 升到 1.5.1 **不需要改任何代码**，1.5.0 写的产物可以直接读。
 要紧的有两条：失败的 Run 不再把 `commercial_review_status` 谎写成 `not_started`（这一步
@@ -810,7 +820,19 @@ v1.5.0 的商业可读性审阅另有四个测试文件：
 没有市场化预言措辞）、`test_commercial_api`（新路由四种返回、模型自报分被重算值顶掉、
 覆盖 `commercial-review.json` 但不碰 `review.json`、旧 Run 读回）。
 
-全部测试合计 **70 个文件 / 1087 条**，全部只调用真实 LLM 之外的桩：
+v1.5.1 的修订回归散在原有文件里（+4 条，未新增文件）：`test_commercial_review_pipeline`
+补齐四条失败路径的 `commercial_review_status` 口径（跨 Attempt 记住真实结果、自己失败即
+`failed`、一个 Attempt 都没跑到才是 `not_started`）、`test_ui_artifacts` 把非入选 Attempt 的
+产物清单从四个文件改成五个（`commercial_review` 并入前缀规则）。
+
+v1.5.2 的界面修订新增 `tests/test_ui_theme_tokens.test.ts`（13 条）：源码级断言钉住
+「不许再写死白 / 锌色边框与底色」「`bg-black/*` 只允许出现在整屏遮罩上」「300/400 档强调色
+必须带 `dark:` 前缀」「两列主工作区必须同时有 `min-h-0` 与 `overflow-y-auto`」「三个内嵌面板
+必须用 `rounded-lg`」「原生 select 必须用 `border-input` 配 `bg-transparent`、浅色下不许
+出现 `bg-input`」「生成结果面板必须是 `grow shrink-0` 而不是 `flex-1`、正文滚动区不许写死
+高度」。拿 1.5.1 的源码跑这批断言会红 37 处。
+
+全部测试合计 **71 个文件 / 1104 条**，全部只调用真实 LLM 之外的桩：
 LLM 由注入的桩对象或 `FakeLLM` 替代（`tests/helpers/fixtures.ts`），
 `fetch` 也被桩掉。重试相关断言同样只用桩，从不触发真实模型调用。
 URL 校验的用例用注入的假解析器跑，不真的查 DNS，也不碰任何真实主机。

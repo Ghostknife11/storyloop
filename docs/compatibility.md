@@ -256,6 +256,40 @@ attempt 级的四类文件上，run 级文件不带前缀。另外 `--help` 出�
 没有改错误码、没有新文件。1.4.0 及以前生成的全部 Run 读出来逐字一致，唯一例外是
 「模型给了维度」的 attempt 摘要分数——而那正是 v1.3.0 文档承诺的口径。
 
+## v1.5.2 的界面修订（只换样式类名，零数据影响）
+
+v1.5.2 没有新能力、没有新字段、没有新路由，改的是 `src/**/*.tsx` 里的样式类名。
+`src/core`、`src/lib`、`src/storage`、`src/app/api`、`scripts/` 一行没动，
+产物布局与字段集与 1.5.1 逐字一致，1.5.1 与 1.5.2 写的 Run 可以互相读，也不存在任何迁移。
+
+- **Story Config 外框不再让内容溢出到边框外。** 两列布局补 `min-h-0`，左右两列都加
+  `min-h-0` + `overflow-y-auto`。此前配置列作为 grid 子项被拉到整行高（1440×900 下 737px）
+  而自身内容有 1110px，父级 `overflow: visible`，多出的部分直接渲染在圆角边框外面。
+- **写死的颜色换成主题 token。** `border-white/*`、`border-border/50` 一律换成
+  `border-border`；`bg-white/[0.02-0.04]`、`bg-white/5`、`bg-white/10`、`bg-black/20`
+  换成 `bg-muted/40` / `bg-muted/50` / `bg-muted`；`text-zinc-200` / `text-zinc-300`
+  换成 `text-foreground`；`bg-zinc-800/60` / `bg-zinc-900` 换成 `bg-input` / `bg-card`。
+  `bg-black/*` 只保留在整屏遮罩上（弹窗遮罩与移动端菜单遮罩），那是它的正当用途。
+- **侧栏不再为深色单独覆盖一层。** 删掉 `dark:bg-zinc-900/70` 与 `dark:border-white/10`：
+  `--border` 与 `--card` 在 `globals.css` 里已经是浅色 / 深色两套值，再盖一层只会让两边都不对。
+- **原生 `<select>` 的边框在浅色模式下不再隐形。** 浅色主题里 `--border` 与 `--input`
+  是同一个值（`oklch(0.92 0.01 280)`），`bg-input` 的底与 `border-input` 的线互相抵消。
+  题材下拉与 Targeted Repair 的 Issue Type 下拉改成与 `ui/input.tsx` 完全一致的输入态：
+  `border-input` 配 `bg-transparent`、仅深色下 `dark:bg-input/30`，焦点环用
+  `focus-visible:ring-ring/50` 取代写死的 `focus:ring-violet-500/30`，option 用 `bg-card`。
+- **右列结果区从「滚不动」变成可以滚到底。** 「生成结果」面板由 `flex-1 min-h-[280px]`
+  改为 `grow shrink-0`（`flex-basis` 回到 `auto`），并去掉正文 `<ScrollArea>` 上写死的
+  `h-full`。此前右列 `scrollHeight == clientHeight`，Attempts / Quality / Validation /
+  Review / Commercial Review 渲染在框外且不可达；现在右列只有一个滚动面，内容超高就在
+  自己的圆角框内滚动，与左列一致。
+- **嵌套圆角与强调色成对写法。** 外层 `rounded-3xl` 内的三块子面板由 `rounded-2xl`
+  改为 `rounded-lg`（内圆角小于「外圆角减内缩量」）；300/400 档强调色改成「浅色 600 档、
+  深色 `dark:`300 档」的成对写法。
+
+这些改动只影响渲染结果，不影响任何接口与产物。新增的
+`tests/test_ui_theme_tokens.test.ts`（13 个用例）把上述规则钉在源码级断言上，防止回退；
+拿 1.5.1 的源码跑这批断言会红 37 处。
+
 ## v1.5.1 的修订（失败路径说真话，仍然纯 additive）
 
 v1.5.1 没有新能力，只修 1.5.0 引入的两处「文档承诺与实现对不上」：
