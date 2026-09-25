@@ -32,7 +32,7 @@ export function ReviewPanel({
   if (state.kind === "hidden") return null;
 
   return (
-    <div className="mb-4 rounded-2xl border border-white/10 bg-white/[0.03] p-3 sm:p-4">
+    <div className="mb-4 rounded-lg border border-border bg-muted/40 p-3 sm:p-4">
       <div className="flex items-center gap-2 mb-2.5">
         <span className={`h-2 w-2 rounded-full ${state.kind === "failed" ? "bg-red-500" : "bg-violet-500"}`} />
         <h3 className="text-xs sm:text-[13px] font-semibold tracking-tight">Review</h3>
@@ -45,7 +45,7 @@ export function ReviewPanel({
 
       {state.kind === "loading" && (
         <div className="flex items-center gap-2 py-4 text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin text-violet-400" />
+          <Loader2 className="h-4 w-4 animate-spin text-violet-600 dark:text-violet-400" />
           <span className="text-xs font-mono">Reviewing...</span>
         </div>
       )}
@@ -54,13 +54,13 @@ export function ReviewPanel({
         <div className="space-y-3">
           <div className="flex items-baseline gap-1.5">
             {/* §32：只有「74 / 100」，没有 PASS / FAIL / 等级 */}
-            <span className="text-3xl font-bold tracking-tight text-violet-300 tabular-nums">
+            <span className="text-3xl font-bold tracking-tight text-primary tabular-nums">
               {state.scoreText}
             </span>
             <span className="text-sm text-muted-foreground font-mono">/ 100</span>
           </div>
 
-          <p className="text-[13px] leading-6 text-zinc-300">{state.summary}</p>
+          <p className="text-[13px] leading-6 text-foreground">{state.summary}</p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -70,7 +70,7 @@ export function ReviewPanel({
                   <li className="text-[12px] text-muted-foreground">（未提供）</li>
                 )}
                 {state.strengths.map((s, i) => (
-                  <li key={i} className="flex gap-1.5 text-[12px] leading-5 text-zinc-300">
+                  <li key={i} className="flex gap-1.5 text-[12px] leading-5 text-foreground">
                     <span className="text-emerald-500 shrink-0">✓</span>
                     <span>{s}</span>
                   </li>
@@ -84,7 +84,7 @@ export function ReviewPanel({
                   <li className="text-[12px] text-muted-foreground">（未提供）</li>
                 )}
                 {state.problems.map((p, i) => (
-                  <li key={i} className="flex gap-1.5 text-[12px] leading-5 text-zinc-300">
+                  <li key={i} className="flex gap-1.5 text-[12px] leading-5 text-foreground">
                     <span className="text-amber-500 shrink-0">•</span>
                     <span>{p}</span>
                   </li>

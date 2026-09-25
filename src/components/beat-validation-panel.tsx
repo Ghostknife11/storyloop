@@ -42,7 +42,7 @@ export function BeatValidationPanel({
   if (state.kind === "hidden") return null;
 
   return (
-    <div className="mb-4 rounded-2xl border border-white/10 bg-white/[0.03] p-3 sm:p-4">
+    <div className="mb-4 rounded-2xl border border-border bg-muted/40 p-3 sm:p-4">
       <div className="flex items-center gap-2 mb-2.5">
         <span
           className={`h-2 w-2 rounded-full ${
@@ -61,7 +61,7 @@ export function BeatValidationPanel({
 
       {state.kind === "loading" && (
         <div className="flex items-center gap-2 py-4 text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin text-emerald-400" />
+          <Loader2 className="h-4 w-4 animate-spin text-emerald-600 dark:text-emerald-400" />
           <span className="text-xs font-mono">Validating beats...</span>
         </div>
       )}
@@ -71,7 +71,7 @@ export function BeatValidationPanel({
           <div className="flex items-baseline gap-2">
             <span
               className={`text-lg font-semibold tracking-tight ${
-                state.passed ? "text-emerald-400" : "text-amber-400"
+                state.passed ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"
               }`}
             >
               {state.passed ? "Passed" : "Not Passed"}
@@ -83,31 +83,31 @@ export function BeatValidationPanel({
             </span>
           </div>
 
-          <div className="text-[12px] leading-5 text-zinc-300">{state.summary}</div>
+          <div className="text-[12px] leading-5 text-foreground">{state.summary}</div>
 
           {state.issues.length > 0 && (
             <ul className="space-y-2">
               {state.issues.map((issue, i) => (
                 <li
                   key={`${issue.code}-${i}`}
-                  className="rounded-xl border border-white/5 bg-black/20 px-2.5 py-2 space-y-1"
+                  className="rounded-xl border border-border bg-muted/40 px-2.5 py-2 space-y-1"
                 >
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[11px] font-mono font-medium text-zinc-200">{issue.code}</span>
+                    <span className="text-[11px] font-mono font-medium text-foreground">{issue.code}</span>
                     <span
                       className={`text-[10px] font-mono uppercase tracking-wider rounded-full border px-1.5 py-px ${
-                        SEVERITY_STYLE[issue.severity] ?? "text-muted-foreground border-white/10"
+                        SEVERITY_STYLE[issue.severity] ?? "text-muted-foreground border-border"
                       }`}
                     >
                       {issue.severity}
                     </span>
                     {beatIssueLabel(issue.beat_ids) && (
-                      <span className="text-[10px] font-mono text-violet-300">
+                      <span className="text-[10px] font-mono text-violet-600 dark:text-violet-300">
                         {beatIssueLabel(issue.beat_ids)}
                       </span>
                     )}
                   </div>
-                  <div className="text-[12px] leading-5 text-zinc-300">{issue.message}</div>
+                  <div className="text-[12px] leading-5 text-foreground">{issue.message}</div>
                 </li>
               ))}
             </ul>

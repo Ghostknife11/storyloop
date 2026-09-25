@@ -58,7 +58,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           mobileOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full",
           collapsed ? "md:w-[72px]" : "md:w-60",
           "md:rounded-r-3xl md:my-2 md:ml-2",
-          "bg-card/80 dark:bg-zinc-900/70 glass-strong border border-border/50 dark:border-white/10 shadow-medium overflow-hidden",
+          "bg-card/80 glass-strong border border-border shadow-medium overflow-hidden",
           "pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] md:pt-0 md:pb-0",
         )}
         onClick={(e) => e.stopPropagation()}
@@ -137,7 +137,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <div className="p-3 space-y-2 shrink-0">
           <button
             onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
-            className="w-full flex items-center justify-center gap-2 h-9 rounded-full border border-border/50 bg-card/50 backdrop-blur text-xs font-medium hover:bg-accent transition-colors"
+            className="w-full flex items-center justify-center gap-2 h-9 rounded-full border border-border bg-card/50 backdrop-blur text-xs font-medium hover:bg-accent transition-colors"
             aria-label="切换主题"
           >
             {!mounted ? <Sun className="h-4 w-4" /> : resolvedTheme === "dark" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
@@ -153,7 +153,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       </aside>
 
       <main className="flex-1 overflow-hidden flex flex-col min-w-0 bg-transparent">
-        <div className="md:hidden flex items-center gap-2 h-12 px-3 border-b border-border/50 bg-card/60 glass shrink-0 pt-[env(safe-area-inset-top)]">
+        <div className="md:hidden flex items-center gap-2 h-12 px-3 border-b border-border bg-card/60 glass shrink-0 pt-[env(safe-area-inset-top)]">
           <button onClick={() => setMobileOpen(true)} className="h-8 w-8 grid place-items-center rounded-full bg-card border shadow-sm shrink-0" aria-label="打开菜单">
             <Menu className="h-4 w-4" />
           </button>
@@ -164,7 +164,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-600 hidden sm:inline-flex">{version}</span>
         </div>
         <div className="flex-1 overflow-hidden p-2 sm:p-3 md:p-4 pb-[max(0.5rem,env(safe-area-inset-bottom))] md:pb-4">
-          <div className="h-full overflow-hidden rounded-2xl sm:rounded-3xl border border-border/50 bg-card/40 glass shadow-soft flex flex-col min-w-0">
+          <div className="h-full overflow-hidden rounded-2xl sm:rounded-3xl border border-border bg-card/40 glass shadow-soft flex flex-col min-w-0">
             <ErrorBoundary>{children}</ErrorBoundary>
           </div>
         </div>

@@ -781,10 +781,10 @@ export default function GeneratePage() {
               : done
                 ? "text-emerald-500 border-emerald-500/30 bg-emerald-500/10"
                 : active
-                  ? "text-violet-300 border-violet-500/40 bg-violet-500/10"
+                  ? "text-violet-600 dark:text-violet-300 border-violet-500/40 bg-violet-500/10"
                   : skipped
-                    ? "text-muted-foreground/60 border-white/10"
-                    : "text-muted-foreground border-white/10";
+                    ? "text-muted-foreground/60 border-border"
+                    : "text-muted-foreground border-border";
             return (
               <span key={s.key} className={`flex items-center gap-1 rounded-full border px-2 py-0.5 ${tone}`}>
                 {failed ? "✕" : done ? "✓" : active ? <Loader2 className="h-3 w-3 animate-spin" /> : skipped ? "–" : "·"}
@@ -803,7 +803,7 @@ export default function GeneratePage() {
           真实结果一律以 Attempt 面板为准（不伪造 Attempt 1 → Retrying → Attempt 2 的过程）。 */}
       {generating && settings.retryEnabled && settings.maxAttempts > 1 && (
         <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono text-muted-foreground">
-          <RotateCcw className="h-3 w-3 text-violet-400" />
+          <RotateCcw className="h-3 w-3 text-violet-600 dark:text-violet-400" />
           <span>
             Automatic Retry on：校验未通过或审阅分数低于 {settings.minReviewScore} 时会重新生成整篇
             （最多 {settings.maxAttempts} 次，会增加 API 调用与费用）。
@@ -814,7 +814,7 @@ export default function GeneratePage() {
       {/* §20/§35 修订提示：说明 Repair-before-Retry，但不在终态伪造修订过程。 */}
       {generating && settings.repairEnabled && settings.maxRepairsPerAttempt > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-mono text-muted-foreground">
-          <Wrench className="h-3 w-3 text-violet-400" />
+          <Wrench className="h-3 w-3 text-violet-600 dark:text-violet-400" />
           <span>
             Targeted Repair on：未通过时先针对单个问题修订现有正文，再重新校验 / 审阅
             （每次生成最多 {settings.maxRepairsPerAttempt} 次）。
@@ -830,7 +830,7 @@ export default function GeneratePage() {
               key={label}
               className={`flex items-center gap-1 rounded-full border px-2 py-0.5 ${
                 label === "Repairing"
-                  ? "border-violet-500/40 bg-violet-500/10 text-violet-300"
+                  ? "border-violet-500/40 bg-violet-500/10 text-violet-600 dark:text-violet-300"
                   : "border-emerald-500/30 bg-emerald-500/10 text-emerald-500"
               }`}
             >
@@ -842,7 +842,7 @@ export default function GeneratePage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 flex-1 min-h-0">
         {/* 配置区 */}
-        <section className="flex flex-col rounded-3xl border border-white/10 bg-card/60 glass shadow-soft p-4 sm:p-5 gap-4 min-h-[320px]">
+        <section className="flex flex-col rounded-3xl border border-border bg-card/60 glass shadow-soft p-4 sm:p-5 gap-4 min-h-0 overflow-y-auto">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-violet-500 shadow-glow" />
@@ -882,8 +882,8 @@ export default function GeneratePage() {
             <div className="space-y-1.5">
               <Label className="text-[11px] text-muted-foreground">Genre</Label>
               <select value={form.genre} onChange={(e) => set({ genre: e.target.value })} disabled={busy}
-                className="w-full h-9 rounded-xl border border-white/10 bg-zinc-800/60 px-3 text-xs text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/30">
-                {GENRE_PRESETS.map((g) => <option key={g} value={g} className="bg-zinc-900">{g}</option>)}
+                className="w-full h-9 rounded-lg border border-input bg-transparent px-3 text-xs text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30">
+                {GENRE_PRESETS.map((g) => <option key={g} value={g} className="bg-card">{g}</option>)}
               </select>
             </div>
             {form.genre === "其他" && (
@@ -895,7 +895,7 @@ export default function GeneratePage() {
           </div>
 
           {/* §41 Core Story */}
-          <div className="rounded-2xl border border-white/5 p-3 space-y-3">
+          <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-3">
             <span className="text-[10px] font-mono tracking-widest uppercase text-muted-foreground">Core Story</span>
             <div className="space-y-1.5">
               <Label className="text-[11px] text-muted-foreground">Premise（核心设定）</Label>
@@ -928,7 +928,7 @@ export default function GeneratePage() {
           </div>
 
           {/* §41 Protagonist */}
-          <div className="rounded-2xl border border-white/5 p-3 space-y-3">
+          <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-3">
             <span className="text-[10px] font-mono tracking-widest uppercase text-muted-foreground">Protagonist</span>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
@@ -955,7 +955,7 @@ export default function GeneratePage() {
           </div>
 
           {/* §41 Style */}
-          <div className="rounded-2xl border border-white/5 p-3 space-y-3">
+          <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-3">
             <span className="text-[10px] font-mono tracking-widest uppercase text-muted-foreground">Style</span>
             <div className="space-y-1.5">
               <Label className="text-[11px] text-muted-foreground">Style（可选）</Label>
@@ -992,12 +992,12 @@ export default function GeneratePage() {
         </section>
 
         {/* Beat Plan + 结果区 */}
-        <section className="flex flex-col gap-3 min-h-[320px]">
+        <section className="flex flex-col gap-3 min-h-0 overflow-y-auto">
           {/* §17 Beat Plan 区 */}
-          <div className="rounded-3xl border border-white/10 bg-card/60 glass shadow-soft flex flex-col min-h-[200px] overflow-hidden">
-            <div className="flex items-center justify-between px-4 sm:px-5 py-3 border-b border-white/5 shrink-0">
+          <div className="rounded-3xl border border-border bg-card/60 glass shadow-soft flex flex-col min-h-[200px] shrink-0 overflow-hidden">
+            <div className="flex items-center justify-between px-4 sm:px-5 py-3 border-b border-border shrink-0">
               <div className="flex items-center gap-2">
-                <span className={`h-2 w-2 rounded-full ${beatPlan ? "bg-emerald-500" : "bg-zinc-600"}`} />
+                <span className={`h-2 w-2 rounded-full ${beatPlan ? "bg-emerald-500" : "bg-muted-foreground"}`} />
                 <h2 className="text-xs sm:text-[13px] font-semibold tracking-tight">
                   Beat Plan {beatPlan ? `(${beatPlan.beats.length})` : ""}
                 </h2>
@@ -1024,7 +1024,7 @@ export default function GeneratePage() {
                 )}
                 {planning && (
                   <div className="py-10 flex flex-col items-center gap-3 text-muted-foreground">
-                    <Loader2 className="h-6 w-6 animate-spin text-violet-400" />
+                    <Loader2 className="h-6 w-6 animate-spin text-violet-600 dark:text-violet-400" />
                     <span className="text-xs font-mono">Planning beats...</span>
                   </div>
                 )}
@@ -1037,9 +1037,9 @@ export default function GeneratePage() {
                   </div>
                 )}
                 {beatPlan?.beats.map((beat, index) => (
-                  <div key={beat.id} className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 space-y-2">
+                  <div key={beat.id} className="rounded-lg border border-border bg-muted/40 p-3 space-y-2">
                     <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-mono font-bold text-violet-300">Beat {beat.id}</span>
+                      <span className="text-[11px] font-mono font-bold text-violet-600 dark:text-violet-300">Beat {beat.id}</span>
                       <div className="ml-auto flex items-center gap-1">
                         <Button variant="ghost" size="sm" className="h-7 w-7 p-0 rounded-full" title="上移"
                           disabled={busy || index === 0} onClick={() => moveBeat(index, -1)}>
@@ -1049,7 +1049,7 @@ export default function GeneratePage() {
                           disabled={busy || index === beatPlan.beats.length - 1} onClick={() => moveBeat(index, 1)}>
                           <ArrowDown className="h-3.5 w-3.5" />
                         </Button>
-                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 rounded-full text-red-400 hover:text-red-300" title="删除这个 Beat"
+                        <Button variant="ghost" size="sm" className="h-7 w-7 p-0 rounded-full text-red-600 dark:text-red-400 hover:text-red-600 dark:text-red-300" title="删除这个 Beat"
                           disabled={busy || beatPlan.beats.length <= 1} onClick={() => deleteBeat(beat.id)}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
@@ -1102,8 +1102,8 @@ export default function GeneratePage() {
           </div>
 
           {/* 生成结果 */}
-          <div className="flex-1 min-h-[280px] flex flex-col rounded-3xl border border-white/10 bg-card/60 glass shadow-soft overflow-hidden">
-            <div className="flex items-center justify-between px-4 sm:px-5 py-3 border-b border-white/5 shrink-0">
+          <div className="grow shrink-0 flex flex-col rounded-3xl border border-border bg-card/60 glass shadow-soft overflow-hidden">
+            <div className="flex items-center justify-between px-4 sm:px-5 py-3 border-b border-border shrink-0">
               <div className="flex items-center gap-2">
                 <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
                 <h2 className="text-xs sm:text-[13px] font-semibold tracking-tight">Generated Story</h2>
@@ -1139,19 +1139,19 @@ export default function GeneratePage() {
 
             {preview && (
               <details className="mx-4 mt-3 rounded-2xl border border-violet-500/20 bg-violet-500/5 p-3" open>
-                <summary className="text-[11px] font-mono tracking-wide text-violet-300 cursor-pointer">FINAL PROMPT（preview）</summary>
-                <pre className="mt-2 text-[11px] leading-5 text-zinc-300 whitespace-pre-wrap max-h-52 overflow-auto">{preview}</pre>
+                <summary className="text-[11px] font-mono tracking-wide text-violet-600 dark:text-violet-300 cursor-pointer">FINAL PROMPT（preview）</summary>
+                <pre className="mt-2 text-[11px] leading-5 text-muted-foreground whitespace-pre-wrap max-h-52 overflow-auto">{preview}</pre>
               </details>
             )}
 
-            <div className="flex-1 min-h-0 overflow-hidden">
+            <div className="flex flex-col min-h-[280px]">
               {generating ? (
-                <div className="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground">
-                  <Loader2 className="h-7 w-7 animate-spin text-violet-400" />
+                <div className="flex flex-col items-center justify-center gap-3 text-muted-foreground min-h-[280px]">
+                  <Loader2 className="h-7 w-7 animate-spin text-violet-600 dark:text-violet-400" />
                   <span className="text-xs font-mono tracking-wide">Generating...</span>
                 </div>
               ) : phase === "success" && result ? (
-                <ScrollArea className="h-full">
+                <ScrollArea>
                   <div className="p-4 sm:p-6">
                     <h1 className="text-2xl font-bold tracking-tight mb-1">{runTitle}</h1>
                     <div className="text-[11px] text-muted-foreground font-mono mb-4">
@@ -1221,9 +1221,9 @@ export default function GeneratePage() {
                       onReviewAgain={handleCommercialReviewAgain}
                     />
                     {/* §42 产物清单：只展示文件名，不展示服务端绝对路径（§67） */}
-                    <div className="mb-4 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+                    <div className="mb-4 rounded-lg border border-border bg-muted/40 p-3">
                       <div className="text-[10px] font-mono tracking-widest uppercase text-muted-foreground mb-1.5">Artifacts</div>
-                      <div className="text-[11px] font-mono text-zinc-300">runs/{result.run_id}/</div>
+                      <div className="text-[11px] font-mono text-foreground">runs/{result.run_id}/</div>
                       <ul className="mt-1 space-y-0.5">
                         {Object.entries(result.artifacts).map(([key, file]) => (
                           <li key={key} className="text-[11px] font-mono text-muted-foreground">
@@ -1240,8 +1240,8 @@ export default function GeneratePage() {
                           onClick={() => setStoryTab("before")}
                           className={`rounded-full border px-2.5 py-0.5 ${
                             showBefore
-                              ? "border-violet-500/40 bg-violet-500/10 text-violet-300"
-                              : "border-white/10 text-muted-foreground"
+                              ? "border-violet-500/40 bg-violet-500/10 text-violet-600 dark:text-violet-300"
+                              : "border-border text-muted-foreground"
                           }`}
                           aria-label="Before Repair"
                         >
@@ -1252,8 +1252,8 @@ export default function GeneratePage() {
                           onClick={() => setStoryTab("after")}
                           className={`rounded-full border px-2.5 py-0.5 ${
                             showBefore
-                              ? "border-white/10 text-muted-foreground"
-                              : "border-violet-500/40 bg-violet-500/10 text-violet-300"
+                              ? "border-border text-muted-foreground"
+                              : "border-violet-500/40 bg-violet-500/10 text-violet-600 dark:text-violet-300"
                           }`}
                           aria-label="After Repair"
                         >
@@ -1271,7 +1271,7 @@ export default function GeneratePage() {
                 </ScrollArea>
               ) : (
                 <div className="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground px-6 text-center">
-                  <div className="size-14 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
+                  <div className="size-14 rounded-2xl bg-muted/50 border border-border flex items-center justify-center">
                     <BookOpen className="h-6 w-6" />
                   </div>
                   <p className="text-[13px]">
@@ -1281,7 +1281,7 @@ export default function GeneratePage() {
               )}
             </div>
 
-            <div className="px-4 sm:px-5 py-3 border-t border-white/5 shrink-0 flex gap-2">
+            <div className="px-4 sm:px-5 py-3 border-t border-border shrink-0 flex gap-2">
               <Button onClick={handleGenerate} disabled={busy || !beatPlan}
                 title={beatPlan ? "根据 Beat Plan 生成正文" : "Generate a beat plan first."}
                 className="flex-1 h-10 rounded-full bg-violet-600 hover:bg-violet-500 text-white font-medium shadow-glow disabled:opacity-60">

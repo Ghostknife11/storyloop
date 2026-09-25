@@ -83,7 +83,7 @@ export function RepairPanel({ repairs }: RepairPanelProps) {
   if (repairs.length === 0) return null;
 
   return (
-    <div className="mb-4 rounded-2xl border border-white/10 bg-white/[0.03] p-3 sm:p-4" data-testid="repair-panel">
+    <div className="mb-4 rounded-2xl border border-border bg-muted/40 p-3 sm:p-4" data-testid="repair-panel">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-2">
         <h3 className="text-xs sm:text-[13px] font-semibold tracking-tight">Repair Applied</h3>
         <span className="text-[11px] font-mono text-muted-foreground" data-testid="repair-count">
@@ -93,18 +93,18 @@ export function RepairPanel({ repairs }: RepairPanelProps) {
 
       <div className="space-y-1.5">
         {repairs.map((repair) => (
-          <div key={repair.repair_number} className="rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2">
+          <div key={repair.repair_number} className="rounded-xl border border-border bg-muted/40 px-3 py-2">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <span className="text-[12px] font-mono font-medium">Repair {repair.repair_number}</span>
               <span className="text-[11px] font-mono text-muted-foreground">
                 Type: {repair.issue_type}（{repairIssueLabel(repair.issue_type)}）
               </span>
               {repair.success ? (
-                <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-emerald-400">
+                <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400">
                   <CheckCircle2 className="h-3 w-3" /> Repaired
                 </span>
               ) : (
-                <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-amber-400">
+                <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
                   <XCircle className="h-3 w-3" /> Not repaired
                 </span>
               )}
@@ -188,9 +188,9 @@ export function ManualRepair({
   }
 
   return (
-    <div className="mb-4 rounded-2xl border border-white/10 bg-white/[0.03] p-3 sm:p-4" data-testid="manual-repair">
+    <div className="mb-4 rounded-2xl border border-border bg-muted/40 p-3 sm:p-4" data-testid="manual-repair">
       <div className="flex items-center gap-2 mb-2">
-        <Wrench className="h-3.5 w-3.5 text-violet-400" />
+        <Wrench className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400" />
         <h3 className="text-xs sm:text-[13px] font-semibold tracking-tight">Manual Targeted Repair</h3>
       </div>
       <p className="text-[11px] text-muted-foreground leading-5 mb-3">
@@ -204,11 +204,11 @@ export function ManualRepair({
             value={issueType}
             onChange={(e) => setIssueType(e.target.value)}
             disabled={repairing}
-            className="w-full h-9 rounded-xl border border-white/10 bg-zinc-800/60 px-3 text-xs text-zinc-200 focus:outline-none focus:ring-2 focus:ring-violet-500/30"
+            className="w-full h-9 rounded-xl border border-input bg-transparent px-3 text-xs text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30"
             aria-label="Issue Type"
           >
             {REPAIR_ISSUE_TYPES.map((t) => (
-              <option key={t} value={t} className="bg-zinc-900">
+              <option key={t} value={t} className="bg-card">
                 {t}（{repairIssueLabel(t)}）
               </option>
             ))}

@@ -48,7 +48,7 @@ export function AttemptPanel({
   const totalRepairs = attempts.reduce((sum, a) => sum + a.repair_count, 0);
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3 sm:p-4">
+    <div className="rounded-2xl border border-border bg-muted/40 p-3 sm:p-4">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-3">
         <h3 className="text-xs sm:text-[13px] font-semibold tracking-tight">Attempts</h3>
         <span className="text-[11px] font-mono text-muted-foreground" data-testid="attempt-count">
@@ -59,15 +59,15 @@ export function AttemptPanel({
         </span>
         {/* §40：Run 级修订次数 = 各 Attempt 修订次数之和，Repair 不新增 Attempt 行 */}
         {totalRepairs > 0 && (
-          <span className="text-[11px] font-mono text-violet-300" data-testid="run-repair-count">
+          <span className="text-[11px] font-mono text-violet-600 dark:text-violet-300" data-testid="run-repair-count">
             Repairs: {totalRepairs}
           </span>
         )}
         <span
           className={`ml-auto text-[10px] font-mono tracking-widest uppercase px-2 py-0.5 rounded-full border ${
             exhausted
-              ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
-              : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+              ? "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-300"
+              : "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300"
           }`}
           data-testid="quality-status"
         >
@@ -91,7 +91,7 @@ export function AttemptPanel({
             <div
               key={attempt.attempt_number}
               className={`rounded-xl border px-3 py-2 ${
-                isViewing ? "border-violet-500/40 bg-violet-500/5" : "border-white/10 bg-white/[0.02]"
+                isViewing ? "border-violet-500/40 bg-violet-500/5" : "border-border bg-muted/40"
               }`}
             >
               <button
@@ -102,18 +102,18 @@ export function AttemptPanel({
               >
                 <span className="text-[12px] font-mono font-medium">Attempt {attempt.attempt_number}</span>
                 {isSelected && (
-                  <span className="text-[10px] font-mono text-violet-300 border border-violet-500/30 rounded-full px-1.5 py-0.5">
+                  <span className="text-[10px] font-mono text-violet-600 dark:text-violet-300 border border-violet-500/30 rounded-full px-1.5 py-0.5">
                     Selected
                   </span>
                 )}
                 {loadingAttempt === attempt.attempt_number ? (
-                  <Loader2 className="h-3 w-3 animate-spin text-violet-400 ml-auto" />
+                  <Loader2 className="h-3 w-3 animate-spin text-violet-600 dark:text-violet-400 ml-auto" />
                 ) : attempt.accepted ? (
-                  <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-emerald-400">
+                  <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400">
                     <CheckCircle2 className="h-3 w-3" /> Accepted
                   </span>
                 ) : (
-                  <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-amber-400">
+                  <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
                     <RotateCcw className="h-3 w-3" /> {retryReasonLabel(attempt.retry_reason)}
                   </span>
                 )}
@@ -136,7 +136,7 @@ export function AttemptPanel({
                 )}
                 {/* §40：Repair 挂在这个 Attempt 内部，不新增 Attempt 行 */}
                 {attempt.repair_count > 0 && (
-                  <span className="inline-flex items-center gap-1 text-violet-300" data-testid={`attempt-${attempt.attempt_number}-repairs`}>
+                  <span className="inline-flex items-center gap-1 text-violet-600 dark:text-violet-300" data-testid={`attempt-${attempt.attempt_number}-repairs`}>
                     <Wrench className="h-3 w-3" />
                     Repairs: {attempt.repair_count}
                     {attempt.repairs.map((r) => (

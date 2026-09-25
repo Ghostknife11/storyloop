@@ -41,7 +41,7 @@ export default function SettingsPage() {
           <p className="text-xs text-muted-foreground mt-1">模型与生成参数 · 保存于浏览器本地</p>
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur p-4 sm:p-5 space-y-4">
+        <div className="rounded-2xl border border-border bg-muted/40 backdrop-blur p-4 sm:p-5 space-y-4">
           <div className="space-y-1.5">
             <Label className="text-[11px] text-muted-foreground">Base URL（留空则使用服务端 .env 的 LLM_BASE_URL）</Label>
             <Input
@@ -83,7 +83,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur p-4 sm:p-5 space-y-4">
+        <div className="rounded-2xl border border-border bg-muted/40 backdrop-blur p-4 sm:p-5 space-y-4">
           <div className="space-y-1">
             <h2 className="text-[13px] font-semibold tracking-tight">Automatic Retry</h2>
             <p className="text-[11px] text-muted-foreground leading-5">
@@ -164,13 +164,13 @@ export default function SettingsPage() {
           </div>
 
           <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-[11px] text-muted-foreground leading-5">
-            <RotateCcw className="h-3.5 w-3.5 text-amber-400 inline-block align-[-2px] mr-1.5" />
+            <RotateCcw className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 inline-block align-[-2px] mr-1.5" />
             Increasing max attempts may increase API usage and cost.
           </div>
         </div>
 
         {/* §34 Targeted Repair：先修现有 Story，修不动才整篇重生。 */}
-        <div className="rounded-2xl border border-white/10 bg-white/[0.04] backdrop-blur p-4 sm:p-5 space-y-4">
+        <div className="rounded-2xl border border-border bg-muted/40 backdrop-blur p-4 sm:p-5 space-y-4">
           <div className="space-y-1">
             <h2 className="text-[13px] font-semibold tracking-tight">Targeted Repair</h2>
             <p className="text-[11px] text-muted-foreground leading-5">
@@ -217,21 +217,21 @@ export default function SettingsPage() {
           </div>
 
           <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-[11px] text-muted-foreground leading-5">
-            <RotateCcw className="h-3.5 w-3.5 text-amber-400 inline-block align-[-2px] mr-1.5" />
+            <RotateCcw className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 inline-block align-[-2px] mr-1.5" />
             Each repair is one extra LLM call. v0.8.0 uses simple issue categories and does not
             diagnose why a story failed.
           </div>
         </div>
 
         <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4 flex gap-3">
-          <KeyRound className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+          <KeyRound className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
           <div className="text-xs text-muted-foreground leading-5">
-            <span className="text-amber-300 font-medium">API Key 不在浏览器保存。</span>
-            请在服务端 <code className="font-mono text-zinc-300">.env</code> 中配置
-            <code className="font-mono text-zinc-300 mx-1">LLM_API_KEY</code>（另可配置
-            <code className="font-mono text-zinc-300 mx-1">LLM_BASE_URL</code> /
-            <code className="font-mono text-zinc-300 mx-1">LLM_MODEL</code> 作为默认值）。
-            参考项目根目录的 <code className="font-mono text-zinc-300">.env.example</code>。
+            <span className="text-amber-600 dark:text-amber-300 font-medium">API Key 不在浏览器保存。</span>
+            请在服务端 <code className="font-mono text-foreground">.env</code> 中配置
+            <code className="font-mono text-foreground mx-1">LLM_API_KEY</code>（另可配置
+            <code className="font-mono text-foreground mx-1">LLM_BASE_URL</code> /
+            <code className="font-mono text-foreground mx-1">LLM_MODEL</code> 作为默认值）。
+            参考项目根目录的 <code className="font-mono text-foreground">.env.example</code>。
           </div>
         </div>
       </div>
