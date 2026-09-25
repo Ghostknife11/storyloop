@@ -16,6 +16,9 @@
 # run artifacts (§15: runs/<run_id>/ 由 ArtifactStore 生成，不入库)
 /runs/
 
+# experiment definitions & results (v1.7.0: experiments/<experiment_id>/ 由 ExperimentStore 生成，不入库)
+/experiments/
+
 # build
 /dist/
 /build/

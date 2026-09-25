@@ -221,6 +221,46 @@ npm install
 git checkout 1.3.0
 ```
 
+## 从 1.6.0 升级到 1.7.0
+
+**没有任何需要改代码的地方。** 1.7.0 是纯增量：没有删字段、没有改字段名、没有改既有路由与
+错误码，产物布局、CLI 与 `metadata.json` 契约和 1.6.0 逐字一致。新增的是**受控实验框架**：
+一份定义、多个 Variant、批量跑、按 Variant 汇总计数与均值。
+
+要紧的有五条：
+
+1. **新增四条路由**：`POST /api/experiments`（建定义，不跑）、`GET /api/experiments`（列表）、
+   `GET /api/experiments/<experiment_id>`（定义 + 格子 + 结果）、
+   `POST /api/experiments/<experiment_id>/run`（跑完）。如果下游对 `/api` 做了白名单代理，
+   现在要把这四个路径放进去。
+2. **新增三个错误码**：`EXPERIMENT_INVALID`（400，定义不合法或服务端没配 `LLM_API_KEY`）、
+   `EXPERIMENT_NOT_FOUND`（404）、`EXPERIMENT_CONFLICT`（409，同名实验已存在或已跑过）。
+   按 `error.code` 处理失败的下游要容忍不认识的 code，而不是当成 500。
+3. **多了一个目录**：实验数据落在 `<RUNS_DIR>/../experiments/<experimentId>/` 下的
+   `definition.json` / `runs.json` / `results.json`。一次普通 Run 的产物一个字节都没变；
+   `run-manifest.json` 只在实验样本上多一个可选的 `experiment` 块（`experimentId` /
+   `variantId` / `repetition`），普通 Run 里这个键不出现。
+4. **实验不接受凭据与地址**：定义里带 `api_key` / `authorization` / `token` / `headers` /
+   `baseUrl` / 原始提示词形状的键一律 400；一个样本的地址永远来自服务端 `LLM_BASE_URL`，
+   于是 v1.1.0 的地址关卡对每个 Variant 都生效。这是安全边界收紧，不是收紧你的输入格式。
+5. **实验的边界是承诺的一部分**：不排名、不评选赢家、缺分数显示 `—`（不补 0）、
+   不做显著性检验、不自动调参；同一份定义重跑是 409（定义与结果都不可变，
+   要改条件请复制成一个新实验）。如果你的流程期待「跑一次自动挑最好的那组」，
+   这个版本要靠你自己读数字。
+
+```bash
+git fetch && git checkout 1.7.0     # tag 不带 v 前缀
+npm install
+```
+
+回滚到 1.6.0 的代价为零：多出来的 `experiments/` 目录、四条路由与三个错误码被旧版本忽略，
+1.6.0 读 1.7.0 跑出来的 Run 与往常一样（`manifest.experiment` 这个键它不认，但清单照旧读）。
+新增的 `tests/test_experiment_*.test.ts` 在回滚后会红，这正是它要挡住的事。
+
+```bash
+git checkout 1.6.0
+```
+
 ## 从 1.5.2 升级到 1.6.0
 
 **没有任何需要改代码的地方。** 1.6.0 是纯增量：没有删字段、没有改字段名、没有改路由与错误码，

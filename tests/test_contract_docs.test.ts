@@ -37,14 +37,29 @@ const DOCS = [
   "cli.md",
   "upgrade.md",
   "compatibility.md",
+  // v1.7.0：受控实验框架的契约（定义 / 执行 / 聚合 / 边界）
+  "experiments.md",
+] as const;
+
+/**
+ * v1.7.0 实验框架的边界：README 必须把「不做什么」写清楚（TASK §8/§26）。
+ * 这些串对应 README 里 blockquote 的原话，写松了就等于宣称它会排名、会评比。
+ */
+const EXPERIMENT_BOUNDARIES = [
+  "不排名",
+  "不评选赢家",
+  "不是模型跑分平台",
+  "不做显著性检验",
+  "不自动调参",
 ] as const;
 
 /**
  * §63/§64 保留给 v1.5.0+ 的能力：任何版本树里都不该宣称已经具备。
  * v1.3.0 已经交付基础质量四维度（MultiDimensionalReviewer），v1.4.0 已经交付
  * BeatPlan 结构校验（BeatValidator），v1.5.0 已经交付独立的商业可读性审阅
- * （CommercialReviewer），所以它仨从这里移出——但自动改写拍子、高级规划器、
- * 伏笔规划、以及「商业分驱动重试 / 自动修订」一类仍然是本版本不做的事。
+ * （CommercialReviewer），v1.7.0 已经交付受控实验的执行链路（ExperimentRunner），
+ * 所以它们从这里移出——但自动改写拍子、高级规划器、伏笔规划、模型跑分平台、
+ * 以及「商业分驱动重试 / 自动修订」一类仍然是本版本不做的事。
  */
 const RESERVED_CAPABILITIES = [
   "AutomaticBeatRepair",
@@ -53,7 +68,6 @@ const RESERVED_CAPABILITIES = [
   "ForeshadowPlanner",
   "CommercialRetryPolicy",
   "AutomaticCommercialRepair",
-  "ExperimentRunner",
   "BenchmarkRunner",
   "AdvancedObservability",
   "FailureAttribution",
@@ -189,5 +203,37 @@ describe("v1.0.0 发布门禁 — docs 与示例", () => {
     expect(existsSync(path), "configs/example_story.json 缺失").toBe(true);
     const config = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
     expect(config.config_version).toBe("1");
+  });
+});
+
+describe("v1.7.0 发布门禁 — 实验框架边界", () => {
+  it("README 写清实验框架能改什么、不能做什么", () => {
+    const readme = read("README.md");
+    expect(readme).toContain("Experiment");
+    expect(readme).toContain("experiments");
+    for (const boundary of EXPERIMENT_BOUNDARIES) {
+      expect(readme, `README 应写明「${boundary}」`).toContain(boundary);
+    }
+    // 实验入口只暴露四个变量，Prompt 不在其中
+    expect(readme).toContain("ExperimentRunner");
+    expect(readme).toContain("ExperimentStore");
+  });
+
+  it("docs/experiments.md 写死目录布局、错误码与样本上限", () => {
+    const text = read("docs/experiments.md");
+    for (const token of [
+      "definition.json",
+      "runs.json",
+      "results.json",
+      "EXPERIMENT_INVALID",
+      "EXPERIMENT_NOT_FOUND",
+      "EXPERIMENT_CONFLICT",
+      "repetitions",
+      "variants",
+    ]) {
+      expect(text, `docs/experiments.md 应包含 ${token}`).toContain(token);
+    }
+    // 同样的边界要在文档里再说一遍：文档比 README 细，不能只写在 README
+    expect(text).toContain("不排名");
   });
 });

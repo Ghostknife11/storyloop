@@ -13,6 +13,76 @@ All notable changes to Storyloop.
 
 ---
 
+## [1.7.0] —— 2026-09-26
+
+v1.7.0 回答「如果只改模型、只改 prompt、只改 temperature，会发生什么？」。做法不是再做一套生成系统，
+而是在 v1.6.0 的 Traceable Runs 之上加一层**受控实验框架**：一份定义、多个变体、变量写明白、
+条件固定住，一次跑完全部格子，结果落成可以回看的 Experiment。它复用的还是那条
+`buildPipeline`——每一次格子都是一次货真价实的 Run，有 run_id、有产物、有出身清单。
+
+框架刻意停在「把数字摆出来」这一步。它不排名、不评赢家、不做显著性检验、不自动调参：
+变量表是人填的，结论是人下的，工具只负责把跑出来的数收集齐、并且不替谁说话。
+
+### Added
+
+- **`experiments/` 目录与三个文件**（`src/lib/experiment-store.ts`）：`<runs>/../experiments/`
+  下每个实验一个目录，含 `definition.json`、`runs.json`、`results.json`。实验只写自己那份
+  目录，Run 一律照旧落在 `runs/` 下；`runs/` 与 `experiments/` 都不进 Git
+- **`ExperimentDefinition` 模型与校验**（`src/core/experiment-config.ts`）：`schemaVersion` 恒为
+  `"1"`，字段 camelCase。定义含 `name` / `hypothesis` / `base` / `variants`；`base` 是四个固定
+  条件——`story_config`、`beat_plan` 与 `beatPlanMode`、`model_config`、`generation_parameters`
+  与 `retry_policy`
+- **四个可改变量，白名单合并**：`model`（`modelConfig.model`）、`generation.temperature`、
+  `retry.maxAttempts`、`retry.minReviewScore`。合并走 `applyVariantOverrides`，**只碰这四个键**，
+  其余字段逐字沿用 base；键不在白名单里 → 400 `EXPERIMENT_INVALID`
+- **`experiments + repetitions` 展开**（`expandExperiment`）：变体数 1~4、重复次数 1~5、
+  总样本 1~12，按定义顺序逐格生成执行计划
+- **`ExperimentRunner`**（`src/core/experiment-runner.ts`）：逐格调用 `buildPipeline`，
+  每格结束就把进度写回 `runs.json`（含 `run_id` / `status` / `failure`），全部跑完才写
+  `results.json`。**单格失败不中断**——失败格带原因留在 `runs.json`，剩下的格子继续跑
+- **基础聚合**（`summarizeExperiment`）：每变体一行的次数（`run_count` / `success_count` /
+  `failure_count`）与均值（`mean_overall_score` / `mean_commercial_score` / `mean_dimensions`），
+  按定义顺序排列。没有任何成功样本时均值是 `null` 而不是 `0`——**没有 winner、没有 rank、
+  没有 p 值**
+- **四个路由**：`POST` / `GET /api/experiments`、`GET /api/experiments/<id>`、
+  `POST /api/experiments/<id>/run`
+- **三个错误码**：`EXPERIMENT_INVALID`（400）、`EXPERIMENT_NOT_FOUND`（404）、
+  `EXPERIMENT_CONFLICT`（409；id 已存在或实验已跑过——同一实验**不能跑第二次**）
+- **实验界面**（`src/app/experiments/`、`src/components/experiment-*.tsx`）：列表页、
+  创建页、详情页的变体卡片与结果表，Run 下钻复用既有 Run 详情入口
+- **Run 出身的 `experiment` 块**：实验产生的 Run 的 `run-manifest.json` 多一个可选
+  `experiment` 字段（`{ experimentId, variantId, repetition }`），纯追加；普通 Run 没有这一段
+- 新文档 `docs/experiments.md`（契约、目录布局、错误码、样本上限与三条边界），
+  `docs/api.md` 与 `docs/upgrade.md` 同步
+
+### Changed
+
+- `run-manifest` 的 `RunManifest` 多一个可选 `experiment` 字段，`validateRunManifest`
+  对它做形状校验；没有这一段的老清单逐字读得通
+- 前端「未来能力」守卫从禁止 `Experiment` 字样改为禁止 `Benchmark` / `CausalGraph` /
+  `因果图` 等仍未发布的能力：实验框架从这一版起是已发布能力
+
+### Security
+
+- **实验定义不接受凭据**：`story_config` 之外任何位置出现凭据形状的字段 →
+  400 `EXPERIMENT_INVALID`，错误信息不回显原文。API Key 只认服务端 `LLM_API_KEY`，
+  定义里没有它、也没有 `baseUrl`
+- 没有 `baseUrl` 意味着每个变体都走服务端配置的地址，**v1.1.0 起那道地址关卡因此对每一次
+  格子都生效**，实验无法借「换个 baseUrl」绕过它
+- 实验定义只登记，不含任何密钥；`runs.json` 与 `results.json` 里只有 run_id、状态、次数与均值
+
+### Compatibility
+
+- 1.6.0 → 1.7.0 无破坏性变更，也不需要迁移：没有删字段、没有改字段名，四条路由与三个错误码
+  全是新增，`runs/` 布局、三层 metadata、`run-manifest.json` 既有字段、CLI 逐字未动
+- 1.6.0 之前生成的 Run 的清单没有 `experiment` 段，读接口照常返回，UI 的 Provenance 面板行为
+  与 1.6.0 一致
+- 新增的 `experiments/` 目录在 `runs/` 旁边；老版本不认识它，回滚到 1.6.0 后这些目录只是躺着，
+  不影响任何 1.6.0 行为
+- **测试总量：1197 passed / 77 files**（1.6.0 为 1133 / 72）
+
+---
+
 ## [1.6.0] —— 2026-09-25
 
 v1.6.0 回答一个此前只能靠翻代码才能回答的问题：**这份故事是拿什么跑出来的？** 每次 Run 现在

@@ -10,6 +10,7 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
+  FlaskConical,
   Info,
   PenLine,
   Settings,
@@ -23,6 +24,9 @@ import {
 
 const NAV = [
   { href: "/", label: "Generate", description: "故事生成", icon: PenLine },
+  // v1.7.0：受控实验入口。只暴露「建 / 跑 / 看分组均值」三件事，
+  // 不做排名、不做自动调参，所以导航里也没有「跑分」这类字眼
+  { href: "/experiments", label: "Experiments", description: "受控实验", icon: FlaskConical },
   { href: "/settings", label: "Settings", description: "模型与参数", icon: Settings },
   { href: "/about", label: "About", description: "版本与许可", icon: Info },
 ];

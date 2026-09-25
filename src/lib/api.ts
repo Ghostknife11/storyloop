@@ -434,3 +434,149 @@ export async function repairStory(
     }),
   }, "修订失败")) as RepairResultApi;
 }
+
+// ---------------------------------------------------------------------------
+// v1.7.0 受控实验
+// ---------------------------------------------------------------------------
+
+/** v1.7.0 实验定义（与 experiments/<id>/definition.json 同一形状，原样来回）。 */
+export interface ExperimentDefinitionApi {
+  schemaVersion: string;
+  experimentId: string;
+  name: string;
+  description?: string;
+  base: {
+    storyConfig: StoryConfig;
+    beatPlanMode: "fixed" | "regenerate";
+    beatPlan?: BeatPlan;
+    modelConfig?: { model: string };
+    generationParameters?: { temperature?: number };
+    retryPolicy?: {
+      max_attempts: number;
+      min_review_score: number;
+      retry_on_validation_failure: boolean;
+      enable_repair: boolean;
+      max_repairs_per_attempt: number;
+    };
+  };
+  variants: {
+    id: string;
+    name: string;
+    overrides: {
+      model?: string;
+      generation?: { temperature?: number };
+      retry?: { maxAttempts?: number; minReviewScore?: number };
+    };
+  }[];
+  repetitions: number;
+  createdAt: string;
+}
+
+/** v1.7.0 列表项：只有摘要，够判断要不要点进去。 */
+export interface ExperimentListItemApi {
+  experimentId: string;
+  name: string;
+  description?: string;
+  repetitions: number;
+  variantCount: number;
+  totalRuns: number;
+  createdAt: string;
+  status: "pending" | "running" | "completed" | "partial" | "failed";
+  completedAt?: string | null;
+  successCount: number;
+  failureCount: number;
+}
+
+/** v1.7.0 一条样本的引用：哪个 Variant、第几次 repetition、哪个 runId。 */
+export interface ExperimentRunApi {
+  variantId: string;
+  repetition: number;
+  runId: string;
+  status: "completed" | "failed";
+  overallScore?: number | null;
+  commercialScore?: number | null;
+}
+
+/** v1.7.0 一个 Variant 的聚合数字（没有排序、没有赢家，顺序就是定义顺序）。 */
+export interface ExperimentVariantSummaryApi {
+  variantId: string;
+  runCount: number;
+  successCount: number;
+  failureCount: number;
+  meanOverallScore: number | null;
+  meanCommercialScore: number | null;
+  meanCoherence: number | null;
+  meanNarrative: number | null;
+  meanCharacter: number | null;
+  meanCausality: number | null;
+  meanHook: number | null;
+  meanPacing: number | null;
+  meanEngagement: number | null;
+  meanPayoff: number | null;
+}
+
+export interface ExperimentResultApi {
+  experimentId: string;
+  status: "pending" | "running" | "completed" | "partial" | "failed";
+  runs: ExperimentRunApi[];
+  summary: {
+    runCount: number;
+    successCount: number;
+    failureCount: number;
+    variants: ExperimentVariantSummaryApi[];
+  };
+  startedAt: string;
+  completedAt?: string | null;
+}
+
+export interface ExperimentDetailApi {
+  definition: ExperimentDefinitionApi;
+  /** 没跑过是 null（不是空数组：「还没开始」与「跑完但一条没成」是两件事）。 */
+  runs: {
+    experimentId: string;
+    totalRuns: number;
+    entries: {
+      variantId: string;
+      repetition: number;
+      runId: string | null;
+      status: "pending" | "completed" | "failed";
+      failure?: string;
+    }[];
+  } | null;
+  result: ExperimentResultApi | null;
+}
+
+/** §36 POST /api/experiments：建一份实验定义（先建，不跑）。 */
+export async function createExperiment(payload: unknown): Promise<ExperimentDefinitionApi> {
+  return (await requestJson("/api/experiments", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }, "创建实验失败")) as ExperimentDefinitionApi;
+}
+
+/** §38 GET /api/experiments：实验列表。 */
+export async function fetchExperiments(): Promise<ExperimentListItemApi[]> {
+  const data = (await requestJson("/api/experiments", undefined, "读取实验列表失败")) as {
+    experiments?: unknown;
+  };
+  return Array.isArray(data.experiments) ? (data.experiments as ExperimentListItemApi[]) : [];
+}
+
+/** §37 GET /api/experiments/<id>：定义 + 格子 + 结果。 */
+export async function fetchExperiment(experimentId: string): Promise<ExperimentDetailApi> {
+  return (await requestJson(
+    `/api/experiments/${encodeURIComponent(experimentId)}`,
+    undefined,
+    "读取实验失败",
+  )) as ExperimentDetailApi;
+}
+
+/** §39 POST /api/experiments/<id>/run：把这份定义跑完。 */
+export async function runExperiment(experimentId: string): Promise<ExperimentResultApi> {
+  return (await requestJson(
+    `/api/experiments/${encodeURIComponent(experimentId)}/run`,
+    { method: "POST" },
+    "运行实验失败",
+  )) as ExperimentResultApi;
+}

@@ -301,21 +301,42 @@ function unknownKeys(raw: Record<string, unknown>, allowed: readonly string[], f
   }
 }
 
+/**
+ * 改了也不会生效的键：单独一条分支把理由说清楚。
+ * 它们不是「暂时没接上」，而是当前版本里确实没有任何一行代码会因为它们而不同。
+ * baseUrl 不在这张表里——它在更早的凭据形状键名扫描就被拦下了（见 FORBIDDEN_KEYS），
+ * 这条路上到不了这里。
+ */
+const NO_EFFECT_OVERRIDE_REASONS: Record<string, string> = {
+  prompts:
+    "提示词差异不是实验变量：六个阶段各读一个固定提示词文件，登记表里每个角色只有一版，" +
+    "没有第二个版本可选；真实用到的提示词由每个 Run 的 Manifest prompts 块如实记录",
+  topP: "LLMClient 的请求体只发送 model / messages / temperature，topP 不会出现在任何一次请求里",
+  maxTokens: "LLMClient 的请求体只发送 model / messages / temperature，maxTokens 不会出现在任何一次请求里",
+};
+
+/**
+ * 白名单判定之前先跑这一遍：先把「改了也没用」的键拦下来，报出它为什么没用。
+ * 顺序很重要——先答「为什么不行」，再答「白名单是什么」，用户才知道该删哪个键。
+ */
+function rejectNoEffectKeys(raw: Record<string, unknown>, field: string): void {
+  for (const key of Object.keys(raw)) {
+    const reason = NO_EFFECT_OVERRIDE_REASONS[key];
+    if (reason) throw new ExperimentValidationError(`${field}.${key} 不允许作为实验变量：${reason}`);
+  }
+}
+
 /** §14 生成参数覆盖：只认 temperature。topP / maxTokens 明确拒绝，并说明原因。 */
 function generationOverridesOf(raw: unknown): ExperimentOverrides["generation"] {
   const r = objOf(raw, "overrides.generation");
+  rejectNoEffectKeys(r, "overrides.generation");
   unknownKeys(r, ["temperature"], "overrides.generation");
   const out: { temperature?: number } = {};
   for (const [key, value] of Object.entries(r)) {
     if (value === undefined || value === null) continue;
     if (key === "temperature") {
       out.temperature = numInRange(value, "overrides.generation.temperature", TEMPERATURE_LIMIT.min, TEMPERATURE_LIMIT.max);
-      continue;
     }
-    // 这两个键到了这里 unknownKeys 已经挡掉；留着这条分支是为了把理由说清楚
-    throw new ExperimentValidationError(
-      `overrides.generation.${key} 不允许作为实验变量：LLMClient 只发送 model / messages / temperature，改它不会改变任何一次请求`,
-    );
   }
   return out;
 }
@@ -323,6 +344,7 @@ function generationOverridesOf(raw: unknown): ExperimentOverrides["generation"] 
 /** §14 重试策略覆盖：只有两个字段可改，其余（开关类）沿用 Base。 */
 function retryOverridesOf(raw: unknown): ExperimentOverrides["retry"] {
   const r = objOf(raw, "overrides.retry");
+  rejectNoEffectKeys(r, "overrides.retry");
   unknownKeys(r, ["maxAttempts", "minReviewScore"], "overrides.retry");
   const out: { maxAttempts?: number; minReviewScore?: number } = {};
   for (const [key, value] of Object.entries(r)) {
@@ -336,23 +358,10 @@ function retryOverridesOf(raw: unknown): ExperimentOverrides["retry"] {
   return out;
 }
 
-/**
- * 改了也不会生效的键：单独一条分支把理由说清楚。
- * 它们不是「暂时没接上」，而是当前版本里确实没有任何一行代码会因为它们而不同。
- */
-const NO_EFFECT_OVERRIDE_REASONS: Record<string, string> = {
-  prompts:
-    "提示词差异不是实验变量：六个阶段各读一个固定提示词文件，登记表里每个角色只有一版，" +
-    "没有第二个版本可选；真实用到的提示词由每个 Run 的 Manifest prompts 块如实记录",
-  topP: "LLMClient 的请求体只发送 model / messages / temperature，topP 不会出现在任何一次请求里",
-  maxTokens: "LLMClient 的请求体只发送 model / messages / temperature，maxTokens 不会出现在任何一次请求里",
-  baseUrl:
-    "地址不是实验变量：实验一律走服务端 LLM_BASE_URL（只接受公网 HTTP/HTTPS），" +
-    "定义里带地址等于给 v1.1.0 的 SSRF 关卡开一个绕过的入口",
-};
-
 function overridesOf(raw: unknown, field: string): ExperimentOverrides {
   const r = objOf(raw, field);
+  // 先解释「这个键改了也没用」，再报白名单
+  rejectNoEffectKeys(r, field);
   unknownKeys(r, ["model", "generation", "retry"], field);
   const out: ExperimentOverrides = {};
   const model = optStrOf(r.model, `${field}.model`, 120);
@@ -361,10 +370,6 @@ function overridesOf(raw: unknown, field: string): ExperimentOverrides {
     out.generation = generationOverridesOf(r.generation);
   }
   if (r.retry !== undefined && r.retry !== null) out.retry = retryOverridesOf(r.retry);
-  for (const key of Object.keys(r)) {
-    const reason = NO_EFFECT_OVERRIDE_REASONS[key];
-    if (reason) throw new ExperimentValidationError(`${field}.${key} 不允许作为实验变量：${reason}`);
-  }
   return out;
 }
 
@@ -436,7 +441,10 @@ export function validateExperimentDefinition(raw: unknown): ExperimentDefinition
 
   const base = baseConfigOf(r.base);
   const variantsRaw = r.variants;
-  if (!Array.isArray(variantsRaw) || variantsRaw.length === 0) {
+  if (!Array.isArray(variantsRaw)) {
+    throw new ExperimentValidationError("variants 必须是数组");
+  }
+  if (variantsRaw.length === 0) {
     throw new ExperimentValidationError("variants 不能为空：至少定义一个 Variant（基准本身也是一个 Variant）");
   }
   if (variantsRaw.length > VARIANTS_LIMIT.max) {

@@ -115,6 +115,10 @@ const ROUTES: ReadonlyArray<readonly [string, string]> = [
   // v1.4.0：手动校验剧情骨架的结构
   ["api/validate-beats", "POST"],
   ["api/version", "GET"],
+  // v1.7.0：受控实验框架的四条入口（建 / 列表同页，详情 / 跑在两个子页）
+  ["api/experiments", "POST,GET"],
+  ["api/experiments/[experiment_id]", "GET"],
+  ["api/experiments/[experiment_id]/run", "POST"],
 ];
 
 function post(path: string, payload: unknown) {

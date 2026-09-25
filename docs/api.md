@@ -34,6 +34,9 @@
 | `VALIDATION_FAILED_INTERNAL` | 500 | 校验器自身出错 |
 | `ARTIFACT_WRITE_FAILED` | 500 | 产物写盘失败 |
 | `INTERNAL_ERROR` | 500 | 未预期异常；message 固定为「服务器内部错误」，不带堆栈与原始异常文本 |
+| `EXPERIMENT_INVALID` | 400 | v1.7.0 新增：实验定义不合法——结构不对、变体数或重复次数越界、总样本数超上限、override 键不在白名单、`story_config` 之外的位置出现凭据形状的字段 |
+| `EXPERIMENT_NOT_FOUND` | 404 | v1.7.0 新增：实验 id 不存在 |
+| `EXPERIMENT_CONFLICT` | 409 | v1.7.0 新增：实验 id 已存在，或该实验已经跑过（第三个文件 `results.json` 已落盘） |
 
 用户错误（改请求就能解决）一律 4xx，运行时错误 5xx。响应里永远不出现堆栈、
 本机绝对路径或凭据：异常文本会先过 `src/lib/safe-text.ts`。
@@ -101,6 +104,10 @@
 | GET | `/api/runs/<run_id>` | Run 详情 |
 | GET | `/api/runs/<run_id>/attempts/<attempt_number>` | 单次尝试详情 |
 | POST | `/api/prompt/preview` | 看将要发给模型的 prompt 长什么样，不调模型 |
+| POST | `/api/experiments` | v1.7.0 新增：登记一份实验定义（只写 `definition.json`，不跑） |
+| GET | `/api/experiments` | v1.7.0 新增：实验列表，按 `created_at` 倒序 |
+| GET | `/api/experiments/<experiment_id>` | v1.7.0 新增：实验详情 + `runs` + `result`（没跑过时两者为 `null`） |
+| POST | `/api/experiments/<experiment_id>/run` | v1.7.0 新增：按定义批量跑，逐格写 `runs.json`，收尾写 `results.json` |
 
 ## 响应字段
 
@@ -283,11 +290,59 @@ Run 不存在与 Attempt 不存在共用 `RUN_NOT_FOUND` 这个 code，只能靠
 
 前者只返回 `{ "prompt": "..." }`；后者只返回 `{ "status": "ok" }`。
 
+### 实验入口（v1.7.0 新增）
+
+四个入口都是 JSON in / JSON out，没有 SSE 也没有进度推送：`run` 是同步跑完再返回。
+
+**`POST /api/experiments`** 请求体就是一份实验定义：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `experiment_id` | string | 必填；同时是目录名，已存在 → 409 `EXPERIMENT_CONFLICT` |
+| `name` | string | 必填 |
+| `hypothesis` | string | 可选；想验证什么 |
+| `base` | object | 必填；四个固定条件（见 [experiments.md](./experiments.md)） |
+| `variants` | array | 必填；1~4 个变体，按数组顺序执行 |
+| `schema_version` | string | `"1"` |
+
+成功返回 201 `{ experiment, created: true }`；此时只写了 `definition.json`，
+`runs.json` 与 `results.json` 都不存在。
+
+**`GET /api/experiments`** 返回 `{ experiments, total }`，按 `created_at` 倒序。
+列表项只有 `experiment_id` / `name` / `hypothesis` / `variant_count` / `repetitions` /
+`total_runs` / `created_at` / `has_result`——**不带结果**，看数字要点进详情。
+`total` 就是本次返回的条数，没有分页参数也没有 total 总数口径。
+
+**`GET /api/experiments/<experiment_id>`** 返回三块：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `definition` | object | 登记时那份定义，逐字读回 |
+| `runs` | array \| null | v1.7.0 新增：逐格进度，每项 `{ variant_id, repetition, run_id, status, failure }`；没跑过是 `null` |
+| `result` | object \| null | 没收尾（`results.json` 不存在）是 `null` |
+
+`result` 里：`counts`（`run_count` / `success_count` / `failure_count`）、
+`variants`（按定义顺序，每项 `variant_id` / `variant_name` / `run_count` /
+`success_count` / `failure_count` / `mean_overall_score` / `mean_commercial_score` /
+`mean_dimensions`）与 `runs`。`mean_*` 在没有任何成功样本时是 `null` 而不是 `0`——
+「没有数字」和「数字是零」是两件事。**没有 winner、没有 rank、没有排名字段。**
+
+**`POST /api/experiments/<experiment_id>/run`** 无请求体。跑完返回 `{ run, persisted }`，
+其中 `run` 与上面详情的 `result` 同形。行为：
+
+- 已经跑过（`results.json` 已存在）→ 409 `EXPERIMENT_CONFLICT`，不会重跑也不会覆盖
+- 服务端 `LLM_API_KEY` 没配 → 400，里层是 `LLM_REQUEST_FAILED`
+- 单格失败不中断：剩下的格子继续跑，失败格在 `runs.json` 里带 `status: "failed"`
+  与失败原因，全部跑完才写 `results.json`
+
 ## 不做什么
 
 - 不做鉴权、不限流：API Key 只是给 LLM 用的，路由本身没有用户体系
 - 不做 SSE / WebSocket 流式输出
-- 不做批量接口
+- 不做批量接口：没有「一次请求喂多个不同输入」的入口；实验框架跑的是同一输入下的多个变体，
+  但它仍然是单一定义的同步执行，不是通用批处理
+- **实验接口不是基准平台**：不排名、不评赢家、不做显著性检验、不出 p 值、没有
+  leaderboard、不做自动调参与自动超参搜索（详见 [experiments.md](./experiments.md)）
 - 没有 middleware 改响应、没有全局 error handler：每个路由自己负责把 service 的结果转成响应
 - 骨架结构校验只报告，不修复：`/api/validate-beats` 不返回改写后的骨架，也不会触发重新规划
 
@@ -296,4 +351,5 @@ Run 不存在与 Attempt 不存在共用 `RUN_NOT_FOUND` 这个 code，只能靠
 - [StoryConfig v1 契约](./story-config.md)
 - [BeatPlan v1 契约](./beat-plan.md)
 - [Run 产物契约](./run-artifacts.md)
+- [受控实验契约（v1.7.0）](./experiments.md)
 - [CLI 契约](./cli.md)

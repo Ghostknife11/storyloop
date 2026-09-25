@@ -74,8 +74,14 @@ StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts
   内容摘要、各阶段 temperature 与重试策略、每次 Attempt 的结局，以及这批产物的 SHA-256。
   API 的 `manifest` 字段与前端 Run Provenance 面板读的是同一份。它只为一次 Run 自证出身：
   不做跨 Run 对比、不跑基准、不统计成功率
+- **Experiment Framework（受控实验框架，v1.7.0）**：同一份 StoryConfig、同一份骨架、同一批
+  环境，批量跑多个 Variant（最多 4 个 × 最多 5 次，总计不超过 12 条样本）。可改的变量只有
+  四个：`model` / `temperature` / `retry.maxAttempts` / `retry.minReviewScore`。
+  执行的是 `ExperimentRunner`（复用 v1.6.0 的 GenerationPipeline，每个样本都是一次完完整整的
+  普通 Run），落盘的是 `ExperimentStore` 里 `experiments/` 下的 `definition.json` / `runs.json` /
+  `results.json`。它只摆数字：每个 Variant 的计数与均值，顺序永远是你声明时的顺序
 - **现代 Web UI**：六阶段进度、Attempt 计数、修订明细、Validation / Review / Commercial
-  Review / Run Provenance 面板、Run ID 与产物清单
+  Review / Run Provenance 面板、实验列表与实验详情、Run ID 与产物清单
 - **OpenAI-compatible LLM**：OpenAI / DeepSeek / 硅基流动 / 任意兼容端点
 - **可编辑 Prompt 模板**：`prompts/*.txt` 直接改，重启生效
 - **稳定 CLI**：`run` / `plan` / `review` / `validate` / `repair` 五个命令，与 API 共用同一套逻辑
@@ -110,6 +116,15 @@ StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts
 >
 > **Beat 校验只报告，不修复（v1.4.0）**：骨架结构不达标时 Storyloop 不改写任何一拍、不重排顺序、
 > 不自动补拍，也不据此重新规划——它只告诉你哪儿站不住，骨架怎么改由你决定。
+>
+> **受控实验只摆数字，不评比（v1.7.0）**：一次实验回答「只改这四个变量分别发生了什么」。
+> 它**不排名、不评选赢家**（结果表的行顺序永远是你声明 Variant 的顺序，绝不按分数重排）；
+> 缺分数的那一条显示 `—`，**不被当成 0**（补 0 等于凭空制造一个差评）；
+> **不是模型跑分平台**（没有 leaderboard、没有胜率、没有「推荐 Variant」）；
+> **不做显著性检验**（没有 p 值 / 置信区间 / 效应量，两个均值差多少由读数字的人自己判断）；
+> **不自动调参**（同一份定义重跑会被 409 挡住：定义与结果都不可变，要改条件就复制成一个新实验）。
+> 同一次实验里 A 组三条都有分、B 组只有一条有分，两组的均值本来就不可直接比大小——
+> 这也是界面必须把「有几条真的跑出了分」摆出来的原因。
 >
 > 后端没有任何为未实现能力预留的隐藏接口——没有的功能就没有入口。
 
@@ -335,6 +350,50 @@ runs/
 API 侧 `POST /api/runs` 与 `GET /api/runs/<run_id>` 各多一个 `manifest` 字段，就是这份清单。
 v1.6.0 之前生成的 Run 没有它，读接口返回 `null`，界面面板整个隐藏。清单只为一次 Run 自证
 出身：不做跨 Run 对比、不跑基准、不统计成功率（那些能力保留给后续版本）。
+
+v1.7.0 起，实验里跑出来的每个样本在这份清单上多一个可选的 `experiment` 块
+（`experimentId` / `variantId` / `repetition`）。普通 Run 没有这个键，读取时整个键不出现；
+它只记录出身，不参与任何流程判断，也不会因为写不进清单而让一次成功的 Run 变成失败。
+
+## 受控实验（Experiment Framework，v1.7.0）
+
+实验不是一次 Run，是**一组 Run 按同一份定义跑出来的一份结果**。一次实验固定回答一个问题：
+「只改这四个变量，分别发生了什么？」
+
+```text
+ExperimentDefinition（base + variants[] + repetitions）
+  → 展开成 variants × repetitions 个样本（顺序执行，不并发）
+  → 每个样本走 GenerationPipeline（一次完完整整的普通 Run）
+  → experiments/<experimentId>/{definition.json, runs.json, results.json}
+  → 按 Variant 汇总：计数 + 均值
+```
+
+四个可改变量：`model`、`generation.temperature`、`retry.maxAttempts`、`retry.minReviewScore`。
+定义里**不出现 `baseUrl`**——一条样本的地址永远来自服务端 `LLM_BASE_URL`，v1.1.0 的地址关卡
+因此对每个 Variant 都生效，实验没有第二条入口可以绕。Prompt 也不是变量：每个阶段只读一份
+固定提示词文件，注册表里每个角色只有一个版本，「换 Prompt 版本」在这个版本不产生任何变化，
+所以定义里直接拒绝（`topP` / `maxTokens` 同理）。凭据 / 地址 / 原始提示词形状的键一律 400。
+
+上限写在契约里：`variants` 1~4 个、`repetitions` 1~5、总样本数不超过 **12**。
+「什么都没改」也是合法 Variant——基准自己就是一个 Variant。
+
+单个样本失败不中止实验：剩下的接着跑，失败的那一格记下失败阶段（`generating` /
+`planning` / …）与一句话摘要，整体状态是 `partial`。每跑完一格就重写一次 `runs.json`，
+进程中途被杀，`GET` 也能如实显示已经跑出来的部分。
+
+结果（`ExperimentResult`）只有计数与均值两类数字：`runCount` / `successCount` /
+`failureCount` 与九个均值（整体分、商业分、四个质量维度、四个商业维度）。缺分数的样本
+不参与均值，界面显示 `—`。**没有排序、没有赢家、没有显著性检验、没有自动调参。**
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/experiments` | `{schemaVersion:"1", name, experimentId, base, variants, repetitions}` → 201，只建不跑 |
+| GET | `/api/experiments` | 列表：每个实验一行（变体数 × 次数、状态、成败计数） |
+| GET | `/api/experiments/<experiment_id>` | `{definition, runs, result}`；没跑过时 `runs` 与 `result` 是 `null` |
+| POST | `/api/experiments/<experiment_id>/run` | 跑完整个实验，回传 `ExperimentResult` |
+
+界面：`/experiments`（列表 + 创建）、`/experiments/<experiment_id>`（变体卡片、结果表、
+样本行，每条样本可点进既有的 Run 详情）。完整契约见 [docs/experiments.md](docs/experiments.md)。
 
 ## RetryPolicy
 
@@ -587,6 +646,10 @@ Run 类入口与两个读回接口响应里的 `quality`、前端 Quality Summar
 | POST | `/api/prompt/preview` | `config`（+可选 `beat_plan`）→ 渲染后的最终 Prompt，不调模型 |
 | GET | `/api/runs/<run_id>` | 读回一次 Run 与它的 Attempt 摘要 |
 | GET | `/api/runs/<run_id>/attempts/<n>` | 读回某一次 Attempt 的详情 |
+| POST | `/api/experiments` | 建一份实验定义（201）。**只建，不跑** |
+| GET | `/api/experiments` | 实验列表：定义摘要 + 结果状态，不带样本详情 |
+| GET | `/api/experiments/<experiment_id>` | 一份实验的定义 + 格子 + 结果（没跑过时后两者是 `null`） |
+| POST | `/api/experiments/<experiment_id>/run` | 顺序跑完整个实验，回传 `ExperimentResult` |
 | GET | `/api/health` | `{status: "ok"}` |
 | GET | `/api/version` | `{version: "<VERSION 文件内容>"}` |
 
@@ -626,6 +689,9 @@ HTTP 状态码仍然是 200（这是一次成功的业务结果，不是错误�
 | `REPAIR_FAILED` | 502 | 单独修订入口的模型输出非法 |
 | `BEAT_VALIDATION_FAILED` | 502 | 骨架结构校验拿不到合法 BeatValidationResult（v1.4.0） |
 | `VALIDATION_FAILED_INTERNAL` | 500 | Validator 自身崩溃（不是「校验不通过」） |
+| `EXPERIMENT_INVALID` | 400 | v1.7.0 新增：实验定义不合法（含凭据 / 地址 / 原始提示词形状的键），或服务端没配 `LLM_API_KEY` 却请求跑实验 |
+| `EXPERIMENT_NOT_FOUND` | 404 | v1.7.0 新增：`experiment_id` 不存在 |
+| `EXPERIMENT_CONFLICT` | 409 | v1.7.0 新增：同名实验已存在，或这份实验已经跑过（定义与结果都不可变） |
 | `ARTIFACT_WRITE_FAILED` | 500 | 产物写入失败（磁盘 / 权限 / 目录被占用） |
 | `INTERNAL_ERROR` | 500 | 未预期异常；message 固定为「服务器内部错误」 |
 
@@ -701,9 +767,12 @@ mapped / NAT64 地址按内嵌的那个地址判
 - **没有商业可行性预测**：商业可读性审阅（v1.5.0）只评价文本本身可观察的读者体验
   （Hook / Pacing / Engagement / Payoff），不评估市场适配、读者规模、销量或商业结果，
   也没有「爆款概率」一类的数字
-- **没有实验框架与基准测试**：没有 A/B、没有评分回归集、没有模型对比工具；
-  v1.6.0 的 `run-manifest.json` 也只是把一次 Run 的出身记下来，不做跨 Run 比较、不跑基准、
-  不统计成功率
+- **实验不是基准平台**：v1.7.0 的受控实验能批量跑多个 Variant 并按 Variant 汇总计数与均值，
+  但它不排名、不评选赢家、不做显著性检验、没有跨实验统计口径、没有评分回归集；
+  一个定义里的样本总数上限 12（`variants` 1~4 × `repetitions` 1~5），变量只有
+  `model` / `temperature` / `retry.maxAttempts` / `retry.minReviewScore` 四个
+- **没有自动调参与自动搜索**：实验只执行你写下来的条件，不尝试新组合、不根据结果反推更好的
+  参数、不优化 Prompt；同一份定义重跑会被 409 挡住（定义与结果都不可变）
 - **没有高级可观测性**：只做工程日志（等级 + `run_id` / `attempt` / `repair` 上下文 + 脱敏），
   没有 Metrics / Trace / Prometheus / OpenTelemetry / Dashboard
 - **没有失败归因与因果图**：修订只按类别改一次，不回答「为什么会失败」、
@@ -718,6 +787,15 @@ mapped / NAT64 地址按内嵌的那个地址判
 
 ## 升级说明
 
+v1.7.0 新增 **受控实验框架**（Experiment Framework）：`POST /api/experiments` 建定义、
+`POST /api/experiments/<id>/run` 跑完、`GET /api/experiments[/<id>]` 读结果，界面是
+`/experiments` 与 `/experiments/<id>`。数据落在 `runs/` 旁的 `experiments/` 下三个 JSON。
+纯 additive：从 1.6.x 升到 1.7.0 **不需要改任何代码**，1.6.x 写的产物可以直接读，一次普通 Run
+一个字节都没变（`run-manifest.json` 只在实验样本上多一个可选的 `experiment` 块，普通 Run 里
+这个键不出现）。要紧的有三条：新增三个错误码 `EXPERIMENT_INVALID` / `EXPERIMENT_NOT_FOUND` /
+`EXPERIMENT_CONFLICT`；实验定义里不接受凭据、地址与原始提示词形状的键（400）；
+同一份定义只能跑一次（409，要改条件就复制成新实验）。回滚到 1.6.0 的代价为零，
+多出来的目录、路由与字段被旧版本忽略。逐版说明见 [docs/upgrade.md](./docs/upgrade.md)。
 v1.6.0 新增 **Run 出身清单** `run-manifest.json`：每次 Run 除了 `metadata.json` 还多写一份
 记录「这份故事是拿什么跑出来的」——代码版本与 commit、模型、各阶段 temperature、六份提示词的
 版本与内容摘要、每次 Attempt 的结局、以及这批产物的 SHA-256。它只在 Run 根目录一份，

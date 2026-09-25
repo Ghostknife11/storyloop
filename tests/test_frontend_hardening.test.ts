@@ -286,7 +286,14 @@ describe("§37 Null safety：review / validation / repair 缺失都不白屏", (
 });
 
 describe("§38 前端不新增未来能力", () => {
-  const FORBIDDEN = ["Experiment", "Benchmark", "Dashboard", "Failure Analysis", "Causal", "Adaptive"];
+  /**
+   * v1.7.0 起「Experiment」不再是保留能力：受控实验框架已经交付（实验列表页 / 详情页 /
+   * /api/experiments 一组路由），所以这个词连同因果维度的 meanCausality 都不再算越界。
+   * 仍然保留的是这个版本明确不做的事：跑分平台、仪表盘、失败归因、因果图、自适应生成。
+   * 「因果图」与 v1.3.0 就有的「因果」维度是两件事，所以这里按 CausalGraph / 因果图 精确匹配。
+   */
+  const FORBIDDEN = ["Benchmark", "Dashboard", "Failure Analysis", "CausalGraph", "Adaptive"];
+  const FORBIDDEN_PHRASES = ["因果图"];
 
   it("组件 / 页面 / api 客户端里没有未来能力入口", () => {
     const files = listSourceFiles(join("src", "components")).concat(
@@ -298,6 +305,9 @@ describe("§38 前端不新增未来能力", () => {
       const src = readFileSync(file, "utf8");
       for (const word of FORBIDDEN) {
         if (new RegExp(word, "i").test(src)) hits.push(`${file}:${word}`);
+      }
+      for (const phrase of FORBIDDEN_PHRASES) {
+        if (src.includes(phrase)) hits.push(`${file}:${phrase}`);
       }
     }
     expect(hits).toEqual([]);

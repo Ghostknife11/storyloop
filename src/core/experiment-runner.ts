@@ -13,11 +13,11 @@
  * 这个模块不判断「哪个 Variant 更好」，也不做任何自动调整：跑完全部样本就结束。
  */
 
-import { join } from "node:path";
 import { expandExperiment, type ExperimentRunPlan } from "@/core/experiment-config";
 import type { GenerationPipeline } from "@/core/pipeline";
 import type { RunDeps } from "@/lib/generate-service";
 import { buildPipeline } from "@/lib/generate-service";
+import { appSettings } from "@/lib/app-config";
 import { ArtifactStore } from "@/storage/artifact-store";
 import { ExperimentStore } from "@/storage/experiment-store";
 import { logger } from "@/lib/logger";
@@ -46,13 +46,13 @@ export interface ExperimentRunnerDeps extends RunDeps {
   experimentStore?: ExperimentStore;
 }
 
-/** 模块加载时锁定项目根，与 generate-service 同一套做法。 */
-const PROJECT_ROOT = process.cwd();
-
 export class ExperimentRunner {
   constructor(private readonly deps: ExperimentRunnerDeps = {}) {
-    this.artifactStore = deps.artifactStore ?? new ArtifactStore(join(PROJECT_ROOT, "runs"));
-    this.experimentStore = deps.experimentStore ?? new ExperimentStore(join(PROJECT_ROOT, "runs"));
+    // 取 appSettings().runsDir 而不是模块级的 process.cwd()：测试会 chdir 进临时目录，
+    // 这里必须在构造那一刻解析，否则产物会写回仓库
+    const runsRoot = appSettings().runsDir;
+    this.artifactStore = deps.artifactStore ?? new ArtifactStore(runsRoot);
+    this.experimentStore = deps.experimentStore ?? new ExperimentStore(runsRoot);
   }
 
   private artifactStore: ArtifactStore;
