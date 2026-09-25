@@ -6,6 +6,8 @@
  * v0.8.0 新增 repairing / revalidating / rereviewing（§35）：同一次 Attempt 内部的
  * 定点修订阶段。Repair 不新增 Attempt，所以这三个阶段都挂在同一个 attempt_number 下。
  * v1.4.0 新增 validating_beat_plan：BeatPlan 落盘之后、任何 Attempt 之前的结构校验阶段。
+ * v1.5.0 新增 reviewing_commercial：基础审阅之后的商业可读性审阅阶段（TASK §13）。
+ * 它只是多一个可定位的阶段名，不改变任何判定——商业分不参与重试与修订（TASK §15）。
  */
 
 import { randomBytes } from "node:crypto";
@@ -21,6 +23,7 @@ export type RunStatus =
   | "repairing"
   | "revalidating"
   | "rereviewing"
+  | "reviewing_commercial"
   | "completed"
   | "failed";
 

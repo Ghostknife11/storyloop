@@ -12,6 +12,12 @@ import { BeatPlanner } from "@/lib/beat-planner";
 import { StoryGenerator } from "@/lib/story-generator";
 import { StoryValidator } from "@/lib/story-validator";
 import { BasicReviewer } from "@/lib/basic-reviewer";
+import { CommercialReviewer } from "@/lib/commercial-reviewer";
+import {
+  commercialOverallScore,
+  type CommercialReviewResult,
+  type CommercialReviewStatus,
+} from "@/types/commercial-review";
 import { BeatValidator } from "@/lib/beat-validator";
 import { StoryRepairer } from "@/lib/story-repairer";
 import { ArtifactStore } from "@/storage/artifact-store";
@@ -76,6 +82,11 @@ export interface GenerationResult {
   review: ReviewResult | null;
   review_status: ReviewStatus;
   review_error: string | null;
+  /** v1.5.0 TASK §13/§16：入选 Attempt 的商业可读性结论；没接这一步或它自身失败时为 null。 */
+  commercial_review: CommercialReviewResult | null;
+  commercial_review_status: CommercialReviewStatus;
+  /** v1.5.0 TASK §24：CommercialReviewer 自身异常时的安全摘要；没跑这一步时是 null。 */
+  commercial_review_error: string | null;
   /** v1.2.0 §4：入选 Attempt 的统一质量快照，与 story 是同一份正文的结论。 */
   quality: QualityResult;
   attempt_count: number;
@@ -101,13 +112,16 @@ function skipReviewFor(validation: ValidationResult | null): boolean {
   return validation.issues.some((i) => i.code === "EMPTY_CONTENT");
 }
 
-/** §22 成功 Run 的产物清单；validation.json / review.json 只在各自成功时出现。 */
+/** §22 成功 Run 的产物清单；validation.json / review.json / commercial-review.json
+ *  只在各自成功时出现。 */
 function artifactsOf(
   validation: ValidationResult | null,
   review: ReviewResult | null,
   quality: QualityResult | null = null,
   // v1.4.0 §20：beat-validation.json 是运行级产物，只在实际校验过时出现
   beatValidation: BeatValidationResult | null = null,
+  // v1.5.0 TASK §16：commercial-review.json 只在商业审阅成功时出现
+  commercialReview: CommercialReviewResult | null = null,
 ): Record<string, string> {
   const artifacts: Record<string, string> = {
     config: "config.json",
@@ -120,6 +134,8 @@ function artifactsOf(
   if (review) artifacts.review = "review.json";
   // v1.2.0 §20：quality.json 与 metadata 同口径（修订后），装配过就一定有这个文件
   if (quality) artifacts.quality = "quality.json";
+  // v1.5.0 TASK §16：商业结论与 quality.json 同口径——跑成了才有这个文件
+  if (commercialReview) artifacts.commercial_review = "commercial-review.json";
   return artifacts;
 }
 
@@ -148,6 +164,13 @@ interface MetaPatch {
   review_status?: ReviewStatus;
   review_error?: string | null;
   review?: ReviewResult | null;
+  /**
+   * v1.5.0 TASK §33 additive：商业可读性审阅。写入时派生出 commercial_score——
+   * 与 review_score / overall_score 同一套派生方式，不新增口径。
+   */
+  commercial_review_status?: CommercialReviewStatus;
+  commercial_review?: CommercialReviewResult | null;
+  commercial_review_error?: string | null;
   /**
    * v1.2.0 §28 additive：统一质量快照。写入时派生出 quality_assembly_status /
    * overall_score / quality_issue_count 三个字段——不复用已被 accepted / exhausted
@@ -191,6 +214,10 @@ interface AttemptRecord {
   validation_error: string | null;
   review_status: ReviewStatus;
   review_error: string | null;
+  /** v1.5.0 TASK §13/§18：这次 Attempt 最终留下的那一版正文的商业可读性结论。 */
+  commercial_review: CommercialReviewResult | null;
+  commercial_review_status: CommercialReviewStatus;
+  commercial_review_error: string | null;
   /** 生成阶段原始异常：只用于错误码映射（§11），绝不写入任何产物或响应。 */
   failure?: unknown;
 }
@@ -222,6 +249,35 @@ function beatCheckPatch(check: BeatCheck): Partial<MetaPatch> {
 }
 
 /**
+ * v1.5.0 TASK §24 一次商业可读性审阅的结论。CommercialReviewer 自身异常只让
+ * commercial_review_status 变成 failed（与 §12 的 Reviewer / Validator 同一约定）：
+ * 已生成的正文、校验结论、质量快照一个都不动，也不触发重试或修订。
+ */
+interface CommercialCheck {
+  commercial_review: CommercialReviewResult | null;
+  commercial_review_status: CommercialReviewStatus;
+  commercial_review_error: string | null;
+}
+
+/** v1.5.0 TASK §5：没注入 CommercialReviewer 时这一路等于不存在，只留一个 not_started。 */
+const COMMERCIAL_CHECK_SKIPPED: CommercialCheck = {
+  commercial_review: null,
+  commercial_review_status: "not_started",
+  commercial_review_error: null,
+};
+
+/** v1.5.0 TASK §33：commercial_review_status 始终落盘（与 beat_validation_status 同约定），
+ *  其余两个字段只在真的有结论 / 真的有错误时才出现，不写 null 占位。 */
+function commercialCheckPatch(check: CommercialCheck): Partial<MetaPatch> {
+  const patch: Partial<MetaPatch> = {
+    commercial_review_status: check.commercial_review_status,
+    commercial_review: check.commercial_review,
+  };
+  if (check.commercial_review_error) patch.commercial_review_error = check.commercial_review_error;
+  return patch;
+}
+
+/**
  * §3/§25 GenerationPipeline：把一次完整生成组织成一个 Run。
  * v0.7.0 固定顺序（§19）：
  *   Config → Planning → [ Attempt n: Generate → Save Story → Validate → Review → Decide → Retry? ] → Finalize
@@ -230,6 +286,8 @@ function beatCheckPatch(check: BeatCheck): Partial<MetaPatch> {
  *   → Repair → Revalidate → Re-review → 再判一次 → 仍不过才 Full Retry。
  * v1.4.0 在 Planning 之后、Attempt 之前插入 BeatPlan 结构校验：
  *   Config → Planning → Validate BeatPlan → [ Attempt n: … ] → Finalize。
+ * v1.5.0 在 Attempt 内部、基础审阅之后插入商业可读性审阅：
+ *   … → Validate → Review → Commercial Review → Decide。
  * §8/§9：BeatPlan 与 StoryConfig 只确定一次，同一 Run 内所有 Attempt 复用，
  * 不自动换 Model / 改温度 / 改 Config（§70）。Repair 与 Beat 校验同样不碰它们（§65）。
  * §65 只暴露 run() 与 runWithPlan()，不做 Stage Registry / DAG / Plugin。
@@ -252,6 +310,9 @@ export class GenerationPipeline {
     private projectVersion: string = readProjectVersion(),
     /** v1.4.0 §5 可选：不注入就完全没有 BeatPlan 结构校验，流程与 v1.3.0 逐字一致。 */
     private beatValidator?: BeatValidator,
+    /** v1.5.0 TASK §5/§12 可选：不注入就完全没有商业可读性审阅，流程与 v1.4.0 逐字一致。
+     *  与 BasicReviewer 是两个独立审阅者，不共用 Prompt、不共用结论。 */
+    private commercialReviewer?: CommercialReviewer,
   ) {}
 
   /** §6 Automatic：StoryConfig → Plan → 若干 Attempt → 选中的那一个。 */
@@ -334,6 +395,8 @@ export class GenerationPipeline {
 
       // §23/§28：根目录 story.md / validation.json / review.json 对应 selected attempt。
       // v1.2.0 §57：quality.json 一起晋升，根目录快照因此与 selected attempt 逐字一致。
+      // v1.5.0 TASK §39：commercial-review.json 同样跟着晋升，于是根目录那份商业结论
+      // 描述的正是 selected attempt 的 story.md，不会张冠李戴。
       this.artifactStore.promoteAttempt(rid, selected.attempt.attempt_number);
 
       transitionStage(ctx, "completed", "completed");
@@ -342,6 +405,7 @@ export class GenerationPipeline {
         this.metaFor(ctx, runtime, {
           ...policyPatch(policy),
           ...beatCheckPatch(beatCheck),
+          ...commercialCheckPatch(selected),
           attempt_count: records.length,
           selected_attempt: selected.attempt.attempt_number,
           quality_status: qualityStatus,
@@ -370,6 +434,9 @@ export class GenerationPipeline {
         review: selected.attempt.review,
         review_status: selected.review_status,
         review_error: selected.review_error,
+        commercial_review: selected.commercial_review,
+        commercial_review_status: selected.commercial_review_status,
+        commercial_review_error: selected.commercial_review_error,
         quality: selected.quality,
         attempt_count: records.length,
         selected_attempt: selected.attempt.attempt_number,
@@ -381,6 +448,7 @@ export class GenerationPipeline {
           selected.attempt.review,
           selected.quality,
           beatCheck.beat_validation,
+          selected.commercial_review,
         ),
         started_at: ctx.started_at,
         finished_at: new Date().toISOString(),
@@ -394,7 +462,11 @@ export class GenerationPipeline {
       try {
         this.artifactStore.putMetadata(
           rid,
-          this.metaFor(ctx, runtime, { ...policyPatch(policy), ...beatCheckPatch(beatCheck) }),
+          this.metaFor(ctx, runtime, {
+            ...policyPatch(policy),
+            ...beatCheckPatch(beatCheck),
+            ...commercialCheckPatch(COMMERCIAL_CHECK_SKIPPED),
+          }),
         );
       } catch {
         /* metadata 保存失败时保留原始错误 */
@@ -526,6 +598,9 @@ export class GenerationPipeline {
     };
     let decision: RetryDecision;
     let repairs: RepairRecord[] = [];
+    // v1.5.0 TASK §13：这一次尝试的商业可读性结论。生成失败时没有正文可评，
+    // 保持 skipped（一个字段都不多写，与 v1.4.0 的产物布局一致）。
+    let commercial: CommercialCheck = { ...COMMERCIAL_CHECK_SKIPPED };
 
     if (story === null) {
       // §22 生成失败：没有正文可校验，也没有正文可修订——直接交给重试决策。
@@ -554,6 +629,10 @@ export class GenerationPipeline {
         decision = repaired.decision;
         repairs = repaired.repairs;
       }
+
+      commercial = await this.reviewCommercial(
+        ctx, rid, config, story, attemptNumber, runtime, policy, check.validation,
+      );
     }
 
     // §5/§16：accepted 表示这一次满足了策略，与 retry_reason 互斥。
@@ -610,6 +689,9 @@ export class GenerationPipeline {
       validation_error: check.validation_error,
       review_status: check.review_status,
       review_error: check.review_error,
+      commercial_review: commercial.commercial_review,
+      commercial_review_status: commercial.commercial_review_status,
+      commercial_review_error: commercial.commercial_review_error,
       failure: generationFailure,
     };
   }
@@ -720,6 +802,72 @@ export class GenerationPipeline {
       review_status: reviewStatus,
       review_error: reviewError,
     };
+  }
+
+  /**
+   * v1.5.0 TASK §13/§14 商业可读性审阅：Story → CommercialReviewer → CommercialReviewResult。
+   * 位置在基础审阅之后（TASK §13），看的是调用方传进来的那一版正文——由调用方负责
+   * 传入「这个 Attempt 最终留下的那一版」，于是 attempts/NN/commercial-review.json
+   * 永远与同目录 story.md 严格对应（TASK §17/§18）。
+   *
+   * §14/§15 只 evaluate / persist：返回的结论不参与 decideRetry、不进 QualityResult、
+   * 不改写正文。§24 这一路自身失败只让 commercial_review_status 变成 failed，
+   * 已产出的正文 / 校验 / 质量结论一个都不动（§25：评价器失败不等于故事坏了）。
+   */
+  private async reviewCommercial(
+    ctx: RunContext,
+    rid: string,
+    config: StoryConfig,
+    story: string,
+    attemptNumber: number,
+    runtime: GenerateRuntime | undefined,
+    policy: RetryPolicy,
+    validation: ValidationResult | null,
+  ): Promise<CommercialCheck> {
+    if (!this.commercialReviewer) return { ...COMMERCIAL_CHECK_SKIPPED };
+    // §18 同一条规矩：正文是空的就没有商业表现可评，这一步直接跳过。
+    if (skipReviewFor(validation)) return { ...COMMERCIAL_CHECK_SKIPPED };
+
+    transitionStage(ctx, "reviewing_commercial", "reviewing_commercial");
+    this.artifactStore.putMetadata(
+      rid,
+      this.metaFor(ctx, runtime, {
+        ...policyPatch(policy),
+        attempt_number: attemptNumber,
+        commercial_review_status: "reviewing",
+      }),
+    );
+
+    let commercialReview: CommercialReviewResult | null = null;
+    let commercialReviewError: string | null = null;
+    try {
+      // §11：与基础审阅同一份输入口径，但用独立 Prompt 与独立 schema。
+      // 温度取 CommercialReviewer 自己的默认值，不跟着正文的创作温度走。
+      commercialReview = await this.commercialReviewer.review(config, story);
+    } catch (e) {
+      commercialReview = null;
+      commercialReviewError = safeText(errorDetail(e));
+      logger.child({ run_id: rid, attempt_number: attemptNumber }).error("commercial review failed", e);
+    }
+
+    // §16/§17：跑成了才落盘。失败时这个文件不出现，API 里对应字段是 null。
+    if (commercialReview) {
+      this.artifactStore.putAttemptCommercialReview(rid, attemptNumber, commercialReview);
+    }
+    const check: CommercialCheck = {
+      commercial_review: commercialReview,
+      commercial_review_status: commercialReview ? "completed" : "failed",
+      commercial_review_error: commercialReviewError,
+    };
+    this.artifactStore.putMetadata(
+      rid,
+      this.metaFor(ctx, runtime, {
+        ...policyPatch(policy),
+        attempt_number: attemptNumber,
+        ...commercialCheckPatch(check),
+      }),
+    );
+    return check;
   }
 
   /** §29：同一份校验 / 审阅结论，按是否属于某次 Repair 决定落盘位置。 */
@@ -911,6 +1059,17 @@ export class GenerationPipeline {
     if (patch.review_status) meta.review_status = patch.review_status;
     if (patch.review_error) meta.review_error = patch.review_error;
     if (patch.review) meta.review_score = reviewOverallScore(patch.review);
+    // v1.5.0 TASK §33：商业可读性审阅的三个字段，与 review_* 同一套派生方式。
+    // commercial_review_status 与 beat_validation_status 一样始终落盘——
+    // 读 metadata 就能看出这一步到底跑没跑过。
+    if (patch.commercial_review_status) {
+      meta.commercial_review_status = patch.commercial_review_status;
+    }
+    if (patch.commercial_review) {
+      // §11：只有一个口径，就是四维均分，与 commercial-review.json 里的 score 一致
+      meta.commercial_score = commercialOverallScore(patch.commercial_review);
+    }
+    if (patch.commercial_review_error) meta.commercial_review_error = patch.commercial_review_error;
     if (patch.quality) {
       // §28/§29：不复用 quality_status（它已经是 accepted / exhausted），
       // 统一质量层的状态另起 quality_assembly_status 这个名字。
@@ -926,6 +1085,7 @@ export class GenerationPipeline {
       patch.review ?? null,
       patch.quality ?? null,
       patch.beat_validation ?? null,
+      patch.commercial_review ?? null,
     );
     return meta;
   }
