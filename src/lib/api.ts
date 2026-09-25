@@ -4,6 +4,7 @@ import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
 import type { QualityResult } from "@/types/quality";
 import type { BeatValidationResult } from "@/types/beat-validation";
+import type { CommercialReviewResult } from "@/types/commercial-review";
 
 /** §34/§38 单个 Attempt 摘要：只带结论，不带完整正文。 */
 export interface AttemptSummaryApi {
@@ -29,7 +30,9 @@ export interface RepairSummaryApi {
  *  v0.7.0 增加重试结论与 Attempt 摘要（§38）。
  *  v0.8.0 增加 repair_count 与每个 Attempt 的 repairs 摘要（§40）。
  *  v1.2.0 增加 quality（§25）：统一质量层是新增字段，原有字段一个不动。
- *  v1.4.0 增加 beat_validation / beat_validation_status（§26）：同样是纯追加。 */
+ *  v1.4.0 增加 beat_validation / beat_validation_status（§26）：同样是纯追加。
+ *  v1.5.0 增加 commercial_review / commercial_review_status（§31）：与 review 并列的
+ *  第二个独立审阅结论，原来的字段一个不动。 */
 export interface RunApiResult {
   run_id: string;
   status: string;
@@ -48,6 +51,11 @@ export interface RunApiResult {
   review: ReviewResult | null;
   review_status: string;
   review_error?: string;
+  /** v1.5.0 TASK §31：商业可读性结论，与 review 完全并列；
+   *  没接这一步或它自身失败时为 null，story / review 不受影响。 */
+  commercial_review: CommercialReviewResult | null;
+  commercial_review_status: string;
+  commercial_review_error?: string;
   /** §25/§26：统一质量快照；更早的响应里没有这个字段，按可空处理。 */
   quality: QualityResult | null;
   artifacts: Record<string, string>;
@@ -237,6 +245,9 @@ export interface RunDetailApi {
   validation_status: string;
   review: ReviewResult | null;
   review_status: string;
+  /** v1.5.0 TASK §32：商业可读性结论；v1.5.0 之前的 Run 读不到这个文件，为 null。 */
+  commercial_review: CommercialReviewResult | null;
+  commercial_review_status: string;
   /** §26：统一质量快照；v1.2.0 之前的 Run 没有 quality.json，服务端会临时装配后返回。 */
   quality: QualityResult | null;
   attempts: AttemptSummaryApi[];
@@ -270,6 +281,9 @@ export interface AttemptDetailApi {
   repairs: RepairDetailApi[];
   validation: ValidationResult | null;
   review: ReviewResult | null;
+  /** v1.5.0 TASK §17/§18：这次尝试最终留下的那一版正文的商业可读性结论；
+   *  这一步被跳过或自身失败时为 null。 */
+  commercial_review: CommercialReviewResult | null;
   quality: QualityResult | null;
 }
 
@@ -325,6 +339,24 @@ export async function reviewStory(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ config, story, ...runtime, ...(runId ? { run_id: runId } : {}) }),
   }, "审阅失败")) as ReviewResult;
+}
+
+/**
+ * v1.5.0 手动商业可读性审阅（Commercial Review Again）：只重新跑四个商业维度，
+ * 不重新生成 Story，也不触碰 /api/review 的结构审阅产物（§31/§57）。
+ * 带 runId 时服务端覆盖该 Run 的 commercial-review.json（§30）。
+ */
+export async function reviewStoryCommercial(
+  config: StoryConfig,
+  story: string,
+  runtime: { model?: string; baseUrl?: string; temperature?: number } = {},
+  runId?: string,
+): Promise<CommercialReviewResult> {
+  return (await requestJson("/api/review/commercial", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ config, story, ...runtime, ...(runId ? { run_id: runId } : {}) }),
+  }, "商业审阅失败")) as CommercialReviewResult;
 }
 
 /**

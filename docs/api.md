@@ -27,6 +27,7 @@
 | `BEAT_VALIDATION_FAILED` | 502 | v1.4.0 新增：骨架结构校验拿不到合法的 `BeatValidationResult` |
 | `GENERATION_FAILED` | 502 | 生成阶段失败 |
 | `REVIEW_FAILED` | 502 | 审阅输出解析失败 |
+| `COMMERCIAL_REVIEW_FAILED` | 502 | v1.5.0 新增：商业可读性审阅输出解析失败；与 `REVIEW_FAILED` 是两条独立的路 |
 | `REPAIR_FAILED` | 502 | 修订输出解析失败 |
 | `VALIDATION_FAILED_INTERNAL` | 500 | 校验器自身出错 |
 | `ARTIFACT_WRITE_FAILED` | 500 | 产物写盘失败 |
@@ -40,7 +41,7 @@
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `config` | StoryConfig | 可选；不传时整个请求体当 StoryConfig（但 `POST /api/plan` 不支持包装） |
-| `model` / `baseUrl` / `temperature` | string / string / number | 可选，覆盖服务端 LLM 设置；**温度只驱动规划与生成**——审阅固定 `0.3`、修订固定 `0.5`、Beat 结构校验固定 `0.2`，三者与生成温度相互独立，请求体里的 `temperature` 对它们不生效 |
+| `model` / `baseUrl` / `temperature` | string / string / number | 可选，覆盖服务端 LLM 设置；**温度只驱动规划与生成**——审阅固定 `0.3`、修订固定 `0.5`、Beat 结构校验固定 `0.2`、商业可读性审阅固定 `0.3`，四者与生成温度相互独立，请求体里的 `temperature` 对它们不生效 |
 | `retry_policy` | object | 可选；**只被 `/api/runs`、`/api/runs/from-plan`、`/api/generate` 读取**，其它路由静默忽略 |
 
 `retry_policy` 字段：`max_attempts`（整数 1~5，缺省 2）、`min_review_score`（0~100，缺省 70）、
@@ -92,6 +93,7 @@
 | POST | `/api/runs/from-plan` | Manual Run：用给定 BeatPlan 直接生成（`beat_plan` 必填） |
 | POST | `/api/generate` | 兼容入口，等价于 `/api/runs/from-plan` |
 | POST | `/api/review` | 对一段已有正文单独审阅（不重试、不写盘；带 `run_id` 时覆盖该 Run 的 `review.json`） |
+| POST | `/api/review/commercial` | v1.5.0 新增：对一段已有正文单独做商业可读性审阅（不重试、不写盘；带 `run_id` 时覆盖该 Run 的 `commercial-review.json`） |
 | POST | `/api/validate` | 对一段已有正文单独跑硬性规则（不调模型） |
 | POST | `/api/repair` | 对一段已有正文定点修订一次 |
 | GET | `/api/runs/<run_id>` | Run 详情 |
@@ -122,6 +124,13 @@
 | `review` | ReviewResult \| null | 审阅失败时为 `null` |
 | `review_status` | string | 同上四值 |
 | `review_error` | string | 可选，仅在出错时出现 |
+| `commercial_review` | CommercialReviewResult \| null | v1.5.0 新增：商业可读性审阅结论；没跑到这一步或自身失败时是 `null` |
+| `commercial_review_status` | string | v1.5.0 新增，取值同 `validation_status` 四值 |
+| `commercial_review_error` | string | 可选，仅在商业审阅自身失败时出现 |
+
+这三个字段是纯追加，`validation` / `review` / `quality` 三个字段逐字未动。商业分数不单独占一个
+响应字段：`commercial_review.score` 就是它，与 `metadata.json` 的 `commercial_score`、
+`commercial-review.json` 的 `score` 同一个口径（四个维度等权均分，保留一位小数）。
 | `quality` | QualityResult \| null | v1.2.0 新增：统一质量快照，见下 |
 | `artifacts` | object | 见下 |
 | `quality_status` | string | `accepted` / `exhausted` |
@@ -132,7 +141,8 @@
 
 `artifacts` 恒含 `config` / `beat_plan` / `story` / `metadata` 四个键（值是文件名），
 校验、审阅或质量装配各自成功时追加 `validation` / `review` / `quality`，
-骨架结构校验成功时追加 `beat_validation`（v1.4.0）。
+骨架结构校验成功时追加 `beat_validation`（v1.4.0），
+商业可读性审阅成功时追加 `commercial_review`（v1.5.0）。
 
 `QualityResult`（v1.2.0 新增，纯 additive）：`overall_score`（有维度时是四维均分，否则是
 `review.score`，没有审阅结论时是 `null`）、`validation_passed`（`true` / `false` /
@@ -175,6 +185,9 @@
 多了策略回显字段 `max_attempts` / `min_review_score` / `enable_repair` / `max_repairs_per_attempt`。
 v1.4.0 起还多两个读回字段 `beat_validation`（BeatValidationResult 或 `null`）与
 `beat_validation_status`（四值）：1.4.0 之前的 Run 没有这个文件，读出 `null` 与 `not_started`。
+v1.5.0 起再多两个：`commercial_review`（CommercialReviewResult 或 `null`）与
+`commercial_review_status`（四值）：没有 `commercial-review.json` 的旧 Run 读出 `null` 与
+`not_started`，磁盘上不会被补写。
 `run_id` 为 `""`、`.`、`..` 或含路径分隔符时 400；Run 不存在 404 `RUN_NOT_FOUND`。
 
 `quality` 按三级兜底取，三级都是同一版正文（入选 Attempt 最终留下的那一版）：
@@ -193,7 +206,9 @@ v1.2.0 直接读 attempt 目录，于是旧 Run 装配出的分数描述的是�
 
 `AttemptDetail`：`run_id`、`attempt_number`、`accepted`、`retry_reason`、`selected`、
 `story`、`initial_story`（没发生修订时是 `null`）、`repair_count`、`repairs`（`RepairDetail[]`）、
-`validation`、`review`、`quality`（v1.2.0 新增，取该次尝试修订后的快照）。
+`validation`、`review`、`quality`（v1.2.0 新增，取该次尝试修订后的快照），
+以及 v1.5.0 新增的 `commercial_review`（CommercialReviewResult 或 `null`，读该次尝试的
+`commercial-review.json`）。
 Run 不存在与 Attempt 不存在共用 `RUN_NOT_FOUND` 这个 code，只能靠 message 区分；
 `attempt_number` 不是 1~99 的整数时 400。
 `quality` 先读 `attempts/<NN>/quality.json`，缺失或被改坏时按上面第 3 级同一套规则装配。
@@ -225,6 +240,29 @@ Run 不存在与 Attempt 不存在共用 `RUN_NOT_FOUND` 这个 code，只能靠
 审阅者输出里的 `dimensions` 一旦出现就必须四个键齐全、各自 0~100 且带非空短评；
 少一个、多一个（模型自己扩到 35 维也一样）、分数越界，都算审阅输出非法，
 按 `REVIEW_FAILED` 502 返回，不会补 0 也不会挑一个先凑着。
+
+### `POST /api/review/commercial`（v1.5.0 新增）
+
+请求体与 `/api/review` 完全相同：`{config, story}`（`config` 可选，带 `run_id` 时顺带覆盖该 Run
+的 `commercial-review.json`），顶层直接是 `CommercialReviewResult`。它是 `/api/review` 完全并列的
+第二个入口，同一个故事可以得到两份互不覆盖的结论：一份看结构（Co/N/C/Ca），一份看商业可读性
+（H/P/E/Pf）。
+
+- `story` 缺失或不是字符串 → 400 `CONFIG_INVALID`
+- 带 `run_id` 且该 Run 不存在 → 404 `RUN_NOT_FOUND`，**不会**调用模型
+- 模型输出解析不出合法的 `CommercialReviewResult` → 502 `COMMERCIAL_REVIEW_FAILED`
+- 商业分数低是**一次成功的调用**，不是错误；这个入口本身也不做任何重试或修订
+
+`CommercialReviewResult`：`score`、`summary`、`strengths`、`problems`、`suggestions`
+（四个都是字符串数组）与 `dimensions`。`dimensions` 固定四个键——`hook` / `pacing` /
+`engagement` / `payoff`，各自 `{score: number, summary: string}`；模型自己加减维度、
+分数越界、某个维度没有短评，都算输出非法，按 `COMMERCIAL_REVIEW_FAILED` 502 返回，
+不会补 0 也不会挑一个先凑着。落盘的 `score` 永远由这四个维度确定性重算（等权均分，
+保留一位小数），模型自报的 `score` 只作为形状校验的依据，不会被采信。
+
+它**不参与**质量装配、重试或修订决策：`QualityResult` 仍然只有 Co/N/C/Ca 四个维度，
+`min_review_score` 也仍然只看结构审阅分数。商业可读性结论不预测市场表现——
+没有「爆款概率」「市场成功率」这类字段或文案。
 
 ### `POST /api/repair`
 

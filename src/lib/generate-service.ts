@@ -7,6 +7,7 @@ import { BeatPlanner } from "@/lib/beat-planner";
 import { StoryGenerator } from "@/lib/story-generator";
 import { StoryValidator } from "@/lib/story-validator";
 import { BasicReviewer } from "@/lib/basic-reviewer";
+import { CommercialReviewer } from "@/lib/commercial-reviewer";
 import { BeatValidator } from "@/lib/beat-validator";
 import { StoryRepairer } from "@/lib/story-repairer";
 import { RepairStrategy } from "@/core/repair-strategy";
@@ -42,6 +43,10 @@ import { qualityResultOf, type QualityResult } from "@/types/quality";
 import type { QualityStatus } from "@/core/pipeline";
 import { projectVersion as readProjectVersion } from "@/lib/version";
 import type { BeatValidationResult } from "@/types/beat-validation";
+import type {
+  CommercialReviewResult,
+  CommercialReviewStatus,
+} from "@/types/commercial-review";
 
 export { ConfigValidationError, UnsupportedConfigVersionError } from "@/types/story-config";
 export { LLMError } from "@/lib/llm";
@@ -53,6 +58,8 @@ export { ValidationValidationError } from "@/types/validation-result";
 export { RepairValidationError } from "@/types/repair";
 export { BeatValidationValidationError } from "@/types/beat-validation";
 export { BeatValidationParseError } from "@/lib/beat-validation-parser";
+export { CommercialReviewValidationError } from "@/types/commercial-review";
+export { CommercialReviewParseError } from "@/lib/commercial-review-parser";
 
 /** 模块加载时锁定项目根，避免测试 chdir 后模板路径漂移。 */
 const PROJECT_ROOT = process.cwd();
@@ -133,7 +140,8 @@ export async function planStory(
  *  v0.7.0 增加 attempt_count / selected_attempt / quality_status / attempts（§38）。
  *  v0.8.0 增加 repair_count 与 attempts[].repairs 摘要（§40）。
  *  v1.2.0 增加 quality（§25）：新增的是统一质量层，原有字段一个不动。
- *  v1.4.0 增加 beat_validation / beat_validation_status（§26）：同样是纯追加。 */
+ *  v1.4.0 增加 beat_validation / beat_validation_status（§26）：同样是纯追加。
+ *  v1.5.0 增加 commercial_review / commercial_review_status（TASK §30）：同样是纯追加。 */
 export interface RunOk {
   run_id: string;
   status: string;
@@ -155,6 +163,11 @@ export interface RunOk {
   review_error?: string;
   /** §25/§26：统一质量快照。POST 响应里一定有；读旧 Run 的接口上它可能是 null。 */
   quality: QualityResult | null;
+  /** v1.5.0 TASK §30：商业可读性结论；这一步跳过或它自身失败时为 null（故事本身不受影响）。 */
+  commercial_review: CommercialReviewResult | null;
+  commercial_review_status: CommercialReviewStatus;
+  /** v1.5.0 TASK §24：CommercialReviewer 自身异常时的安全摘要；没跑这一步时整个键不出现。 */
+  commercial_review_error?: string;
   artifacts: Record<string, string>;
   /** §16/§38：accepted = 某次 Attempt 满足策略；exhausted = 次数用尽仍未满足。 */
   quality_status: "accepted" | "exhausted";
@@ -184,6 +197,8 @@ export interface RunDeps {
   repairStrategy?: RepairStrategy;
   /** v1.4.0 §5：不注入就没有 BeatPlan 结构校验这一步。 */
   beatValidator?: BeatValidator;
+  /** v1.5.0 TASK §5：不注入就没有商业可读性审阅这一步，其余流程与 v1.4.0 一致。 */
+  commercialReviewer?: CommercialReviewer;
   artifactStore?: ArtifactStore;
 }
 
@@ -193,6 +208,8 @@ export interface RunDeps {
  * §25 Writer 与 Reviewer 使用同一个 LLMClient——不引入 Reviewer Model / Model Router。
  * §3 Validator 是纯规则，不需要 LLM。
  * §9 Repairer 用同一个 LLMClient；不注入 Repairer 时 Pipeline 完全不修（§51-E）。
+ * §44 TASK §44：CommercialReviewer 的 LLMClient 与其它组件走同一条安全构建路径
+ * （clientFor → assertPublicBaseUrl → clientFromEnv），不另开一条不受校验的入口。
  */
 export async function buildPipeline(runtime: GenerateRuntime, deps: RunDeps = {}): Promise<GenerationPipeline> {
   const llm = await clientFor(runtime, deps.llm);
@@ -219,9 +236,15 @@ export async function buildPipeline(runtime: GenerateRuntime, deps: RunDeps = {}
     llm,
     join(PROJECT_ROOT, "prompts", "beat_validator.txt"),
   );
+  // v1.5.0 TASK §12：商业审阅者与 BasicReviewer 分离，共用同一个 LLMClient。
+  const commercialReviewer = deps.commercialReviewer ?? new CommercialReviewer(
+    llm,
+    join(PROJECT_ROOT, "prompts", "commercial_reviewer.txt"),
+  );
   return new GenerationPipeline(
     planner, generator, validator, reviewer, artifactStore, DEFAULT_RETRY_POLICY,
     repairer, repairStrategy, new QualityAssembler(), readProjectVersion(), beatValidator,
+    commercialReviewer,
   );
 }
 
@@ -237,6 +260,9 @@ function runOkOf(result: GenerationResult): RunOk {
     validation_status: result.validation_status,
     review: result.review,
     review_status: result.review_status,
+    // v1.5.0 TASK §16/§30：商业可读性结论与结构审阅并列回传，互不覆盖
+    commercial_review: result.commercial_review,
+    commercial_review_status: result.commercial_review_status,
     quality: result.quality,
     artifacts: result.artifacts,
     quality_status: result.quality_status,
@@ -250,6 +276,8 @@ function runOkOf(result: GenerationResult): RunOk {
   if (result.review_error) ok.review_error = result.review_error;
   // v1.4.1 §26：与 validation_error / review_error 同一套「有错误才带这个键」的约定
   if (result.beat_validation_error) ok.beat_validation_error = result.beat_validation_error;
+  // v1.5.0 TASK §24：CommercialReviewer 自身异常时的摘要；没跑这一步时整个键不出现
+  if (result.commercial_review_error) ok.commercial_review_error = result.commercial_review_error;
   return ok;
 }
 
@@ -396,6 +424,72 @@ export async function reviewStory(body: unknown, deps: RunDeps = {}): Promise<Re
   } catch (e) {
     const err = toApiError(e);
     logger.error(`review failed (${err.code})`, e);
+    return { status: err.httpStatus, json: err.body() };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// v1.5.0 商业可读性审阅：POST /api/review/commercial
+// 与 /api/review 完全并列的第二个入口，共用同一个 CommercialReviewer（§31/§57：
+// 两个审阅者各自独立，不合成一个「8 维大 Prompt」，也不互相改写对方的产物）。
+// ---------------------------------------------------------------------------
+
+/** v1.5.0 CommercialReviewOutcome：成功回 CommercialReviewResult；失败回统一错误体。 */
+export type CommercialReviewOutcome =
+  | { status: 200; json: CommercialReviewResult }
+  | { status: number; json: ApiErrorBody };
+
+/**
+ * v1.5.0 POST /api/review/commercial 的服务层：{config, story}（可选 run_id）→ CommercialReviewResult。
+ * §30 带上 run_id 时覆盖该 Run 的 commercial-review.json——不建立 commercial_review_history。
+ * §15/§57：只读商业可读性，不驱动重试或修订；也不参考 / 更新结构审阅的 review.json。
+ */
+export async function reviewStoryCommercial(body: unknown, deps: RunDeps = {}): Promise<CommercialReviewOutcome> {
+  try {
+    const raw = (body ?? {}) as Record<string, unknown>;
+    const config = validateStoryConfig(raw.config ?? normalizeLegacy(raw));
+
+    const story = typeof raw.story === "string" ? raw.story.trim() : "";
+    if (!story) {
+      return { status: 400, json: errorBody("CONFIG_INVALID", "story is required——提供需要商业审阅的小说正文") };
+    }
+
+    const runtime = runtimeOf(raw);
+
+    // §30/§12：带上 run_id 时先判 Run 存在再调模型——404 不该先花掉一次付费请求。
+    // 这与 docs/api.md 里「带 run_id 且该 Run 不存在时 404，不会调用模型」一致；
+    // /api/review 目前仍是先审阅后判（v1.0.0 冻结时的既有行为），这里不复刻那个顺序。
+    const runId = typeof raw.run_id === "string" ? raw.run_id.trim() : "";
+    let store: ArtifactStore | null = null;
+    if (runId) {
+      store = deps.artifactStore ?? new ArtifactStore(appSettings().runsDir);
+      let exists: boolean;
+      try {
+        exists = store.runExists(runId);
+      } catch {
+        return { status: 400, json: errorBody("CONFIG_INVALID", `run_id 非法：${runId}`) };
+      }
+      if (!exists) {
+        return {
+          status: 404,
+          json: errorBody("RUN_NOT_FOUND", `run_id 不存在：${runId}（只能覆盖已存在 Run 的 commercial-review.json）`),
+        };
+      }
+    }
+
+    const reviewer = deps.commercialReviewer ?? new CommercialReviewer(
+      await clientFor(runtime, deps.llm),
+      join(PROJECT_ROOT, "prompts", "commercial_reviewer.txt"),
+    );
+    const review = await reviewer.review(config, story);
+
+    // §30：re-review 覆盖当前 commercial-review.json，不建立 commercial_review_history
+    store?.putCommercialReview(runId, review);
+
+    return { status: 200, json: review };
+  } catch (e) {
+    const err = toApiError(e);
+    logger.error(`commercial review failed (${err.code})`, e);
     return { status: err.httpStatus, json: err.body() };
   }
 }
@@ -573,6 +667,10 @@ export interface RunDetail {
   validation_status: string;
   review: ReviewResult | null;
   review_status: string;
+  /** v1.5.0 TASK §16/§32：入选 Attempt 的商业可读性结论；v1.5.0 之前的 Run 没有
+   *  commercial-review.json，这里是 null（面板据此隐藏，不报错）。 */
+  commercial_review: CommercialReviewResult | null;
+  commercial_review_status: string;
   /** §26：统一质量快照。v1.2.0 之前的 Run 没有 quality.json，按同一套规则临时装配。 */
   quality: QualityResult | null;
   attempts: AttemptSummary[];
@@ -595,6 +693,9 @@ export interface AttemptDetail {
   repairs: RepairDetail[];
   validation: ValidationResult | null;
   review: ReviewResult | null;
+  /** v1.5.0 TASK §17/§18：这次尝试最终留下的那一版正文的商业可读性结论；
+   *  v1.5.0 之前的 Attempt 没有 attempts/NN/commercial-review.json，为 null。 */
+  commercial_review: CommercialReviewResult | null;
   /** §26：统一质量快照；没有 quality.json 的旧 Attempt 按同一套规则临时装配。 */
   quality: QualityResult | null;
 }
@@ -757,6 +858,7 @@ export async function getRun(
   const qualityStatus = (strOf(meta?.quality_status) as QualityStatus | null) ?? null;
   const finalValidation = store.readFinalValidation(runId);
   const finalReview = store.readFinalReview(runId);
+  const finalCommercialReview = store.readFinalCommercialReview(runId);
   const selectedAttempt = intOf(meta?.selected_attempt) ?? (numbers.length > 0 ? numbers[numbers.length - 1] : 0);
   // §26/§27：三级兜底都指向「入选 Attempt 最终留下的那一版正文」——运行根的 quality.json、
   // 入选 Attempt 自己的 quality.json、再用最终结论临时装配。
@@ -787,6 +889,10 @@ export async function getRun(
       validation_status: strOf(meta?.validation_status) ?? "not_started",
       review: finalReview,
       review_status: strOf(meta?.review_status) ?? "not_started",
+      // v1.5.0 TASK §16：运行根那份商业结论，与 story.md 严格同版（§39）；
+      // v1.5.0 之前的 Run 读不到文件，status 兜底 not_started，前端据此隐藏面板。
+      commercial_review: finalCommercialReview,
+      commercial_review_status: strOf(meta?.commercial_review_status) ?? "not_started",
       // §26/§27：三级兜底都是同一版正文（见上面的 storedQuality / finalCheck）。
       quality: qualityOf(
         storedQuality,
@@ -864,6 +970,9 @@ export async function getRunAttempt(
       repairs,
       validation: store.readAttemptValidation(runId, attemptNumber),
       review: store.readAttemptReview(runId, attemptNumber),
+      // v1.5.0 TASK §17/§18：attempt 目录那份商业结论只描述这一次尝试最终留下的
+      // story.md；这一步被跳过或自身失败时没有文件，返回 null
+      commercial_review: store.readAttemptCommercialReview(runId, attemptNumber),
       // §26/§27：与运行根那份同口径——先读这份快照，缺失或被改坏时用这次尝试最终留下的
       // 结论（有修订就是最后一次修订的）临时装配。
       quality: qualityOf(

@@ -29,6 +29,8 @@ export const API_ERROR_CODES = [
   "VALIDATION_FAILED_INTERNAL",
   "REVIEW_FAILED",
   "REPAIR_FAILED",
+  // v1.5.0：商业可读性审阅自身失败（模型超时 / 输出非法），与 REVIEW_FAILED 并列
+  "COMMERCIAL_REVIEW_FAILED",
   "ARTIFACT_WRITE_FAILED",
   // v1.4.0：BeatPlan 结构校验自身失败（模型超时 / 输出非法 / 模板缺失）
   "BEAT_VALIDATION_FAILED",
@@ -132,6 +134,17 @@ export function toApiError(e: unknown): ApiError {
     }
     if (inner.name === "ReviewParseError") {
       return new ApiError("REVIEW_FAILED", `Review failed. 原因：${safeText(inner.message)}`, 502, runIdOf(e), stageOf(e));
+    }
+    // v1.5.0：商业可读性审阅与结构审阅是两条独立的路，错误码也分开——
+    // 前者失败不该被描述成「审阅失败」，两边结论互不影响（§12）。
+    if (inner.name === "CommercialReviewParseError" || inner.name === "CommercialReviewValidationError") {
+      return new ApiError(
+        "COMMERCIAL_REVIEW_FAILED",
+        `Commercial review failed. 原因：${safeText(inner.message)}`,
+        502,
+        runIdOf(e),
+        stageOf(e),
+      );
     }
     if (inner.name === "ValidatorError") {
       return new ApiError("VALIDATION_FAILED_INTERNAL", `Validation failed. 原因：${safeText(inner.message)}`, 500, runIdOf(e), stageOf(e));
