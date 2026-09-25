@@ -8,11 +8,13 @@ import { BeatPlanner } from "@/lib/beat-planner";
 import { StoryGenerator } from "@/lib/story-generator";
 import { StoryValidator } from "@/lib/story-validator";
 import { BasicReviewer } from "@/lib/basic-reviewer";
+import { CommercialReviewer } from "@/lib/commercial-reviewer";
 import { StoryRepairer } from "@/lib/story-repairer";
 import { RepairStrategy } from "@/core/repair-strategy";
 import {
   SAMPLE_BEAT_PLAN,
   SAMPLE_BEAT_VALIDATION,
+  SAMPLE_COMMERCIAL_REVIEW,
   SAMPLE_CONFIG,
   SAMPLE_REVIEW,
   SAMPLE_STORY,
@@ -31,12 +33,14 @@ import {
  *
  * 做法是跑几条真实路径的 Pipeline（只有 LLM 与校验 / 审阅组件是假的），把各层 metadata
  * 实际出现的键收成一个集合，与文档里列出的名字双向比对。两边都是集合：文档多写、漏写、
- * 改名都算走样。条件字段只在特定路径出现，因此五条路径必须都跑到：
- * 成功 / 修订后接受 / 重试耗尽 / 生成失败 / 校验与审阅组件自身异常。
+ * 改名都算走样。条件字段只在特定路径出现，因此这几条路径必须都跑到：
+ * 成功 / 修订后接受 / 重试耗尽 / 生成失败 / 校验与审阅组件自身异常 /
+ * Beat 校验器自身异常 / 商业审阅自身异常。
  */
 
 const PLAN_REPLY = JSON.stringify(SAMPLE_BEAT_PLAN);
 const GOOD_REVIEW = JSON.stringify(SAMPLE_REVIEW);
+const COMMERCIAL_REPLY = JSON.stringify(SAMPLE_COMMERCIAL_REVIEW);
 const LOW_REVIEW = JSON.stringify({
   score: 41,
   summary: "正文冲突没有展开。",
@@ -48,7 +52,12 @@ function pipelineWith(
   llm: FakeLLM,
   store: ArtifactStore,
   retryPolicy?: RetryPolicy,
-  brokenComponents?: { validator?: unknown; reviewer?: unknown; beatValidator?: unknown },
+  brokenComponents?: {
+    validator?: unknown;
+    reviewer?: unknown;
+    beatValidator?: unknown;
+    commercialReviewer?: unknown;
+  },
 ) {
   // 四个阶段都只用到 generate()，这里一次性降到它们需要的形状
   const client = llm as never;
@@ -67,6 +76,11 @@ function pipelineWith(
     (brokenComponents?.beatValidator ?? {
       validate: async () => SAMPLE_BEAT_VALIDATION,
     }) as never,
+    // v1.5.0：商业可读性审阅是另一次独立调用，单独用一条假 LLM——
+    // 与结构审阅共用序列会让每条路径的回复位置全部错位（TASK §12：两个审阅者不合并）
+    (brokenComponents?.commercialReviewer ?? new CommercialReviewer(
+      new FakeLLM([COMMERCIAL_REPLY]) as never,
+    )) as never,
   );
 }
 
@@ -80,6 +94,7 @@ async function runScenario(
     validator?: unknown;
     reviewer?: unknown;
     beatValidator?: unknown;
+    commercialReviewer?: unknown;
   } = {},
 ) {
   const dir = withTmpDir();
@@ -177,7 +192,7 @@ function expectSameSet(label: string, documented: string[], actual: string[]) {
 }
 
 describe("v1.0.1 文档与产物字段集 — 真实路径", () => {
-  it("六条路径覆盖全部条件字段：成功 / 修订后接受 / 重试耗尽 / 生成失败 / 校验审阅组件异常 / Beat 校验器自身异常", async () => {
+  it("七条路径覆盖全部条件字段：成功 / 修订后接受 / 重试耗尽 / 生成失败 / 校验审阅组件异常 / Beat 校验器自身异常 / 商业审阅自身异常", async () => {
     const happy = await runScenario([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW]);
     const repaired = await runScenario([
       PLAN_REPLY,
@@ -221,6 +236,18 @@ describe("v1.0.1 文档与产物字段集 — 真实路径", () => {
         },
       },
     });
+    // v1.5.0 §24/§25：CommercialReviewer 自身抛异常只写 commercial_review_error，
+    // 故事 / 校验 / 审阅 / 质量一个结论都不受影响，也没有 commercial-review.json
+    const brokenCommercialCheck = await runScenario([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW], {
+      ...DEFAULT_RETRY_POLICY,
+      enable_repair: false,
+    }, {
+      commercialReviewer: {
+        review: () => {
+          throw new Error("commercial reviewer boom");
+        },
+      },
+    });
 
     expect(happy.runKeys).toContain("quality_status");
     expect(repaired.repairKeys).toContain("repair_number");
@@ -236,6 +263,18 @@ describe("v1.0.1 文档与产物字段集 — 真实路径", () => {
     expect(existsSync(join(brokenBeatCheck.runDir, "beat-validation.json"))).toBe(false);
     expect(brokenBeatCheck.runKeys).not.toContain("beat_validation_passed");
 
+    // v1.5.0：商业审阅自身异常 ≠ 商业分低——只是这一步没跑成
+    expect(brokenCommercialCheck.runKeys).toContain("commercial_review_status");
+    expect(brokenCommercialCheck.runKeys).toContain("commercial_review_error");
+    expect(existsSync(join(brokenCommercialCheck.runDir, "commercial-review.json"))).toBe(false);
+    expect(brokenCommercialCheck.runKeys).not.toContain("commercial_score");
+    // §24/§25：Run 照常完成，其它结论一个都没丢
+    expect(brokenCommercialCheck.runKeys).toContain("quality_status");
+    expect(existsSync(join(brokenCommercialCheck.runDir, "review.json"))).toBe(true);
+    expect(existsSync(join(brokenCommercialCheck.runDir, "quality.json"))).toBe(true);
+    // §11：跑成时 overall_score / commercial_score 都落在 metadata 里，口径一致
+    expect(happy.runKeys).toContain("commercial_score");
+
     const run = unique([
       ...happy.runKeys,
       ...repaired.runKeys,
@@ -243,6 +282,7 @@ describe("v1.0.1 文档与产物字段集 — 真实路径", () => {
       ...failed.runKeys,
       ...brokenCheck.runKeys,
       ...brokenBeatCheck.runKeys,
+      ...brokenCommercialCheck.runKeys,
     ]);
     const attempt = unique([
       ...happy.attemptKeys,

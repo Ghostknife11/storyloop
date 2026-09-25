@@ -10,8 +10,9 @@ import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
+import type { CommercialReviewResult } from "@/types/commercial-review";
 import type { AttemptSummaryApi } from "@/lib/api";
-import { apiErrorOf } from "./helpers/fixtures";
+import { SAMPLE_COMMERCIAL_REVIEW, apiErrorOf } from "./helpers/fixtures";
 
 /**
  * §31~§33/§46 HTTP 路由层：只验证「JSON 解析 → 委托 service → 响应形状」，
@@ -43,6 +44,21 @@ const review: ReviewResult = {
 
 const RUN_ID = /^\d{8}_\d{6}_[a-z0-9]{6}$/;
 
+/** v1.5.0：与 SAMPLE_COMMERCIAL_REVIEW 同值的一份商业可读性结论（stubLLM 的固定回复）。 */
+const commercialReview: CommercialReviewResult = {
+  score: 71.5,
+  summary: "开篇三句内进入冲突，中段略拖，结尾收得住。",
+  strengths: ["第一段就抛出失踪悬念"],
+  problems: ["中段推理过程重复"],
+  suggestions: ["把中段两次排查合并成一次带新信息的排查"],
+  dimensions: {
+    hook: { score: 82, summary: "开场即冲突，读完想往下看。" },
+    pacing: { score: 68, summary: "中段排查过程拖了两轮。" },
+    engagement: { score: 74, summary: "主角动机明确，动力持续住了。" },
+    payoff: { score: 62, summary: "结局收得干脆但回报略赶。" },
+  },
+};
+
 /** target_words=5000 时长度下限为 750：这里远超下限、含主角名、以句号结尾，可通过全部硬规则。 */
 const LONG_STORY = `陈岚推开派出所的玻璃门，${"雨水顺着屋檐砸在台阶上。".repeat(80)}`;
 
@@ -62,18 +78,22 @@ function withTmpDir() {
 
 /**
  * 冒充 OpenAI-compatible /chat/completions：
- * system 消息区分三种角色——剧情策划（Planner）/ 基础审阅者（Reviewer）/ 作者（Generator）。
+ * system 消息区分四种角色——剧情策划（Planner）/ 基础审阅者（Reviewer）/
+ * 商业可读性审阅者（v1.5.0）/ 作者（Generator）。
  */
 function stubLLM(reviewerOutput?: string, story = LONG_STORY) {
   const reviewerText = reviewerOutput ?? JSON.stringify(review);
   const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body)) as { messages?: Array<{ role: string; content: string }> };
     const system = (body.messages ?? []).map((m) => m.content).join("\n");
+    // v1.5.0：商业可读性审阅者要排在「审阅」之前——它的 system 里也含「审阅」二字
     const content = system.includes("剧情策划")
       ? JSON.stringify(plan)
-      : system.includes("审阅")
-        ? reviewerText
-        : story;
+      : system.includes("商业可读性")
+        ? JSON.stringify(commercialReview)
+        : system.includes("审阅")
+          ? reviewerText
+          : story;
     return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content } }] }) };
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -127,19 +147,26 @@ describe("POST /api/runs（§32/§46）", () => {
 
     const runDir = join(dir, "runs", String(body.run_id));
     expect(readdirSync(runDir).sort()).toEqual([
-      "attempts", "beats.json", "config.json", "metadata.json", "quality.json",
-      "review.json", "story.md", "validation.json",
+      "attempts", "beats.json", "commercial-review.json", "config.json", "metadata.json",
+      "quality.json", "review.json", "story.md", "validation.json",
     ]);
     expect(JSON.parse(readFileSync(join(runDir, "validation.json"), "utf8"))).toEqual({ passed: true, issues: [] });
+    expect(JSON.parse(readFileSync(join(runDir, "commercial-review.json"), "utf8"))).toEqual(
+      SAMPLE_COMMERCIAL_REVIEW,
+    );
     // §16/§17/§24 metadata 与响应一致
     const meta = JSON.parse(readFileSync(join(runDir, "metadata.json"), "utf8"));
-    expect(meta.run_id).toBe(body.run_id);
-    expect(meta.status).toBe("completed");
-    expect(meta.validation_status).toBe("completed");
-    expect(meta.validation_passed).toBe(true);
-    expect(meta.validation_issue_count).toBe(0);
-    expect(meta.review_status).toBe("completed");
-    expect(meta.review_score).toBe(74);
+    const metaFull = meta as Record<string, unknown>;
+    expect(metaFull.run_id).toBe(body.run_id);
+    expect(metaFull.status).toBe("completed");
+    expect(metaFull.validation_status).toBe("completed");
+    expect(metaFull.validation_passed).toBe(true);
+    expect(metaFull.validation_issue_count).toBe(0);
+    expect(metaFull.review_status).toBe("completed");
+    expect(metaFull.review_score).toBe(74);
+    // v1.5.0 §16/§33：商业结论是 additive 字段，与 review_* 同一套派生方式
+    expect(metaFull.commercial_review_status).toBe("completed");
+    expect(metaFull.commercial_score).toBe(71.5);
   });
 
   it("请求体不是合法 JSON → 400", async () => {
@@ -286,8 +313,12 @@ describe("POST /api/runs — review failure（§28/§34/§46）", () => {
     expect(existsSync(join(runDir, "review.json"))).toBe(false);
     // §25：quality 只依赖 validation + 采纳结论，Review 失败也照样装配并落盘
     expect(existsSync(join(runDir, "quality.json"))).toBe(true);
+    // v1.5.0 §24/§25：结构审阅失败不影响商业可读性这一路——它照样跑完并落盘
+    expect(existsSync(join(runDir, "commercial-review.json"))).toBe(true);
+    expect(body.commercial_review_status).toBe("completed");
     expect(readdirSync(runDir).sort()).toEqual([
-      "attempts", "beats.json", "config.json", "metadata.json", "quality.json", "story.md", "validation.json",
+      "attempts", "beats.json", "commercial-review.json", "config.json", "metadata.json",
+      "quality.json", "story.md", "validation.json",
     ]);
     const meta = JSON.parse(readFileSync(join(runDir, "metadata.json"), "utf8"));
     expect(meta.status).toBe("completed");
@@ -332,11 +363,14 @@ describe("POST /api/runs/from-plan（§33）", () => {
     });
     expect(plannerCalls).toHaveLength(0);
     // §25：Reviewer 与 Generator 使用同一个 LLM 端点（无 Model Router）
+    // v1.5.0：商业可读性审阅者与基础审阅者是两次独立的调用（§12：不合成一个大 Prompt）
     const reviewerCalls = fetchMock.mock.calls.filter(([, init]) => {
       const b = JSON.parse(String((init as RequestInit | undefined)?.body)) as { messages?: Array<{ content: string }> };
       return (b.messages ?? []).some((m) => m.content.includes("审阅"));
     });
-    expect(reviewerCalls).toHaveLength(1);
+    expect(reviewerCalls).toHaveLength(2);
+    const commercialCalls = callsWithSystem(fetchMock, (s) => s.includes("商业可读性"));
+    expect(commercialCalls).toHaveLength(1);
   });
 
   it("缺 beat_plan → 400，并指引先规划", async () => {

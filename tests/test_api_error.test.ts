@@ -19,6 +19,7 @@ import { BeatValidationParseError } from "@/lib/beat-validation-parser";
 import { BeatPlanValidationError } from "@/types/beat-plan";
 import { BeatValidationValidationError } from "@/types/beat-validation";
 import { ReviewParseError } from "@/lib/review-parser";
+import { CommercialReviewParseError } from "@/lib/commercial-review-parser";
 import { PipelineError } from "@/core/pipeline";
 import { ArtifactWriteError } from "@/storage/artifact-store";
 
@@ -55,6 +56,8 @@ describe("§11 稳定错误码", () => {
       "VALIDATION_FAILED_INTERNAL",
       "REVIEW_FAILED",
       "REPAIR_FAILED",
+      // v1.5.0：商业可读性审阅自身失败，与 REVIEW_FAILED 是两条独立的路
+      "COMMERCIAL_REVIEW_FAILED",
       "ARTIFACT_WRITE_FAILED",
       // v1.4.0：BeatPlan 结构校验自身失败
       "BEAT_VALIDATION_FAILED",
@@ -127,6 +130,15 @@ describe("§12 状态码按错误性质分开", () => {
     const err = toApiError(beatValidation);
     expect(err.code).toBe("BEAT_VALIDATION_FAILED");
     expect(err.httpStatus).toBe(502);
+  });
+
+  it("v1.5.0 CommercialReviewParseError → COMMERCIAL_REVIEW_FAILED + 502，与 REVIEW_FAILED 分开", () => {
+    // 商业审阅与结构审阅是两条独立的路：错误码也不共用 REVIEW_FAILED
+    const err = toApiError(new CommercialReviewParseError("Commercial Reviewer 输出不是合法 JSON"));
+    expect(err.code).toBe("COMMERCIAL_REVIEW_FAILED");
+    expect(err.httpStatus).toBe(502);
+    expect(err.message).toContain("Commercial review failed");
+    expect(toApiError(new ReviewParseError("分数越界")).code).toBe("REVIEW_FAILED");
   });
 
   it("v1.4.0 请求体里的 BeatPlan / BeatValidationResult 不合法是用户错误，400", () => {

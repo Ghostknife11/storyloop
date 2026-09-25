@@ -11,7 +11,7 @@ import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
 import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
-import { apiErrorOf } from "./helpers/fixtures";
+import { apiErrorOf, commercialReviewerOf, SAMPLE_BEAT_VALIDATION } from "./helpers/fixtures";
 
 /**
  * §37~§39/§51 Retry API：请求体带 retry_policy、响应带 Attempt 摘要、
@@ -87,6 +87,7 @@ function scriptedReviewer(results: ReviewResult[]) {
  * 走服务层直接注入假组件：测试聚焦 HTTP 契约，不打真实 API。
  * deps 里同时注入假 Repairer（这里故意「修不好」），否则 buildPipeline 会造一个
  * 真 StoryRepairer 去打真实 LLM——测试绝不允许发生这种事（§66）。
+ * v1.5.0：商业可读性审阅同理给假件；它只产出结论，不参与这里的重试判定。
  */
 async function runWith(
   body: unknown,
@@ -101,6 +102,8 @@ async function runWith(
     validator: scriptedValidator(validations) as never,
     reviewer: scriptedReviewer(reviews) as never,
     repairer: { repair: async () => ({ repaired_story: "", issue_type: "general", success: false, notes: "修订失败：测试用的假 Repairer" }) } as never,
+    beatValidator: { validate: async () => SAMPLE_BEAT_VALIDATION } as never,
+    commercialReviewer: commercialReviewerOf(),
   } as never);
 }
 

@@ -13,7 +13,7 @@ import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
 import type { RepairIssueType, RepairRequest, RepairResult } from "@/types/repair";
 import { LLMError } from "@/lib/llm";
-import { apiErrorOf } from "./helpers/fixtures";
+import { apiErrorOf, commercialReviewerOf, SAMPLE_BEAT_VALIDATION } from "./helpers/fixtures";
 
 /**
  * §38/§40/§68 Repair API：POST /api/repair 的手动修订契约 +
@@ -118,6 +118,9 @@ async function runWith(
         validator: { validate: async () => validations[Math.min(v++, validations.length - 1)] } as never,
         reviewer: { review: async () => reviews[Math.min(r++, reviews.length - 1)] } as never,
         repairer: repairer as never,
+        // v1.5.0：商业可读性审阅给假件，否则 buildPipeline 会造一个真客户端（§66）
+        beatValidator: { validate: async () => SAMPLE_BEAT_VALIDATION } as never,
+        commercialReviewer: commercialReviewerOf(),
       } as never,
     );
 }

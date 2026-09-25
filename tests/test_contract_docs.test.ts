@@ -40,17 +40,19 @@ const DOCS = [
 ] as const;
 
 /**
- * §63/§64 保留给 v1.4.0+ 的能力：任何版本树里都不该宣称已经具备。
+ * §63/§64 保留给 v1.5.0+ 的能力：任何版本树里都不该宣称已经具备。
  * v1.3.0 已经交付基础质量四维度（MultiDimensionalReviewer），v1.4.0 已经交付
- * BeatPlan 结构校验（BeatValidator），所以它俩从这里移出——但自动改写拍子、
- * 高级规划器、伏笔规划一类仍然是本版本不做的事。
+ * BeatPlan 结构校验（BeatValidator），v1.5.0 已经交付独立的商业可读性审阅
+ * （CommercialReviewer），所以它仨从这里移出——但自动改写拍子、高级规划器、
+ * 伏笔规划、以及「商业分驱动重试 / 自动修订」一类仍然是本版本不做的事。
  */
 const RESERVED_CAPABILITIES = [
   "AutomaticBeatRepair",
   "BeatRegenerationPolicy",
   "AdvancedBeatPlanner",
   "ForeshadowPlanner",
-  "CommercialReviewer",
+  "CommercialRetryPolicy",
+  "AutomaticCommercialRepair",
   "ExperimentRunner",
   "BenchmarkRunner",
   "AdvancedObservability",

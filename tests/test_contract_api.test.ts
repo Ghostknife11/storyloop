@@ -31,12 +31,14 @@ import { BeatValidator } from "@/lib/beat-validator";
 import { StoryGenerator } from "@/lib/story-generator";
 import { StoryValidator } from "@/lib/story-validator";
 import { BasicReviewer } from "@/lib/basic-reviewer";
+import { CommercialReviewer } from "@/lib/commercial-reviewer";
 import { StoryRepairer } from "@/lib/story-repairer";
 import { RepairStrategy } from "@/core/repair-strategy";
 import { LLMError, LLMTimeoutError } from "@/lib/llm";
 import { BeatParseError } from "@/lib/beat-parser";
 import { BeatValidationParseError } from "@/lib/beat-validation-parser";
 import { ReviewParseError } from "@/lib/review-parser";
+import { CommercialReviewParseError } from "@/lib/commercial-review-parser";
 import { ValidatorError } from "@/lib/story-validator";
 import { ArtifactWriteError } from "@/storage/artifact-store";
 import { ConfigValidationError } from "@/types/story-config";
@@ -45,6 +47,7 @@ import type { BeatPlan } from "@/types/beat-plan";
 import {
   SAMPLE_BEAT_PLAN,
   SAMPLE_BEAT_VALIDATION,
+  SAMPLE_COMMERCIAL_REVIEW,
   SAMPLE_CONFIG,
   SAMPLE_REVIEW,
   SAMPLE_STORY,
@@ -79,6 +82,9 @@ const RUN_OK_KEYS = [
   "validation_status",
   "review",
   "review_status",
+  // v1.5.0 TASK §31：商业可读性结论与 review 完全并列，同样是纯追加字段
+  "commercial_review",
+  "commercial_review_status",
   // v1.2.0 §25：统一质量层是新增字段，原有字段一个不动
   "quality",
   "artifacts",
@@ -97,6 +103,8 @@ const ROUTES: ReadonlyArray<readonly [string, string]> = [
   ["api/prompt/preview", "POST"],
   ["api/repair", "POST"],
   ["api/review", "POST"],
+  // v1.5.0：与 /api/review 完全并列的第二个审阅入口
+  ["api/review/commercial", "POST"],
   ["api/runs", "POST"],
   ["api/runs/from-plan", "POST"],
   ["api/runs/[run_id]", "GET"],
@@ -141,16 +149,22 @@ function runDeps(llm: FakeLLM, beatValidation?: BeatValidationResult) {
     beatValidator: new BeatValidator(
       new FakeLLM([JSON.stringify(beatValidation ?? SAMPLE_BEAT_VALIDATION)]) as never,
     ),
+    // v1.5.0：商业审阅同样是独立的一次调用。FakeLLM 对单条回复会一直重复返回，
+    // 于是这里不必在每条用例的主回复序列里给它排一个位置。
+    commercialReviewer: new CommercialReviewer(
+      new FakeLLM([JSON.stringify(SAMPLE_COMMERCIAL_REVIEW)]) as never,
+    ),
   };
 }
 
 describe("v1.0.0 API 冻结 — 错误契约", () => {
-  it("错误码白名单恰好是十二种", () => {
+  it("错误码白名单恰好是十三种", () => {
     expect([...API_ERROR_CODES].sort()).toEqual(
       [
         "ARTIFACT_WRITE_FAILED",
         // v1.4.0：BeatPlan 结构校验自身失败
         "BEAT_VALIDATION_FAILED",
+        "COMMERCIAL_REVIEW_FAILED",
         "CONFIG_INVALID",
         "GENERATION_FAILED",
         "INTERNAL_ERROR",
@@ -189,6 +203,7 @@ describe("v1.0.0 API 冻结 — 错误契约", () => {
     [new ReviewParseError("解析不出 JSON"), "REVIEW_FAILED", 502],
     [new ValidatorError("规则炸了"), "VALIDATION_FAILED_INTERNAL", 500],
     [new BeatValidationParseError("解析不出 JSON"), "BEAT_VALIDATION_FAILED", 502],
+    [new CommercialReviewParseError("解析不出 JSON"), "COMMERCIAL_REVIEW_FAILED", 502],
     [new ArtifactWriteError("story.md", new Error("EACCES")), "ARTIFACT_WRITE_FAILED", 500],
     [new ConfigValidationError("配置不合法"), "CONFIG_INVALID", 400],
     [new BeatPlanValidationError("骨架不合法"), "CONFIG_INVALID", 400],
@@ -376,9 +391,13 @@ describe("v1.0.0 API 冻结 — Run 入口", () => {
     expect(status).toBe(200);
     const run = json as unknown as Record<string, unknown>;
     expect(Object.keys(run).sort()).toEqual(RUN_OK_KEYS);
-    // validation / review 都成功：七个 artifact 键齐（v1.4.0 多一个 beat-validation.json）
+    // validation / review / commercial review 都成功：九个 artifact 键齐
+    // （v1.4.0 多一个 beat-validation.json，v1.5.0 多一个 commercial-review.json）
     expect(Object.keys(run.artifacts as object).sort()).toEqual(
-      ["beat_plan", "beat_validation", "config", "metadata", "quality", "review", "story", "validation"],
+      [
+        "beat_plan", "beat_validation", "commercial_review", "config", "metadata",
+        "quality", "review", "story", "validation",
+      ],
     );
     expect(run.quality_status).toBe("accepted");
     expect(run.attempt_count).toBe(1);
@@ -450,9 +469,11 @@ describe("v1.0.0 API 冻结 — Run 入口", () => {
     expect(Object.keys(detail).sort()).toEqual([
       "attempt_count",
       "attempts",
-      // v1.4.0 §26：BeatPlan 结构校验同样是纯追加字段
       "beat_validation",
       "beat_validation_status",
+      // v1.5.0 TASK §31：商业可读性结论同样是纯追加字段
+      "commercial_review",
+      "commercial_review_status",
       "enable_repair",
       "max_attempts",
       "max_repairs_per_attempt",
@@ -514,6 +535,8 @@ describe("v1.0.0 API 冻结 — Run 入口", () => {
     expect(Object.keys(detail).sort()).toEqual([
       "accepted",
       "attempt_number",
+      // v1.5.0 TASK §17：这一次尝试的商业可读性结论
+      "commercial_review",
       "initial_story",
       // v1.2.0 §26：这一次 Attempt 的质量快照
       "quality",
@@ -530,6 +553,8 @@ describe("v1.0.0 API 冻结 — Run 入口", () => {
     expect(detail.initial_story).toBeNull();
     expect(detail.selected).toBe(true);
     expect(detail.validation).toEqual(SAMPLE_VALIDATION);
+    // v1.5.0：商业结论与 review 各自独立回传，都是完整对象
+    expect(detail.commercial_review).toEqual(SAMPLE_COMMERCIAL_REVIEW);
   });
 
   it("Run 查询不依赖异常路径：getRun/getRunAttempt 直接返回 {status, json}", async () => {

@@ -11,13 +11,16 @@ import { BasicReviewer } from "@/lib/basic-reviewer";
 import { StoryRepairer } from "@/lib/story-repairer";
 import { RepairStrategy } from "@/core/repair-strategy";
 import { BeatValidator } from "@/lib/beat-validator";
+import { CommercialReviewer } from "@/lib/commercial-reviewer";
 import { QualityAssembler } from "@/core/quality-assembler";
 import { validateStoryConfig } from "@/types/story-config";
 import { validateBeatValidationResult } from "@/types/beat-validation";
+import { validateCommercialReviewResult, commercialOverallScore } from "@/types/commercial-review";
 import {
   MISSING_ENDING,
   SAMPLE_BEAT_PLAN,
   SAMPLE_BEAT_VALIDATION,
+  SAMPLE_COMMERCIAL_REVIEW,
   SAMPLE_CONFIG,
   SAMPLE_REVIEW,
   SAMPLE_STORY,
@@ -41,10 +44,12 @@ const GOOD_REVIEW = JSON.stringify(SAMPLE_REVIEW);
 const LOW_REVIEW = JSON.stringify({ score: 41, summary: "正文冲突没有展开。", strengths: ["开头有画面"], problems: ["高潮缺失"] });
 
 /** v1.0.0 冻结的运行级文件名；v1.2.0 追加 quality.json（§20）；
- *  v1.4.0 追加 beat-validation.json（BeatPlan 在生成正文前的结构校验结论）。 */
+ *  v1.4.0 追加 beat-validation.json（BeatPlan 在生成正文前的结构校验结论）；
+ *  v1.5.0 追加 commercial-review.json（商业可读性审阅结论）。 */
 const RUN_FILES = [
   "beat-validation.json",
   "beats.json",
+  "commercial-review.json",
   "config.json",
   "metadata.json",
   "quality.json",
@@ -54,13 +59,21 @@ const RUN_FILES = [
 ] as const;
 
 /** v1.0.0 冻结的 attempt 级文件名（initial_story.md 只在发生过修订时出现）；
- *  v1.2.0 追加 quality.json（§21）。 */
-const ATTEMPT_FILES = ["metadata.json", "quality.json", "review.json", "story.md", "validation.json"] as const;
+ *  v1.2.0 追加 quality.json（§21）；v1.5.0 追加 commercial-review.json。 */
+const ATTEMPT_FILES = [
+  "commercial-review.json",
+  "metadata.json",
+  "quality.json",
+  "review.json",
+  "story.md",
+  "validation.json",
+] as const;
 
 /** v1.0.0 冻结的 repair 级文件名。 */
 const REPAIR_FILES = ["metadata.json", "request.json", "review.json", "story.md", "validation.json"] as const;
 
-/** TASK §9 要求的运行级 metadata 必备字段；v1.4.0 追加 beat_validation_status。 */
+/** TASK §9 要求的运行级 metadata 必备字段；v1.4.0 追加 beat_validation_status；
+ *  v1.5.0 追加 commercial_review_status（与 beat_validation_status 同约定：始终落盘）。 */
 const RUN_META_REQUIRED = [
   "run_id",
   "project_version",
@@ -75,6 +88,7 @@ const RUN_META_REQUIRED = [
   "review_status",
   "repair_count",
   "beat_validation_status",
+  "commercial_review_status",
   "artifacts",
 ] as const;
 
@@ -106,6 +120,11 @@ function pipelineWith(llm: FakeLLM, store: ArtifactStore, retryPolicy?: RetryPol
   // v1.4.0：Beat 校验器自带一份假 LLM——它接在 Planner 之后、Generator 之前，
   // 若和主序列共用就会把 PLAN_REPLY 吃掉。
   const beatValidator = new BeatValidator(new FakeLLM([JSON.stringify(SAMPLE_BEAT_VALIDATION)]) as never);
+  // v1.5.0：商业审阅者同样自带一份假 LLM（§12 两个审阅者互不读取），
+  // 免得它抢走主序列里给 BasicReviewer / StoryRepairer 的那几条回复。
+  const commercialReviewer = new CommercialReviewer(
+    new FakeLLM([JSON.stringify(SAMPLE_COMMERCIAL_REVIEW)]) as never,
+  );
   return new GenerationPipeline(
     new BeatPlanner(client),
     new StoryGenerator(client),
@@ -118,6 +137,7 @@ function pipelineWith(llm: FakeLLM, store: ArtifactStore, retryPolicy?: RetryPol
     new QualityAssembler(),
     undefined,
     beatValidator,
+    commercialReviewer,
   );
 }
 
@@ -139,7 +159,7 @@ function expectHasAll(actual: string[], required: readonly string[], label: stri
 }
 
 describe("v1.0.0 产物布局冻结 — Happy Path", () => {
-  it("运行级目录只含 attempts/ 与冻结的八个文件", async () => {
+  it("运行级目录只含 attempts/ 与冻结的九个文件", async () => {
     const dir = withTmpDir();
     const llm = new FakeLLM([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW]);
     const result = await pipelineWith(llm, new ArtifactStore()).run(SAMPLE_CONFIG);
@@ -163,7 +183,7 @@ describe("v1.0.0 产物布局冻结 — Happy Path", () => {
     }
   });
 
-  it("attempt/01 落五个冻结文件，metadata 带齐 TASK §10 全部必备字段", async () => {
+  it("attempt/01 落六个冻结文件，metadata 带齐 TASK §10 全部必备字段", async () => {
     const dir = withTmpDir();
     const llm = new FakeLLM([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW]);
     const result = await pipelineWith(llm, new ArtifactStore()).run(SAMPLE_CONFIG);
@@ -289,12 +309,13 @@ describe("v1.0.0 官方示例 Run", () => {
     expect(readdirSync(join(exampleRoot, "attempts", "01", "repairs", "01")).sort()).toEqual([...REPAIR_FILES]);
   });
 
-  it("示例里的 config.json / beats.json / beat-validation.json / validation.json / review.json 都能通过 schema 校验", () => {
+  it("示例里的 config.json / beats.json / beat-validation.json / validation.json / review.json / commercial-review.json 都能通过 schema 校验", () => {
     const config = JSON.parse(readFileSync(join(exampleRoot, "config.json"), "utf8")) as unknown;
     const beats = JSON.parse(readFileSync(join(exampleRoot, "beats.json"), "utf8")) as unknown;
     const beatValidation = JSON.parse(readFileSync(join(exampleRoot, "beat-validation.json"), "utf8")) as unknown;
     const validation = JSON.parse(readFileSync(join(exampleRoot, "validation.json"), "utf8")) as unknown;
     const review = JSON.parse(readFileSync(join(exampleRoot, "review.json"), "utf8")) as unknown;
+    const commercialReview = JSON.parse(readFileSync(join(exampleRoot, "commercial-review.json"), "utf8")) as unknown;
 
     expect(() => validateStoryConfig(config)).not.toThrow();
     // 示例把每个可选字段都用上了：读者照抄一份就能覆盖全部字段
@@ -315,11 +336,37 @@ describe("v1.0.0 官方示例 Run", () => {
     expect(Object.keys(r).sort()).toEqual(["problems", "score", "strengths", "summary"]);
     expect(r.score).toBeGreaterThanOrEqual(0);
     expect(r.score).toBeLessThanOrEqual(100);
+    // v1.5.0：商业可读性结论同样要过 schema，且 score 与四维均分自洽
+    const cr = validateCommercialReviewResult(commercialReview);
+    expect(Object.keys(cr).sort()).toEqual([
+      "dimensions",
+      "problems",
+      "score",
+      "strengths",
+      "suggestions",
+      "summary",
+    ]);
+    expect(Object.keys(cr.dimensions).sort()).toEqual(["engagement", "hook", "pacing", "payoff"]);
+    for (const key of Object.keys(cr.dimensions) as (keyof typeof cr.dimensions)[]) {
+      expect(cr.dimensions[key].score).toBeGreaterThanOrEqual(0);
+      expect(cr.dimensions[key].score).toBeLessThanOrEqual(100);
+      expect(cr.dimensions[key].summary).toBeTruthy();
+    }
+    // §11：整体分永远是四维均分，模型自报的分数不参与落盘口径
+    expect(cr.score).toBe(commercialOverallScore(cr));
   });
 
   it("示例 metadata 带齐 TASK §9/§10/§11 必备字段", () => {
     const runMeta = JSON.parse(readFileSync(join(exampleRoot, "metadata.json"), "utf8")) as Record<string, unknown>;
     expectHasAll(Object.keys(runMeta).sort(), RUN_META_REQUIRED, "示例运行级 metadata");
+    // v1.5.0：商业审阅这一路成功时 metadata 还派生 commercial_score，artifacts 多一个索引
+    expect(runMeta.commercial_review_status).toBe("completed");
+    expect(runMeta.commercial_score).toBe(
+      commercialOverallScore(validateCommercialReviewResult(
+        JSON.parse(readFileSync(join(exampleRoot, "commercial-review.json"), "utf8")) as unknown,
+      )),
+    );
+    expect((runMeta.artifacts as Record<string, string>).commercial_review).toBe("commercial-review.json");
     const attemptMeta = JSON.parse(
       readFileSync(join(exampleRoot, "attempts", "01", "metadata.json"), "utf8"),
     ) as Record<string, unknown>;
@@ -335,11 +382,13 @@ describe("v1.0.0 官方示例 Run", () => {
       "story.md",
       "validation.json",
       "review.json",
+      "commercial-review.json",
       "metadata.json",
       "config.json",
       "beats.json",
       "beat-validation.json",
       "attempts/01/story.md",
+      "attempts/01/commercial-review.json",
       "attempts/01/repairs/01/story.md",
     ];
     for (const file of files) {

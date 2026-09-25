@@ -62,6 +62,9 @@ describe("RunOk.beat_validation_error（v1.4.1）", () => {
     validation_status: "not_started",
     review: null,
     review_status: "not_started",
+    // v1.5.0 TASK §31：商业可读性结论是新增字段，status 必填
+    commercial_review: null,
+    commercial_review_status: "not_started",
     quality: null,
     artifacts: {},
     quality_status: "accepted",
@@ -88,11 +91,13 @@ describe("v1.4.1 「重新」/ 导出只作用于当前展示的正文", () => {
   const page = readFileSync("src/app/page.tsx", "utf8");
 
   it("Review Again / Validate Again 送当前正文，且只在展示的就是 Run 落盘那版时带 run_id", () => {
-    // 两个回调都送 baseStory（当前展示的那一版），不是 result?.story（落盘那版）
+    // 三个回调都送 baseStory（当前展示的那一版），不是 result?.story（落盘那版）
     expect(page).toMatch(/reviewStory\(\s*formToConfig\(form\),\s*baseStory,/);
     expect(page).toMatch(/validateStory\(\s*formToConfig\(form\),\s*baseStory,/);
+    // v1.5.0：商业可读性审阅是第三个同边界回调，同样只作用于当前展示的正文
+    expect(page).toMatch(/reviewStoryCommercial\(\s*formToConfig\(form\),\s*baseStory,/);
     // run_id 只在这时出现：覆盖 run 目录里的结论才有意义
-    expect(page.match(/shownStoryIsRunStory \? result\.run_id : undefined/g) ?? []).toHaveLength(2);
+    expect(page.match(/shownStoryIsRunStory \? result\.run_id : undefined/g) ?? []).toHaveLength(3);
     expect(page).toContain("const shownStoryIsRunStory = !viewAttempt && !repairOverride;");
     // 结论覆盖只针对 run 级那一路：看别的 Attempt / 手动修订版时不动磁盘
     expect(page).not.toMatch(/reviewStory\([\s\S]{0,400}?run_id: result\.run_id/);
