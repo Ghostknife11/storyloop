@@ -11,6 +11,11 @@
 > `dimensions`（四个基础维度的分数与短评）。审阅没给维度时整个键不出现，
 > 没有维度的旧 Run 照常读取。
 >
+> v1.5.0 在这一约束下新增了 `commercial-review.json`（Run 根 + 每个 attempt）与三个
+> 运行级 metadata 字段：`commercial_review_status` / `commercial_score` /
+> `commercial_review_error`。商业可读性审阅与结构审阅是**两份独立的结论**，
+> 不是 `review.json` 改名，也不改 `quality.json` 的任何一个字段。
+>
 > 实现：`src/core/pipeline.ts` + `src/storage/artifact-store.ts`
 > 契约测试：`tests/test_contract_artifacts.test.ts`（存在性与必填字段）、
 > `tests/test_contract_docs_sync.test.ts`（本文件的字段表 ↔ 真实产物逐字段一致）
@@ -27,6 +32,7 @@ runs/
     ├── story.md                       # 最终入选正文（# 标题 + 空行 + 正文）
     ├── validation.json                # 入选 Attempt 的首次校验结果
     ├── review.json                    # 入选 Attempt 的首次审阅结果（v1.3.0 起可能带维度）
+    ├── commercial-review.json         # 入选 Attempt 的商业可读性结论（v1.5.0 新增；跳过或审阅自身失败时缺失）
     ├── quality.json                   # 入选 Attempt 的统一质量快照（v1.2.0 新增）
     ├── metadata.json                  # 运行级 metadata
     └── attempts/
@@ -35,6 +41,7 @@ runs/
             ├── validation.json        # 该次尝试的首次校验结果
             ├── review.json            # 该次尝试的首次审阅结果（v1.3.0 起可能带维度）
             ├── quality.json           # 该次尝试的统一质量快照（v1.2.0 新增）
+            ├── commercial-review.json # 该次尝试最终那一版正文的商业可读性结论（v1.5.0 新增）
             ├── metadata.json          # attempt 级 metadata
             ├── initial_story.md       # 只在发生过修订时出现（修订前的原文）
             └── repairs/               # 只在发生过修订时出现
@@ -49,7 +56,7 @@ runs/
 固定规则：
 
 - attempt 与 repair 目录名都是两位数字 `01`、`02`…（上限 99）
-- 运行级目录里除了 `attempts/` 只有那八个文件，没有别的
+- 运行级目录里除了 `attempts/` 只有那九个文件，没有别的
 - `beat-validation.json`（v1.4.0 新增）是**运行级独有**的一份：BeatPlan 在第一个 Attempt
   之前校验一次，`attempts/` 与 `repairs/` 下都没有它。骨架结构带 `error` 级 issue 时 Run
   在这里就结束了，此时运行级目录只有 `config.json` / `beats.json` /
@@ -57,8 +64,10 @@ runs/
 - `validation.json` / `review.json` 可能缺失：校验或审阅自身出错时 Pipeline 只写 metadata，
   不写这两个文件（对应 API 响应里字段为 `null`、`*_status` 为 `failed`）。
 `beat-validation.json` 同理：Beat 校验器自身抛异常时不写这个文件，但
-`beat_validation_error` 会记下原因——**骨架不达标不算错误**，那种情况文件照常写
-`review.json` / `validation.json` 与 v1.2.0 起新增的 `quality.json` 都不受这个影响：
+`beat_validation_error` 会记下原因——**骨架不达标不算错误**，那种情况文件照常写。
+`commercial-review.json`（v1.5.0 新增）同样如此：商业可读性审阅自身出错时只写
+`commercial_review_error`，不写这个文件；正文、`validation.json` / `review.json`
+与 v1.2.0 起新增的 `quality.json` 都不受这个影响：
 装配只需要 validation 与采纳结论，Review 失败时照样落盘，只是 `overall_score` 与 `summary`
 为 `null`
 - 修订目录 `repairs/NN/` 固定五个文件，**不写** `quality.json`：attempt 级那份快照取的
@@ -80,7 +89,7 @@ runs/
 |---|---|---|---|
 | `run_id` | string | 必有 | 目录名，同时是 API 里的标识 |
 | `project_version` | string | 必有 | 仓库版本号，与 `VERSION` 文件一致 |
-| `status` | string | 必有 | 运行阶段：`planning` / `generating` / `saving` / `validating` / `reviewing` / `repairing` / `revalidating` / `rereviewing` / `completed` / `failed` |
+| `status` | string | 必有 | 运行阶段：`planning` / `generating` / `saving` / `validating` / `reviewing` / `reviewing_commercial` / `repairing` / `revalidating` / `rereviewing` / `completed` / `failed` |
 | `current_stage` | string | 必有 | 写这份 metadata 时正处于的阶段，比 `status` 更细（例如 `Attempt 2 — Repairing`）；失败时 `status` 是 `failed`，这里留着失败发生的阶段 |
 | `started_at` / `finished_at` | string (ISO 8601) | `started_at` 必有；`finished_at` 只在 `completed` / `failed` | 起止时间 |
 | `model` | string | 必有 | 本次真正生效的模型名（请求覆盖 → 环境变量 → 缺省值） |
@@ -101,8 +110,11 @@ runs/
 | `beat_validation_passed` | boolean | 有结构校验结论 | v1.4.0 新增：结论里有没有 error 级问题（只有 warning 也算通过） |
 | `beat_validation_issue_count` | number | 有结构校验结论 | v1.4.0 新增：命中了几条结构规则 |
 | `beat_validation_error` | string | Beat 校验器自身抛异常 | v1.4.0 新增：校验器自身失败的原因；**骨架不达标不算错误**，那种情况 `beat_validation_passed` 是 `false`、这个字段不出现 |
+| `commercial_review_status` | string | 商业可读性审阅跑到过 | v1.5.0 新增：`not_started` / `reviewing` / `completed` / `failed`。与 `review_status` 是两条独立的路，谁也不挡谁 |
+| `commercial_score` | number | 有商业可读性结论 | v1.5.0 新增：四个维度（Hook / Pacing / Engagement / Payoff）的均分，与 `commercial-review.json` 里的 `score`、API 的 `commercial_review.score` 同一个口径；这一步没跑成时整个字段不出现 |
+| `commercial_review_error` | string | 商业审阅者自身抛异常 | v1.5.0 新增：这一步自身失败的原因；**商业分低不算错误**，那种情况结论照常落盘、这个字段不出现 |
 | `error` | string | Run 失败 | Run 级失败原因，已过 `safe-text`；成功时整个字段不出现 |
-| `artifacts` | object | 必有 | 文件名索引：`config` / `beat_plan` / `story` / `metadata`，有结论时再加 `beat_validation` / `validation` / `review` / `quality` |
+| `artifacts` | object | 必有 | 文件名索引：`config` / `beat_plan` / `story` / `metadata`，有结论时再加 `beat_validation` / `validation` / `review` / `commercial_review` / `quality` |
 
 运行级 `metadata.json` 是**整体快照**：每次阶段推进都整份重写，不与上一次合并。因此在中断
 现场读到的 metadata 还可能带着过程态字段（例如 Attempt 刚开始时的 `attempt_number`），
@@ -207,6 +219,47 @@ BeatPlan 只校验一次，不随重试重跑，`attempts/` 与 `repairs/` 下�
 结论对应的四个运行级 metadata 字段（`beat_validation_status` / `beat_validation_passed` /
 `beat_validation_issue_count` / `beat_validation_error`）见上面「运行级 metadata.json」表；
 注意 `beat_validation_error` 只在**校验器自身**抛异常时出现，骨架不达标不算错误。
+
+### 商业可读性结论（v1.5.0 新增）
+
+`commercial-review.json` 记录与结构审阅**并列的第二个独立结论**，字段为 `score` /
+`summary` / `strengths` / `problems` / `suggestions` / `dimensions`。两个审阅者各自只干
+一件事：结构审阅（`review.json`）看有效性与内在质量，商业审阅看读者的可读性（开篇抓力、
+节奏、持续阅读动力、回报），互不合成、互不覆盖、也不引用对方的结论。
+
+`dimensions` 固定四个键，缺一个就不是合法结论（读接口会当坏数据处理，返回 `null`）：
+
+| 键 | 记号 | 看什么 |
+|---|---|---|
+| `hook` | H | 开篇抓力、冲突进入速度 |
+| `pacing` | P | 阅读节奏、拖沓与推进速度 |
+| `engagement` | E | 全篇持续的阅读动力 |
+| `payoff` | Pf | 高潮与结尾对前文承诺的回报 |
+
+每个维度是 `{score, summary}`，分数 0 ~ 100。`score`（整体分）= 四个维度的算术均分，
+由代码按 `(H + P + E + Pf) / 4` 重算后落盘（四舍五入到一位小数）：模型必须自报一个 `score`
+（缺了算格式错误），但**模型自报的数值不作为最终口径**——与 `review.json` 的
+`reviewOverallScore` 同一套「重新聚合、不轻信模型」的规则。没有按题材 / 动态 / 学习权重
+调过分，同一个输入永远得到同一个整体分。
+
+落盘位置与生效规则：
+
+- `attempts/NN/commercial-review.json` 描述**该次尝试最终留下的那一版 `story.md`**：
+  发生过修订时就是修订后的版本（先修订、后商业审阅），不会留下描述旧正文的脏数据；
+- 入选 Attempt 的那一份通过 promote 流程复制到 Run 根目录，与根目录 `story.md` 严格同版；
+- `repairs/NN/` 下**没有** `commercial-review.json`：一次修订只跑一次商业审阅，
+  修订目录里多一份内容相同的副本没有读者；
+- 没有注入 `CommercialReviewer`（或这一步被跳过）时这一步等于不存在：不写文件、
+  `commercial_review_status` 是 `not_started`，API 返回 `null`，UI 面板整个隐藏。
+
+**商业分不驱动任何自动动作**：`RetryPolicy` 只有 `min_review_score` 一个门槛（只看结构
+审阅分），`RepairStrategy` 也只依据校验与结构审阅结论选修订点。商业分低不会触发重试，
+也不会触发定点修订——它只写在产物里、显示在 UI 上，供人判断。同理，产物与界面上的措辞
+只描述可读性，没有任何「必火 / 爆款概率 / 市场成功率 / 签约概率 / 销量预测」一类市场化
+预言。
+
+v1.5.0 之前产生的 Run 没有 `commercial-review.json`：读接口返回 `null`、status 兜底
+`not_started`，磁盘上不会补写（[compatibility.md](./compatibility.md)）。
 
 ## 安全约定
 

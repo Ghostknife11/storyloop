@@ -221,6 +221,45 @@ npm install
 git checkout 1.3.0
 ```
 
+## 从 1.4.1 升级到 1.5.0
+
+**没有任何需要改代码的地方。** 全是 additive：既有字段、路由、错误码、CLI 参数与产物布局
+一个都没动，1.4.x 写的产物可以直接读，1.5.0 写的 Run 回落到 1.4.x 也只是多一份被忽略的
+文件与几个被忽略的 metadata 字段。
+
+需要知道的四件事：
+
+1. **多了一道商业可读性审阅。** 结构审阅之后，同一个故事再拿给 `CommercialReviewer`，
+   从「读者会不会继续读下去」的角度给 Hook（开篇抓力）/ Pacing（节奏）/
+   Engagement（全篇持续阅读动力）/ Payoff（回报）四个固定维度各打 0~100 分并附一句短评。
+   结论落在 `commercial-review.json`（Run 根一份 + 每个 attempt 目录一份，`repairs/` 下没有）、
+   API 的 `commercial_review` 字段与前端 Commercial Review 面板三处。
+2. **商业分不驱动任何决策。** `RetryPolicy` 里仍然只有 `min_review_score` 一个总分门槛，
+   比的还是结构审阅的整体分；修订策略仍然只看问题类别；`QualityResult` 里没有商业分，
+   仍然只有 Co/N/C/Ca 四个维度。低商业分是一次诚实的业务结果，不是错误，
+   也不会改变 attempt 的采纳结论。它同样不是市场预测——没有「爆款概率」一类数字。
+3. **这一步被跳过或自身失败时，别的都不受影响。** 不注入 `CommercialReviewer`
+   （它只是可选的第十二个 Pipeline 构造函数参数）时 `commercial_review_status` 是
+   `not_started`，流程与 1.4.1 逐字一致；模型超时或输出非法时该字段是 `failed`、
+   另有 `commercial_review_error` 记录原因，`commercial-review.json` 不写，
+   正文 / `validation.json` / `review.json` / `quality.json` 与采纳结论全部照常。
+4. **`POST /api/review/commercial` 是 `/api/review` 完全并列的第二个入口。** 请求体同为
+   `{config, story}`（可选 `run_id`），同一个故事可以得到两份互不覆盖的结论。
+   带 `run_id` 且该 Run 不存在时返回 404 `RUN_NOT_FOUND`，不调用模型、不写任何文件；
+   成功时覆盖该 Run 根目录的 `commercial-review.json`，不建立 history。
+   商业审阅自身失败返回 502 `COMMERCIAL_REVIEW_FAILED`，与 `REVIEW_FAILED` 并列。
+
+```bash
+git fetch && git checkout 1.5.0     # tag 不带 v 前缀
+npm install
+```
+
+回滚到 1.4.1 的代价为零：不需要迁移，多出来的文件与字段只是被旧版本忽略。
+
+```bash
+git checkout 1.4.1
+```
+
 ## 从 1.4.0 升级到 1.4.1
 
 **没有任何需要改代码的地方。** 没有新文件、新字段、新路由、新错误码，1.4.0 写的产物
@@ -301,7 +340,7 @@ git checkout 1.4.0
 ## 升级操作
 
 ```bash
-git fetch && git checkout 1.4.1     # tag 不带 v 前缀；从 0.9.x 升级时 checkout 1.0.0 亦可
+git fetch && git checkout 1.5.0     # tag 不带 v 前缀；从 0.9.x 升级时 checkout 1.0.0 亦可
 npm install
 cp .env.example .env                # 填入 LLM_API_KEY 后即可跑
 npm run dev                         # Web UI
@@ -323,5 +362,7 @@ HTTP 行为与 1.1.0 相同；合法的公网 IPv4-mapped 地址会再次被误�
 只是被旧版本忽略，旧版本不会因为多一个文件而读不了 Run；CLI 与 HTTP 行为逐字相同。
 从 1.4.1 回滚到 1.4.0 同样不需要迁移，唯一可见的差别就是上面那处分数字口：
 带审阅维度的 attempt 摘要会退回 `review.score` 原值，其余只是少了读回容错与 CLI 提示行。
+从 1.5.0 回滚到 1.4.1 也没有代价：多出来的 `commercial-review.json` 与
+`commercial_review_*` 字段被旧版本忽略，其余行为逐字相同。
 从 1.4.0 回滚到 1.3.0 也只有一处行为差别：带 `error` 级结构问题的 BeatPlan 会重新一路生成
 到 Attempt 阶段，多出来的 `beat-validation.json` 与 `beat_validation_*` 字段被旧版本忽略。

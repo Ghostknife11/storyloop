@@ -256,6 +256,38 @@ attempt 级的四类文件上，run 级文件不带前缀。另外 `--help` 出�
 没有改错误码、没有新文件。1.4.0 及以前生成的全部 Run 读出来逐字一致，唯一例外是
 「模型给了维度」的 attempt 摘要分数——而那正是 v1.3.0 文档承诺的口径。
 
+## v1.5.0 的商业可读性审阅（additive，两套审阅并行）
+
+v1.5.0 加了第二个审阅者：`CommercialReviewer` 从「读者会不会继续读下去」的角度看同一篇
+正文，给 Hook / Pacing / Engagement / Payoff 四个固定维度各打 0~100 分并附一句短评，
+结论落成 `commercial-review.json`、API 的 `commercial_review` 字段与前端 Commercial
+Review 面板三处。对外契约仍然纯 additive：
+
+- **`StoryConfig` / `BeatPlan` / `ValidationResult` / `ReviewResult` / `QualityResult`
+  一个字段都没改。** 商业可读性是并列的第二个结论，不是 `ReviewResult` 的新维度——
+  两个审阅者各自的提示词、parser 与产物文件，绝不合成一个「八维大 Prompt」。
+- **Run 产物多两个新文件。** `commercial-review.json` 在 Run 根（由入选 attempt 提升而来，
+  与入选正文严格同版）与每个 attempt 目录（该次尝试最终那一版正文的结论）各一份；
+  `repairs/` 下**没有**——一次修订只跑一次商业审阅。这一步被跳过或自身失败时文件不存在。
+- **既有路由只加字段。** Run 类入口与 Run 详情多 `commercial_review` /
+  `commercial_review_status` / `commercial_review_error`，Attempt 详情多 `commercial_review`，
+  `artifacts` 可能在成功时多一个 `commercial_review` 键；错误码多一个
+  `COMMERCIAL_REVIEW_FAILED`（502）。既有字段、路由、状态码含义全都没动。
+- **旧 Run 不需要迁移。** v1.5.0 之前的 Run 没有 `commercial-review.json`，读回时
+  `commercial_review` 是 `null`、`commercial_review_status` 是 `not_started`，与当年逐字一致，
+  读接口也不会把磁盘「补写」成新版结构。
+
+三条边界必须写死在这里：商业可读性分数**不驱动重试**（`RetryPolicy` 里仍然只有
+`min_review_score` 一个总分门槛，比的还是结构审阅的整体分）、**不驱动修订**
+（`RepairStrategy` 仍然只看问题类别）、**不进 `QualityResult`**（质量快照仍然只有
+Co/N/C/Ca 四个维度）。低商业分是一次诚实的业务结果，不是错误，也不会改变 attempt 的
+采纳结论。它同样**不预测市场表现**：没有「爆款概率」「必火」「市场成功率」一类的字段或
+文案，分数描述的是文本本身可观察的事实。
+
+失败隔离沿用既有约定：这一步自身失败（模型超时、输出非法）只把
+`commercial_review_status` 置为 `failed`、记下 `commercial_review_error`，Run 照常继续，
+正文 / `validation.json` / `review.json` / `quality.json` 与采纳结论一个都不受影响。
+
 ## 破坏性变更怎么发布
 
 1. 在 `CHANGELOG.md` 里单独开一个条目，写清楚「旧行为 → 新行为 → 怎么改」

@@ -205,6 +205,112 @@ v1.4.1 是**修订版本**：没有新能力、没有新文件、没有新字段
 
 ---
 
+## [1.5.0] —— 2026-09-25
+
+v1.5.0 加了**商业可读性审阅**：与结构审阅（Co/N/C/Ca 四维）完全并列的第二个独立审阅者，
+从「读者会不会继续读下去」的角度看同一篇正文，四个固定维度——**Hook（开篇抓力）**、
+**Pacing（节奏）**、**Engagement（全篇持续阅读动力）**、**Payoff（回报）**，各自 0~100
+分加一句短评。整体分是这四个维度的**确定性等权均分**（保留一位小数），没有题材权重、
+没有动态权重、没有学习权重——纯算术，模型自报的 `score` 只作为形状校验的依据，落盘与
+响应的永远是重算值。
+
+两个审阅者绝不合成一个「八维大 Prompt」：`BasicReviewer` 与 `CommercialReviewer` 各自
+独立的提示词、各自的 parser、各自的产物文件。商业可读性结论**不驱动任何决策**——
+`RetryPolicy` 里仍然只有 `min_review_score` 一个总分门槛且只看结构审阅分，修订策略也不看它；
+`QualityResult` 仍然只有 Co/N/C/Ca 四个维度，商业分不掺进去。它也不预测市场表现：
+没有「爆款概率」「必火」「市场成功率」一类的字段或文案，分数描述的是文本本身可观察的事实。
+
+### Added
+
+- **`CommercialReviewResult` 模型**（`src/types/commercial-review.ts`）：`score`、`summary`、
+  `strengths`、`problems`、`suggestions`（四个字符串数组）与 `dimensions`。`dimensions`
+  固定四个键 `hook` / `pacing` / `engagement` / `payoff`，各自 `{score: number,
+  summary: string}`；模型自己加减维度、分数越界、某个维度没有短评都算输出非法。
+  `aggregateCommercialDimensions` 是唯一的分数字源
+- **`CommercialReviewer`**（`src/lib/commercial-reviewer.ts`）：StoryConfig + 正文 →
+  `prompts/commercial_reviewer.txt` → LLM → `CommercialReviewResult`。温度固定 0.3，
+  与结构审阅的 0.3 同级、与生成温度独立。提示词写明「不是文学奖评审、不是结构 Validator、
+  不是内容修改器」，四个维度各自的判定口径，以及 Hook ≠ Engagement、Pacing ≠ Narrative
+  的边界——审的是读者体验，不断言结构成不成立，也不改写正文
+- **`parseCommercialReviewResult`**（`src/lib/commercial-review-parser.ts`）：容错 code fence
+  与首尾空白，不做散文 scavenging；拿不到结构合法的 JSON 抛 `CommercialReviewParseError`
+- **Pipeline 新阶段 `reviewing_commercial`**（`src/core/pipeline.ts`）：结构审阅之后跑，
+  与审阅 / 校验并列，进度写进 metadata
+- **`commercial-review.json`**：Run 根目录一份、每个 attempt 目录一份（`repairs/` 下没有——
+  一次修订只跑一次商业审阅，改完就取修订后那一版的结论）。运行根那一份由入选 attempt
+  提升而来，与入选正文严格同版
+- **三个运行级 metadata 字段**：`commercial_review_status`（`not_started` / `reviewing` /
+  `completed` / `failed`，与 `review_status` 同口径）、`commercial_score`（四维均分）、
+  `commercial_review_error`（**只在审阅者自身失败时**出现——商业分低不算错误）
+- **API 字段**：Run 类入口与 Run 详情多 `commercial_review` / `commercial_review_status` /
+  `commercial_review_error`，Attempt 详情多 `commercial_review`，`artifacts` 在商业审阅成功
+  时多一个 `commercial_review` 键。v1.5.0 之前的 Run 没有这个文件，读出 `null` 与
+  `not_started`，磁盘上不会被补写
+- **`POST /api/review/commercial`**：与 `POST /api/review` 完全并列的第二个入口，
+  请求体同为 `{config, story}`（可选 `run_id`）。带 `run_id` 且该 Run 不存在时 404，
+  **不调用模型**、不写任何文件；成功时覆盖该 Run 根目录的 `commercial-review.json`，
+  不建立 history
+- **新错误码 `COMMERCIAL_REVIEW_FAILED`（502）**：商业可读性审阅拿不到合法的
+  `CommercialReviewResult`。它与 `REVIEW_FAILED` 并列而不是合并——两条路各自的失败
+  不该被描述成「审阅失败」
+- **前端 Commercial Review 面板**（`src/lib/commercial-view.ts` +
+  `src/components/commercial-panel.tsx`）：商业分、H/P/E/Pf 四个维度各自的分数与短评、
+  优点 / 问题 / 建议三组清单，以及唯一的操作入口「Commercial Review Again」。
+  没有 Fix / Retry / 重写一类按钮——这个分数不驱动任何事
+- **`prompts/commercial_reviewer.txt`**：四个维度的定义、输出 JSON 的形状与四条硬规则
+  （维度一个不能少也不许多、分数 0~100、三个列表必须是字符串数组、`score` 必须与四维
+  一致），末尾明确「不要预测市场、销量、读者规模或商业结果」
+
+### Changed
+
+- **生成链路多一道独立的审阅**：结构审阅之后再跑一次商业可读性审阅。这一步自身失败
+  （模型超时、输出非法）只把 `commercial_review_status` 置为 `failed`、记下
+  `commercial_review_error`，**不写** `commercial-review.json`，也**不**影响正文、
+  `validation.json` / `review.json` / `quality.json` 与采纳结论
+- **`CommercialReviewer` 是可选的第十二个 Pipeline 构造函数参数**：不注入就完全没有这道
+  审阅，`commercial_review_status` 是 `not_started`，流程与 v1.4.1 逐字一致
+- **examples/example_run/** 增加两份 `commercial-review.json`（运行根 + `attempts/01/`，
+  内容逐字相同）与对应的 metadata 字段（71.5 = (82 + 68 + 74 + 62) / 4），样例 README 同步
+
+### Tests
+
+- 新增 `tests/test_commercial_review.test.ts`（26 条）：schema 边界（缺维度、未知维度、
+  分数越界、空短评、顶层 score 缺失或越界）、聚合计法（含 1.3 的四舍五入）、
+  `commercialReviewResultOf`（缺文件 / 半份 JSON / 手改成 101 都是 `null`）、
+  `parseCommercialReviewResult`（code fence、非 JSON → `CommercialReviewParseError`）、
+  `CommercialReviewer`（提示词四个定义、温度 0.3、默认模板路径、模板缺失即抛错、不改输入）
+- 新增 `tests/test_commercial_review_pipeline.test.ts`（16 条）：两份产物逐字相同、
+  `commercial_score` 落在 metadata 与 artifacts 索引、审阅看到的是该次尝试自己的正文、
+  修订后重跑、retry 路径不混用分数、失败隔离（正文 / 校验 / 审阅 / 质量全部保留）、
+  非法输出同样隔离、**低商业分不触发重试也不触发修订**、`min_review_score` 只看结构分、
+  不注入审阅者时与 v1.4.1 逐字一致
+- 新增 `tests/test_commercial_review_ui.test.ts`（17 条）：面板五种状态、四个维度的
+  H→P→E→Pf 顺序、只有一个操作入口、市场预测类词汇一个都不出现、`commercialPanelState`
+  的百分比钳制、`page.tsx` 接线（重新审阅不带 `run_id` 除非当前展示的就是落盘那一版）
+- 新增 `tests/test_commercial_api.test.ts`（14 条）：新路由 200 / 400 / 404 / 502 分支、
+  模型自报 `score` 被重算值顶掉、覆盖 `commercial-review.json` 但不碰 `review.json`、
+  v1.4.1 的老 Run 读回 `null` + `not_started`、Attempt 详情、`src/lib/api.ts` 客户端接线
+- 合同测试同步：`tests/test_contract_artifacts.test.ts` 的文件表与 metadata 必填字段加入
+  商业审阅三项；`tests/test_contract_api.test.ts` 的路由清单加入
+  `POST /api/review/commercial`、错误码白名单加入 `COMMERCIAL_REVIEW_FAILED`；
+  `tests/test_contract_docs.test.ts` 的保留能力清单移出 `CommercialReviewer`，
+  并加入「商业分不驱动重试 / 修订」「没有市场预测文案」的边界断言
+- **测试总量：1087 passed / 70 files**（1.4.1 为 1012 / 66）。全部用例仍只用假模型 / 假组件，
+  不调真实接口、不碰真实主机
+
+### Compatibility
+
+- 1.4.x → 1.5.0 无破坏性变更，也不需要迁移：既有字段、路由、错误码、CLI 参数与产物布局
+  一个都没动（新增全是 additive），1.4.x 写的产物可以直接读（`commercial_review` 是
+  `null`、`commercial_review_status` 是 `not_started`），1.5.0 写的 Run 回落到 1.4.x
+  也只是多一份被忽略的文件与几个被忽略的 metadata 字段
+- 没有新的重试或修订触发条件：`min_review_score` 仍然只看结构审阅分，商业可读性分数
+  在任何版本都不会改变 attempt 的采纳结论
+- 明细见 [docs/upgrade.md](./docs/upgrade.md) 的「从 1.4.1 升级到 1.5.0」与
+  [docs/compatibility.md](./docs/compatibility.md) 的「v1.5.0 的商业可读性审阅」
+
+---
+
 ## [1.3.0] —— 2026-09-24
 
 v1.3.0 给审阅结论加了**四个基础质量维度**（连贯性 / 叙事 / 人物 / 因果），让同一篇正文的质量

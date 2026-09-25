@@ -49,7 +49,7 @@ npx tsx scripts/generate-cli.ts validate --config configs/example_story.json --s
 一次完整生成就是一个 **Run**，固定顺序：
 
 ```text
-StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts: Generate → Save Story → Validate → Review → Repair? → Decide〕→ Finalize
+StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts: Generate → Save Story → Validate → Review → Commercial Review → Repair? → Decide〕→ Finalize
 ```
 
 - **AI Beat Planning**：先生成剧情骨架（BeatPlan），再据此写正文；骨架可手动编辑后进入生成
@@ -58,6 +58,10 @@ StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts
 - **Story Validator（硬性有效性检查）**：正文落盘后立即跑一遍确定性规则，回答「这篇正文基本可用吗」
 - **Basic AI Reviewer**：每次生成的正文自动获得一次基础审阅，产出 0–100 整体分，
   并给出四个基础维度的分数与短评（连贯性 / 叙事 / 人物 / 因果）
+- **Commercial Reviewer（商业可读性审阅，v1.5.0）**：与上面那道结构审阅完全并列的第二个
+  审阅者，从「读者会不会继续读下去」的角度再出一次结论：Hook（开篇抓力）/ Pacing（节奏）/
+  Engagement（全篇持续阅读动力）/ Payoff（回报）四个维度各 0–100 分加一句短评，
+  外加优点 / 问题 / 建议三组清单。两份结论互不覆盖、互不影响
 - **Automatic Retry（自动重试）**：生成失败、校验不通过或总分低于阈值时按确定性策略重新生成
 - **Targeted Story Repair（定点修订）**：Attempt 不通过时先按具体问题类别改写这篇正文，
   修订后再校验、再审阅；修订彻底失败才退回整篇重新生成
@@ -65,7 +69,8 @@ StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts
   `QualityResult`（`quality.json` + API 的 `quality` 字段 + 前端 Quality Summary 面板），
   不调用模型、不新增分数
 - **Run Artifacts**：产物统一落在 `runs/<run_id>/`，每次 Attempt、每次修订单独归档
-- **现代 Web UI**：六阶段进度、Attempt 计数、修订明细、Validation / Review 面板、Run ID 与产物清单
+- **现代 Web UI**：六阶段进度、Attempt 计数、修订明细、Validation / Review / Commercial
+  Review 面板、Run ID 与产物清单
 - **OpenAI-compatible LLM**：OpenAI / DeepSeek / 硅基流动 / 任意兼容端点
 - **可编辑 Prompt 模板**：`prompts/*.txt` 直接改，重启生效
 - **稳定 CLI**：`run` / `plan` / `review` / `validate` / `repair` 五个命令，与 API 共用同一套逻辑
@@ -86,7 +91,14 @@ StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts
 > 纯算术、无权重），`RetryPolicy` 里仍然只有 `min_review_score` 一个总分门槛——
 > 维度不新增阈值、不触发重试或修订、不改变采纳判定。维度也可有可无：
 > 1.3.0 之前的 Run 没有这个字段，读取时整个键不出现，行为与当年逐字一致。
-
+>
+> **两个审阅者是两件事（v1.5.0）**：Basic Reviewer 看结构（连贯性 / 叙事 / 人物 / 因果），
+> Commercial Reviewer 看读者体验（Hook / Pacing / Engagement / Payoff）。两者各自的提示词、
+> 各自的解析器、各自的产物文件（`review.json` 与 `commercial-review.json`），
+> **绝不合成一个「八维大 Prompt」**。商业可读性分数同样不驱动任何决策：不触发重试、不触发
+> 修订、不进 `QualityResult`（质量快照仍然只有 Co/N/C/Ca 四个维度）。它也**不是市场预测**——
+> 没有「爆款概率」「必火」「市场成功率」一类字段或文案，分数描述的是文本本身可观察的事实。
+>
 > **定点修订在整篇重试之前**：修订策略是纯函数（问题类别只由校验 issue code 或审阅问题文本推出，
 > 没有模型参与、没有打分、没有择优），重试同样由确定性策略驱动，没有学习、没有自适应：
 > 同样的输入得到同样的重试次数。修订只回答「这篇正文哪里不对、按类别改一次」，不回答「为什么会失败」。
@@ -109,7 +121,7 @@ StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts
 └──────────┬───────────┘
            ▼
 ┌──────────────────────┐
-│   Run API            │  POST /api/runs · POST /api/runs/from-plan · POST /api/validate · POST /api/review · POST /api/validate-beats
+│   Run API            │  POST /api/runs · POST /api/runs/from-plan · POST /api/validate · POST /api/review · POST /api/review/commercial · POST /api/validate-beats
 └──────────┬───────────┘
            ▼
 ┌──────────────────────────────────────────┐
@@ -117,8 +129,8 @@ StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts
 └──────────┬───────────────────────────────┘
            ▼
 ┌──────────────────────┐
-│  GenerationPipeline  │  固定顺序：Config → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts: Generate → Save Story → Validate → Review → Repair? → Decide〕→ Finalize
-│  · run()             │  StoryConfig → BeatPlan → Story → ValidationResult → ReviewResult
+│  GenerationPipeline  │  固定顺序：Config → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts: Generate → Save Story → Validate → Review → Commercial Review → Repair? → Decide〕→ Finalize
+│  · run()             │  StoryConfig → BeatPlan → Story → ValidationResult → ReviewResult → CommercialReviewResult
 │  · runWithPlan()     │  用户编辑后的 BeatPlan 直接进入生成
 │  · RetryPolicy       │  max_attempts / min_review_score / retry_on_validation_failure / enable_repair / max_repairs_per_attempt
 │  · RepairLoop        │  定点修订在整篇重试之前：Repair → Re-validate → Re-review → 仍不达标才重试
@@ -143,6 +155,7 @@ StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts
 │  StoryGenerator      │  prompts/story.txt 渲染（含 Beat Plan）
 │  StoryValidator      │ 确定性硬性规则 → ValidationResult（不调用 LLM，只检查，不改写）
 │  BasicReviewer       │  prompts/reviewer.txt → LLM → ReviewResult（只评价，不改写）
+│  CommercialReviewer  │  prompts/commercial_reviewer.txt → LLM → CommercialReviewResult（只看读者体验，不改写）
 │  StoryRepairer       │  prompts/repair.txt → LLM → 修订后正文（可选，不注入则无修订能力）
 └──────────┬───────────┘
            ▼
@@ -154,6 +167,7 @@ StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts
 │    ArtifactStore     │  原子写入 runs/<run_id>/ 下的产物，写失败抛 ArtifactWriteError
 │                      │  v1.2.0 起多一份 quality.json（Run 根与 attempts/NN/ 各一份）
 │                      │  v1.4.0 起多一份 beat-validation.json（Run 根，对 BeatPlan 唯一）
+│                      │  v1.5.0 起多一份 commercial-review.json（Run 根与 attempts/NN/ 各一份）
 └──────────────────────┘
 ```
 
@@ -181,6 +195,13 @@ StoryConfig + BeatPlan 交给模型判结构。**结论里带 error 级问题时
 一个 Attempt 都不跑，`story.md` 与 `attempts/` 都不会出现（骨架都站不住时不花生成额度）；
 只有 warning 或完全没有问题时照常生成。BeatValidator 自身崩溃则只把
 `beat_validation_status` 置为 `failed` 并记录原因，骨架与生成流程都不受影响。
+
+结构审阅之后还有一道**商业可读性审阅**（v1.5.0，进度记在 `reviewing_commercial`）：
+同一个故事再拿给 `CommercialReviewer`，从「读者会不会继续读下去」的角度给 Hook /
+Pacing / Engagement / Payoff 四个维度打分。这一步排在结构审阅之后、可能的修订之前，
+因此同一篇正文的两份结论描述的是同一版文字。它自身失败（模型超时、输出非法）只把
+`commercial_review_status` 置为 `failed` 并记录原因——正文、`validation.json` /
+`review.json` / `quality.json` 与采纳结论一个都不受影响，Run 照常收尾。
 
 ## StoryConfig
 
@@ -243,6 +264,7 @@ runs/
     ├── story.md         # 被选中那一次 Attempt 的正文（发生过修订时为修订后的版本）
     ├── validation.json  # 被选中那一次 Attempt 的首次硬性校验结果
     ├── review.json      # 被选中那一次 Attempt 的首次审阅结果
+    ├── commercial-review.json  # 被选中那一次 Attempt 的商业可读性结论（v1.5.0 新增，跑过这一步才有）
     ├── quality.json     # 被选中那一次 Attempt 的统一质量快照（v1.2.0 新增）
     ├── metadata.json    # 运行级 metadata
     └── attempts/
@@ -251,6 +273,7 @@ runs/
         │   ├── initial_story.md  # 修订前的正文（只有发生过修订时才存在）
         │   ├── validation.json   # 该次尝试的首次校验结论
         │   ├── review.json       # 该次尝试的首次审阅结论
+        │   ├── commercial-review.json  # 该次尝试最终那一版正文的商业可读性结论（v1.5.0 新增）
         │   ├── quality.json      # 该次尝试的统一质量快照（v1.2.0 新增）
         │   ├── metadata.json     # attempt 级 metadata
         │   └── repairs/
@@ -274,7 +297,8 @@ runs/
 `quality_issue_count`、`max_attempts`、`min_review_score`、
 `attempt_count`、`selected_attempt`、`quality_status`、`enable_repair`、
 `max_repairs_per_attempt`、`repair_count`、`beat_validation_status`、
-`beat_validation_passed`、`beat_validation_issue_count`、`beat_validation_error`。
+`beat_validation_passed`、`beat_validation_issue_count`、`beat_validation_error`、
+`commercial_review_status`、`commercial_score`、`commercial_review_error`。
 `model` 始终是「本次真正生效的模型」（请求覆盖 → 环境变量 → 缺省值），attempt 级的 `error`
 没有错误时是 `null`——这两条是 v1.0.0 固定下来的字段语义。
 
@@ -358,8 +382,9 @@ Transport Retry **绝不无限重试**：上限是常量 `MAX_TRANSPORT_RETRIES 
 字数统计对中文与英文一视同仁：CJK 字符逐个计数，连续的拉丁字母 / 数字算一个词，
 标点与空白不计入。规则刻意保持宽松，宁可漏报也不误报。
 
-没有角色一致性分析、动机分析、故事弧检查、Beat 校验、商业可行性评审——
-Validator 只回答「基本可用吗」，不回答「写得好不好」。
+没有角色一致性分析、动机分析、故事弧检查、Beat 校验、读者体验评价——
+Validator 只回答「基本可用吗」，不回答「写得好不好」，也不回答「读者读不读得下去」
+（后面两个分别是 Basic Reviewer 与 Commercial Reviewer 的事）。
 
 ## ReviewResult
 
@@ -394,6 +419,43 @@ Validator 只回答「基本可用吗」，不回答「写得好不好」。
 
 维度只影响「看得见多少」，不影响「怎么决策」：没有按维度设的阈值，没有维度驱动的重试或修订。
 没有维度的旧结论（1.3.0 之前的 `review.json`）一路照常可用。
+
+## CommercialReviewResult（v1.5.0）
+
+与 `ReviewResult` 完全并列的第二个结论：同一个故事，一份看结构（Co/N/C/Ca），一份看
+「读者会不会继续读下去」。两者是**两个独立的审阅者**——各自的提示词、各自的解析器、
+各自的产物文件（`review.json` / `commercial-review.json`），不合成一个八维大 Prompt，
+也不互相改写对方的结论。
+
+| Field | Type | Description |
+|---|---|---|
+| `score` | number | 商业整体分 0 ~ 100；**永远由四个维度重算**（等权均分，四舍五入到 1 位小数），模型自报值只作形状校验 |
+| `summary` | string | 一段话说清这篇正文的商业可读性整体表现 |
+| `strengths` | string[] | 商业可读性上的优点（可为空数组） |
+| `problems` | string[] | 商业可读性上的问题（可为空数组） |
+| `suggestions` | string[] | 可以怎么改的建议（可为空数组） |
+| `dimensions` | object | 四个固定维度，见下 |
+
+四个维度一个不能少、也不许多出别的（模型自己扩到 6 个也算非法），各自 0~100 分加一句
+非空短评，整体分就是这四个数的均分：
+
+| 维度键 | 中文名 | 评的是什么 |
+|---|---|---|
+| `hook` | Hook（开篇抓力） | 只看开头：冲突 / 悬念是否尽早出现，前几段有没有抓力 |
+| `pacing` | Pacing（节奏） | 只看阅读速度与拖沓感：推进快不快、信息密度、有无重复 |
+| `engagement` | Engagement（全篇持续阅读动力） | 只看全篇：悬念是否持续、冲突是否维持、读到哪里容易弃读 |
+| `payoff` | Payoff（回报） | 只看承诺与兑现：高潮够不够值、结尾是否回应主要冲突 |
+
+两条边界必须分清：Hook ≠ Engagement（开头抓人但中段崩塌，是 Hook 高、Engagement 低）；
+Pacing ≠ Narrative（结构成立但读起来拖沓，是 Pacing 低）。
+评分描述的是文本本身可观察的事实，**不预测市场、销量、读者规模或商业结果**。
+
+商业可读性分数不驱动任何决策：`RetryPolicy` 里仍然只有 `min_review_score` 一个总分门槛
+（比的还是结构审阅的整体分），修订策略仍然只看问题类别，`QualityResult` 里也**没有**
+商业分。审阅用的温度固定为 `0.3`，与结构审阅同级、与生成温度相互独立。这一步自身失败
+只让 `commercial_review_status` 变成 `failed`，Run 与其它结论照常成立。
+`POST /api/review/commercial` 可以单独跑一次：同样的模型、同样的规则，
+带 `run_id` 时覆盖该 Run 根目录的 `commercial-review.json`。
 
 ## QualityResult（v1.2.0，v1.3.0 增加可选维度）
 
@@ -499,6 +561,7 @@ Run 类入口与两个读回接口响应里的 `quality`、前端 Quality Summar
 | POST | `/api/plan` | StoryConfig → BeatPlan（只规划，不生成正文） |
 | POST | `/api/generate` | 兼容入口，等价于 `/api/runs/from-plan` |
 | POST | `/api/review` | `{config, story}`（+可选 `run_id`）→ 单独审阅正文 |
+| POST | `/api/review/commercial` | `{config, story}`（+可选 `run_id`）→ 单独做商业可读性审阅（v1.5.0） |
 | POST | `/api/validate` | `{config, story}`（+可选 `run_id`）→ 单独校验正文 |
 | POST | `/api/validate-beats` | `{config, beat_plan}` → 单独校验剧情骨架的结构，不写任何产物 |
 | POST | `/api/repair` | `{config, beat_plan, story, issue_type, issue_message}` → 单独定点修订 |
@@ -512,7 +575,7 @@ Run 类入口与两个读回接口响应里的 `quality`、前端 Quality Summar
 只会记录在 Run 的 `metadata.json` 里。非法值返回 400，Run 不会开始。
 `artifacts` 是产物文件名映射（`config` / `beat_plan` / `story` / `metadata`，
 校验、审阅或质量装配各自成功时追加 `validation` / `review` / `quality`，
-跑过 Beat 结构校验时追加 `beat_validation`），
+跑过 Beat 结构校验时追加 `beat_validation`，商业可读性审阅成功时追加 `commercial_review`），
 响应中不会返回服务器绝对路径。
 
 **校验不通过不会让 Run 失败**——`story` 与 `status: "completed"` 照常返回，`validation.passed` 为 `false`，
@@ -540,6 +603,7 @@ HTTP 状态码仍然是 200（这是一次成功的业务结果，不是错误�
 | `PLANNER_INVALID_OUTPUT` | 502 | 规划阶段拿不到合法 BeatPlan |
 | `GENERATION_FAILED` | 502 | 生成阶段失败（含连正文都没拿到的最后一次 Attempt） |
 | `REVIEW_FAILED` | 502 | 单独审阅入口的模型输出非法 |
+| `COMMERCIAL_REVIEW_FAILED` | 502 | 商业可读性审阅拿不到合法 CommercialReviewResult（v1.5.0，与 `REVIEW_FAILED` 并列） |
 | `REPAIR_FAILED` | 502 | 单独修订入口的模型输出非法 |
 | `BEAT_VALIDATION_FAILED` | 502 | 骨架结构校验拿不到合法 BeatValidationResult（v1.4.0） |
 | `VALIDATION_FAILED_INTERNAL` | 500 | Validator 自身崩溃（不是「校验不通过」） |
@@ -565,7 +629,7 @@ storygen repair    对已有正文定点修订一次
 | `--config` | 全部 | 必填：StoryConfig JSON 文件 |
 | `--beats` | run / repair | 手动模式用编辑过的 BeatPlan 直接生成 |
 | `--story` | review / validate / repair | 要处理的正文文件 |
-| `--model` / `--base-url` / `--temperature` | 全部（validate 除外） | 覆盖服务端 LLM 设置；**温度只作用于规划与生成**——审阅固定 0.3、修订固定 0.5，两者与生成温度相互独立（v1.4.1 起 CLI 会明说这一点） |
+| `--model` / `--base-url` / `--temperature` | 全部（validate 除外） | 覆盖服务端 LLM 设置；**温度只作用于规划与生成**——审阅固定 0.3、商业可读性审阅固定 0.3、修订固定 0.5，三者与生成温度相互独立（v1.4.1 起 CLI 会明说这一点） |
 | `--max-attempts` / `--min-score` | run | 1~5 / 0~100 |
 | `--enable-repair` / `--no-repair` / `--max-repairs` | run | 定点修订开关与上限 0~3 |
 | `--issue-type` / `--issue-message` / `--out` | repair | 修订类别 / 问题原文 / 输出路径 |
@@ -581,7 +645,7 @@ storygen repair    对已有正文定点修订一次
 | 配置 | 来源 | 说明 |
 |---|---|---|
 | **Application Settings** | 环境变量 + 默认值 | `RUNS_DIR` / `LOG_LEVEL` / `LLM_TIMEOUT`；与模型无关，不是每请求可调的 |
-| **LLM Settings** | 请求覆盖 > 环境变量 > 默认值 | `LLM_BASE_URL` / `LLM_MODEL` / `temperature` / `timeoutMs`，全部非敏感；温度只驱动规划与生成，审阅 / 修订 / Beat 校验各有固定温度 |
+| **LLM Settings** | 请求覆盖 > 环境变量 > 默认值 | `LLM_BASE_URL` / `LLM_MODEL` / `temperature` / `timeoutMs`，全部非敏感；温度只驱动规划与生成，审阅 / 商业可读性审阅 / 修订 / Beat 校验各有固定温度 |
 | **StoryConfig** | 请求体 / `configs/*.json` | 故事内容与创作目标 |
 | **RetryPolicy** | 请求体可选 `retry_policy` | 五项策略，见上 |
 
@@ -615,7 +679,9 @@ mapped / NAT64 地址按内嵌的那个地址判
   （整体分即四维均分，重试仍只看 `min_review_score` 一个门槛）
 - **没有 Best-of-N 择优**：取第一个满足策略的 Attempt，不会在多次尝试里挑「最好的」
 - **没有质量门禁**：没有 PASS / FAIL 判定，`quality_status` 只有 `accepted` / `exhausted` 两种
-- **没有商业审阅**：不评估市场适配、读者预期或商业可行性
+- **没有商业可行性预测**：商业可读性审阅（v1.5.0）只评价文本本身可观察的读者体验
+  （Hook / Pacing / Engagement / Payoff），不评估市场适配、读者规模、销量或商业结果，
+  也没有「爆款概率」一类的数字
 - **没有实验框架与基准测试**：没有 A/B、没有评分回归集、没有模型对比工具
 - **没有高级可观测性**：只做工程日志（等级 + `run_id` / `attempt` / `repair` 上下文 + 脱敏），
   没有 Metrics / Trace / Prometheus / OpenTelemetry / Dashboard
@@ -631,6 +697,16 @@ mapped / NAT64 地址按内嵌的那个地址判
 
 ## 升级说明
 
+v1.5.0 加了**商业可读性审阅**：与结构审阅完全并列的第二个审阅者，产出
+`CommercialReviewResult`（`commercial-review.json` + API 的 `commercial_review` 字段 +
+前端 Commercial Review 面板 + `POST /api/review/commercial`）。纯 additive：
+从 1.4.x 升到 1.5.0 **不需要改任何代码**，1.4.x 写的产物可以直接读
+（`commercial_review_status` 读作 `not_started`、`commercial_review` 读作 `null`），
+1.5.0 写的 Run 回落到 1.4.x 只是多一份被忽略的文件与几个被忽略的 metadata 字段。
+要紧的有三条：`RetryPolicy` 仍然只有 `min_review_score` 一个门槛、仍然只看结构审阅分，
+商业分不触发重试也不触发修订；`QualityResult` 里没有商业分，仍然只有 Co/N/C/Ca 四个维度；
+商业可读性审阅自身失败只让 `commercial_review_status` 变成 `failed`，正文、校验结论、
+结构审阅结论与质量快照一个都不受影响。回滚到 1.4.1 没有任何代价，也不需要迁移。
 v1.4.0 在 Planning 之后加了一道 BeatPlan 结构校验（`BeatValidationResult` /
 `beat-validation.json` / `POST /api/validate-beats` / 前端 Beat Validation 面板），
 纯 additive：从 1.3.x 升到 1.4.0 **不需要改任何代码**，1.3.x 写的产物可以直接读
@@ -664,7 +740,7 @@ attempt 级 metadata 的 `error` 没有错误时是 `null`（以前按条件写�
 两者都是「字段从可能没有变成一定有」，不会让旧读取方崩掉。
 
 ```bash
-git fetch && git checkout 1.4.1     # tag 不带 v 前缀
+git fetch && git checkout 1.5.0     # tag 不带 v 前缀
 npm install
 cp .env.example .env
 npx tsx scripts/generate-cli.ts run --config configs/example_story.json
@@ -719,7 +795,16 @@ v1.4.1 的修补回归散在原有文件里：分数口径（`test_generation_at
 （`test_cli`）、`beat_validation_error`（`test_beat_validation_pipeline`）、
 产物清单前缀（`test_ui_artifacts`）。
 
-所有测试都不调用真实 LLM：LLM 由注入的桩对象或 `FakeLLM` 替代（`tests/helpers/fixtures.ts`），
+v1.5.0 的商业可读性审阅另有四个测试文件：
+`test_commercial_review`（维度模型、schema 白名单、确定性聚合、解析、
+`CommercialReviewer` 行为）、`test_commercial_review_pipeline`（两份产物逐字相同、
+修订后重跑、失败隔离、**低商业分不触发重试或修订**、不注入时与 1.4.1 逐字一致）、
+`test_commercial_review_ui`（面板五种状态、四个维度顺序、没有 Fix / Retry 入口、
+没有市场化预言措辞）、`test_commercial_api`（新路由四种返回、模型自报分被重算值顶掉、
+覆盖 `commercial-review.json` 但不碰 `review.json`、旧 Run 读回）。
+
+全部测试合计 **70 个文件 / 1087 条**，全部只调用真实 LLM 之外的桩：
+LLM 由注入的桩对象或 `FakeLLM` 替代（`tests/helpers/fixtures.ts`），
 `fetch` 也被桩掉。重试相关断言同样只用桩，从不触发真实模型调用。
 URL 校验的用例用注入的假解析器跑，不真的查 DNS，也不碰任何真实主机。
 
