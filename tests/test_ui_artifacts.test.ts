@@ -82,6 +82,8 @@ describe("RunOk.beat_validation_error（v1.4.1）", () => {
     selected_attempt: 1,
     repair_count: 0,
     attempts: [],
+    // v1.6.0：出身清单是新增字段，POST 响应一定有这个键；写盘失败时是 null
+    manifest: null,
   };
 
   it("字段是可选的：没有错误时整个键不出现", () => {

@@ -7,6 +7,9 @@ import { LLMClient } from "@/lib/llm";
 /** 模块加载时锁定项目根，避免测试 chdir 后模板路径漂移。 */
 const PROJECT_ROOT = process.cwd();
 
+/** §14 生成阶段的缺省温度：请求没有覆盖时用这一个（与规划的缺省温度不是同一个数）。 */
+export const STORY_TEMPERATURE = 0.8;
+
 /**
  * §14 StoryGenerator：StoryConfig + BeatPlan → Story Prompt → LLM → Story。
  * 它不是 Pipeline（§2）。§16：BeatPlan 用轻量 renderer 渲染，不 str(dict)。
@@ -70,7 +73,7 @@ export class StoryGenerator {
   async generate(
     config: StoryConfig,
     plan: BeatPlan,
-    temperature = 0.8,
+    temperature = STORY_TEMPERATURE,
     system = "你是一名专业短篇小说作者。严格参考 StoryConfig 和 Story Beat Plan 创作完整短篇小说。",
   ): Promise<string> {
     return this.llm.generate(this.buildStoryPrompt(config, plan), temperature, system);

@@ -93,6 +93,8 @@ const RUN_OK_KEYS = [
   "selected_attempt",
   "repair_count",
   "attempts",
+  // v1.6.0：出身清单同样是纯追加字段，与 run-manifest.json 是同一份内容
+  "manifest",
 ].sort();
 
 /** v1.0.0 冻结的路由清单：[路径, HTTP 方法]。 */
@@ -475,6 +477,8 @@ describe("v1.0.0 API 冻结 — Run 入口", () => {
       "commercial_review",
       "commercial_review_status",
       "enable_repair",
+      // v1.6.0：出身清单与 POST 响应同源，都是纯追加字段
+      "manifest",
       "max_attempts",
       "max_repairs_per_attempt",
       "min_review_score",

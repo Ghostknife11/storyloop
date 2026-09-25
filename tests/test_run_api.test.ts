@@ -148,7 +148,7 @@ describe("POST /api/runs（§32/§46）", () => {
     const runDir = join(dir, "runs", String(body.run_id));
     expect(readdirSync(runDir).sort()).toEqual([
       "attempts", "beats.json", "commercial-review.json", "config.json", "metadata.json",
-      "quality.json", "review.json", "story.md", "validation.json",
+      "quality.json", "review.json", "run-manifest.json", "story.md", "validation.json",
     ]);
     expect(JSON.parse(readFileSync(join(runDir, "validation.json"), "utf8"))).toEqual({ passed: true, issues: [] });
     expect(JSON.parse(readFileSync(join(runDir, "commercial-review.json"), "utf8"))).toEqual(
@@ -318,7 +318,7 @@ describe("POST /api/runs — review failure（§28/§34/§46）", () => {
     expect(body.commercial_review_status).toBe("completed");
     expect(readdirSync(runDir).sort()).toEqual([
       "attempts", "beats.json", "commercial-review.json", "config.json", "metadata.json",
-      "quality.json", "story.md", "validation.json",
+      "quality.json", "run-manifest.json", "story.md", "validation.json",
     ]);
     const meta = JSON.parse(readFileSync(join(runDir, "metadata.json"), "utf8"));
     expect(meta.status).toBe("completed");

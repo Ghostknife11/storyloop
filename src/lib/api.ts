@@ -5,6 +5,7 @@ import type { ValidationResult } from "@/types/validation-result";
 import type { QualityResult } from "@/types/quality";
 import type { BeatValidationResult } from "@/types/beat-validation";
 import type { CommercialReviewResult } from "@/types/commercial-review";
+import type { RunManifest } from "@/types/run-manifest";
 
 /** §34/§38 单个 Attempt 摘要：只带结论，不带完整正文。 */
 export interface AttemptSummaryApi {
@@ -67,6 +68,8 @@ export interface RunApiResult {
   /** §40 Run 级修订次数 = 各 Attempt 修订次数之和。 */
   repair_count: number;
   attempts: AttemptSummaryApi[];
+  /** v1.6.0 这次 Run 的出身清单；写盘失败时是 null（面板隐藏，不报错）。 */
+  manifest: RunManifest | null;
 }
 
 /** §28 失败时带上 run_id 与 stage，让 UI 能指出失败阶段（不猜）。
@@ -250,6 +253,8 @@ export interface RunDetailApi {
   commercial_review_status: string;
   /** §26：统一质量快照；v1.2.0 之前的 Run 没有 quality.json，服务端会临时装配后返回。 */
   quality: QualityResult | null;
+  /** v1.6.0 这次 Run 的出身清单；v1.6.0 之前生成的 Run 没有这个文件，为 null。 */
+  manifest: RunManifest | null;
   attempts: AttemptSummaryApi[];
 }
 

@@ -8,6 +8,9 @@ import { LLMClient } from "@/lib/llm";
 /** 模块加载时锁定项目根，避免测试 chdir 后模板路径漂移。 */
 const PROJECT_ROOT = process.cwd();
 
+/** §9 规划阶段的缺省温度：请求没有覆盖时用这一个（与生成的缺省温度不是同一个数）。 */
+export const PLAN_TEMPERATURE = 0.7;
+
 /**
  * §9 BeatPlanner：StoryConfig → Planning Prompt → LLM → JSON Parse → BeatPlan。
  * 不得写正文、评价 Beat 质量、自动修复 Beat（§9 职责限定）。
@@ -56,7 +59,7 @@ export class BeatPlanner {
       .replaceAll("{{target_words}}", String(config.target_words));
   }
 
-  async plan(config: StoryConfig, temperature = 0.7): Promise<BeatPlan> {
+  async plan(config: StoryConfig, temperature = PLAN_TEMPERATURE): Promise<BeatPlan> {
     const raw = await this.llm.generate(
       this.buildPlanningPrompt(config),
       temperature,

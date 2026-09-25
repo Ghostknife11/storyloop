@@ -45,7 +45,8 @@ const LOW_REVIEW = JSON.stringify({ score: 41, summary: "正文冲突没有展�
 
 /** v1.0.0 冻结的运行级文件名；v1.2.0 追加 quality.json（§20）；
  *  v1.4.0 追加 beat-validation.json（BeatPlan 在生成正文前的结构校验结论）；
- *  v1.5.0 追加 commercial-review.json（商业可读性审阅结论）。 */
+ *  v1.5.0 追加 commercial-review.json（商业可读性审阅结论）；
+ *  v1.6.0 追加 run-manifest.json（这次 Run 的出身清单，与 metadata.json 并列）。 */
 const RUN_FILES = [
   "beat-validation.json",
   "beats.json",
@@ -54,6 +55,7 @@ const RUN_FILES = [
   "metadata.json",
   "quality.json",
   "review.json",
+  "run-manifest.json",
   "story.md",
   "validation.json",
 ] as const;
@@ -159,7 +161,7 @@ function expectHasAll(actual: string[], required: readonly string[], label: stri
 }
 
 describe("v1.0.0 产物布局冻结 — Happy Path", () => {
-  it("运行级目录只含 attempts/ 与冻结的九个文件", async () => {
+  it("运行级目录只含 attempts/ 与冻结的十个文件", async () => {
     const dir = withTmpDir();
     const llm = new FakeLLM([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW]);
     const result = await pipelineWith(llm, new ArtifactStore()).run(SAMPLE_CONFIG);

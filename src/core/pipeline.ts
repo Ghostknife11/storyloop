@@ -39,6 +39,8 @@ import { logger } from "@/lib/logger";
 import { safeText } from "@/lib/safe-text";
 import { llmSettings } from "@/lib/app-config";
 import { projectVersion as readProjectVersion } from "@/lib/version";
+import type { RunManifest } from "@/types/run-manifest";
+import { buildRunManifest, type ManifestAttemptInput } from "@/lib/tracking/manifest-builder";
 
 /**
  * §28 PipelineError：不吞异常，带 run_id / stage / message。
@@ -97,6 +99,9 @@ export interface GenerationResult {
   artifacts: Record<string, string>;
   started_at: string;
   finished_at: string;
+  /** v1.6.0 这次 Run 的出身清单（run-manifest.json 的同一内容）。
+   *  只在本进程里拼得出来、也写进去了才有；写盘失败时是 null，但不影响 Run 结果。 */
+  manifest: RunManifest | null;
 }
 
 /** §27/§28/§67 安全错误信息：node:fs 的异常文本带服务器绝对路径，LLM/HTTP 客户端的
@@ -366,6 +371,9 @@ export class GenerationPipeline {
     // v1.5.1：与 beatCheck 同一套「跨 Attempt 记住最后一次真实结论」的可变持有者。
     // 缺了它，失败路径只能二选一：写一个假的 not_started，或者干脆不写这个字段。
     const commercialLast: CommercialCheck = { ...COMMERCIAL_CHECK_SKIPPED };
+    // v1.6.0：提到 try 外面，失败路径才能把「已经跑过的 Attempt」如实写进 Manifest。
+    let records: AttemptRecord[] = [];
+    let selectedAttemptNumber: number | null = null;
 
     try {
       this.artifactStore.createRunDirectory(rid);
@@ -386,7 +394,7 @@ export class GenerationPipeline {
       await this.validateBeatPlan(ctx, rid, config, beatPlan, runtime, policy, beatCheck);
 
       // §19 重试循环：硬上限来自 policy.max_attempts（§15 禁止无限重试）。
-      const records: AttemptRecord[] = [];
+      records = [];
       for (let attemptNumber = 1; attemptNumber <= policy.max_attempts; attemptNumber++) {
         const record = await this.runAttempt(ctx, rid, config, beatPlan, runtime, policy, attemptNumber, commercialLast);
         records.push(record);
@@ -410,6 +418,7 @@ export class GenerationPipeline {
 
       // §17：第一个满足策略的 Attempt；全部 exhausted 时取最后一个（§16）。
       const selected = records.find((r) => r.attempt.accepted) ?? records[records.length - 1];
+      selectedAttemptNumber = selected.attempt.attempt_number;
       const qualityStatus: QualityStatus = selected.attempt.accepted ? "accepted" : "exhausted";
       // §40：Run 级 repair_count = 各 Attempt 修订次数之和（Repair 不新增 Attempt，§17）。
       const repairCount = records.reduce((sum, r) => sum + r.attempt.repairs.length, 0);
@@ -473,6 +482,7 @@ export class GenerationPipeline {
         ),
         started_at: ctx.started_at,
         finished_at: new Date().toISOString(),
+        manifest: this.writeManifest(ctx, rid, runtime, policy, records, selectedAttemptNumber),
       };
     } catch (e) {
       // §18/§19/§20：失败阶段可识别，已产出的文件不删除
@@ -495,12 +505,56 @@ export class GenerationPipeline {
       } catch {
         /* metadata 保存失败时保留原始错误 */
       }
+      // v1.6.0：失败也要留下出身记录——「这个 Run 死在哪个版本、哪次 Attempt、用了什么参数」
+      // 正是最需要查的一件事。此时没有 promote，运行根目录里只有 config / beats 与 attempt 级文件，
+      // Manifest 如实只列这些（selectedAttemptId 不出现）。
+      this.writeManifest(ctx, rid, runtime, policy, records, null);
       throw new PipelineError(
         ["Run", rid, "failed at", ctx.current_stage ?? "unknown", ":", detail].join(" "),
         rid,
         ctx.current_stage ?? "unknown",
         e,
       );
+    }
+  }
+
+  /**
+   * v1.6.0 出身清单：把这次 Run「跑在什么上面」收敛成 run-manifest.json，与 metadata.json 并列。
+   *
+   * 时机：所有已有产物都落盘之后（成功路径在 promote 之后、失败路径在 metadata 之后）。
+   * 因此清单里的摘要是照磁盘上那一份文件现算的，不是拿内存里的对象猜的。
+   *
+   * 失败取舍：故事已经产出，记录出身不该把成功的 Run 判失败；但不悄悄吞掉，
+   * 日志留告警，并返回 null 让调用方知道这份 Run 没有 Manifest。
+   */
+  private writeManifest(
+    ctx: RunContext,
+    runId: string,
+    runtime: GenerateRuntime | undefined,
+    policy: RetryPolicy,
+    records: AttemptRecord[],
+    selectedAttemptNumber: number | null,
+  ): RunManifest | null {
+    const attempts: ManifestAttemptInput[] = records.map((r) => ({
+      attemptNumber: r.attempt.attempt_number,
+      accepted: r.attempt.accepted,
+      retryReason: r.attempt.retry_reason,
+      repairs: r.attempt.repairs.map((p) => ({
+        repairNumber: p.repair_number,
+        issueType: p.issue_type,
+        success: p.success,
+      })),
+    }));
+    try {
+      const manifest = buildRunManifest(
+        { runId, startedAt: ctx.started_at, runtime, policy, attempts, selectedAttemptNumber },
+        this.artifactStore,
+      );
+      this.artifactStore.putManifest(runId, manifest);
+      return manifest;
+    } catch (e) {
+      logger.child({ run_id: runId }).warning(`run manifest write failed: ${safeText(errorDetail(e))}`);
+      return null;
     }
   }
 

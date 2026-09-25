@@ -19,6 +19,7 @@ import { BeatValidationPanel } from "@/components/beat-validation-panel";
 import { AttemptPanel } from "@/components/attempt-panel";
 import { QualityPanel } from "@/components/quality-panel";
 import { CommercialPanel } from "@/components/commercial-panel";
+import { ManifestPanel } from "@/components/manifest-panel";
 import {
   ManualRepair,
   RepairPanel,
@@ -1232,6 +1233,9 @@ export default function GeneratePage() {
                         ))}
                       </ul>
                     </div>
+                    {/* v1.6.0 出身面板：这次 Run 的版本 / 模型 / 提示词 / 参数 / Attempt 事实。
+                        §37 旧 Run 没有 run-manifest.json 时整个面板不出现。 */}
+                    <ManifestPanel manifest={result.manifest} />
                     {/* §37 Before / After Story：只有这次 Attempt 真的修过才给两个 Tab */}
                     {hasBeforeStory && (
                       <div className="mb-3 flex flex-wrap items-center gap-1.5 text-[11px] font-mono">

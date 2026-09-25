@@ -112,6 +112,8 @@ describe("§51 POST /api/runs： quality 是 additive 字段", () => {
       "beat_validation", "beat_validation_status",
       // v1.5.0：商业可读性结论同样是纯追加字段
       "commercial_review", "commercial_review_status",
+      // v1.6.0：出身清单同样是纯追加字段
+      "manifest",
       "quality", "quality_status",
       "repair_count", "review", "review_status", "run_id", "selected_attempt", "status",
       "story", "validation", "validation_status",

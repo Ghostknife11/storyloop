@@ -152,7 +152,7 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
     const runDir = join(dir, "runs", result.run_id);
     expect(readdirSync(runDir).sort()).toEqual([
       "attempts", "beats.json", "config.json", "metadata.json", "quality.json",
-      "review.json", "story.md", "validation.json",
+      "review.json", "run-manifest.json", "story.md", "validation.json",
     ]);
     expect(readFileSync(join(runDir, "story.md"), "utf8")).toContain("# 消失的目击者");
     expect(JSON.parse(readFileSync(join(runDir, "review.json"), "utf8"))).toEqual(review);
@@ -243,6 +243,8 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
       // v1.5.0：商业可读性结论同样是正式字段，与 review 完全并列
       "commercial_review", "commercial_review_error", "commercial_review_status",
       "config", "finished_at",
+      // v1.6.0：出身清单同样是正式字段，内容等于落盘的 run-manifest.json
+      "manifest",
       "quality", "quality_status", "review", "review_error", "review_status", "run_id",
       "selected_attempt", "started_at", "status", "story",
       "validation", "validation_error", "validation_status",

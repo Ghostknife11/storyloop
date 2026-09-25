@@ -96,7 +96,8 @@ describe("POST /api/runs（v0.6.0 Automatic Run）", () => {
     // §8：planner 只规划一次，重试复用 BeatPlan
     expect(calls).toHaveLength(1);
     expect(readdirSync(runDir).sort()).toEqual([
-      "attempts", "beats.json", "config.json", "metadata.json", "quality.json", "story.md", "validation.json",
+      "attempts", "beats.json", "config.json", "metadata.json", "quality.json",
+      "run-manifest.json", "story.md", "validation.json",
     ]);
     expect(JSON.parse(readFileSync(join(runDir, "config.json"), "utf8")).protagonist?.name).toBe("陈岚");
     expect(JSON.parse(readFileSync(join(runDir, "beats.json"), "utf8")).beats).toHaveLength(2);

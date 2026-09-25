@@ -1,0 +1,205 @@
+{
+  "schemaVersion": "1",
+  "runId": "20260101_120000_example",
+  "project": {
+    "version": "1.6.0"
+  },
+  "models": {
+    "default": {
+      "model": "gpt-4o-mini",
+      "baseUrlClass": "server-configured",
+      "provider": "openai"
+    }
+  },
+  "prompts": [
+    {
+      "role": "planner",
+      "version": "1",
+      "digest": "1a795e51fbe18f4634415cff14f243d56492ebf29b11ace5ad0dbfe06f235d78"
+    },
+    {
+      "role": "generator",
+      "version": "1",
+      "digest": "98d1cb59a8803901356010a9944d2ea74420ec92150e6c4c8d832edb3acc1d38"
+    },
+    {
+      "role": "beat-validator",
+      "version": "1",
+      "digest": "26f31b859492c76d5314b9039959bb544a43fe6d7a46b4e7efee76567ced5fed"
+    },
+    {
+      "role": "reviewer",
+      "version": "1",
+      "digest": "870c06dab7a7e136673e562282702a80bdb965d61fa053daac04992924d0db36"
+    },
+    {
+      "role": "commercial-reviewer",
+      "version": "1",
+      "digest": "047a6fb4e55741bf168d635de211c2befbbc3b6c3637e95ff99353ec92910c92"
+    },
+    {
+      "role": "repairer",
+      "version": "1",
+      "digest": "18e36fbc3eabea0888b65025cc2475a433a8097c2429da32dee9fa75f9b8dbfa"
+    }
+  ],
+  "parameters": {
+    "generation": {
+      "temperature": 0.8
+    },
+    "planning": {
+      "temperature": 0.7
+    },
+    "review": {
+      "temperature": 0.3
+    },
+    "commercialReview": {
+      "temperature": 0.3
+    },
+    "beatValidation": {
+      "temperature": 0.2
+    },
+    "repair": {
+      "temperature": 0.5
+    },
+    "retry": {
+      "maxAttempts": 2,
+      "minReviewScore": 70,
+      "retryOnValidationFailure": true,
+      "enableRepair": true,
+      "maxRepairsPerAttempt": 1
+    }
+  },
+  "storyConfigRef": "config.json",
+  "beatPlanRef": "beats.json",
+  "attempts": [
+    {
+      "attemptId": "01",
+      "index": 1,
+      "status": "accepted",
+      "retryReason": null,
+      "repairIds": [
+        "01"
+      ],
+      "validationArtifact": "attempts/01/validation.json",
+      "reviewArtifact": "attempts/01/review.json",
+      "commercialReviewArtifact": "attempts/01/commercial-review.json",
+      "qualityArtifact": "attempts/01/quality.json"
+    }
+  ],
+  "selectedAttemptId": "01",
+  "repairs": [
+    {
+      "repairId": "01",
+      "attemptId": "01",
+      "index": 1,
+      "category": "general",
+      "succeeded": true,
+      "inputStoryArtifact": "attempts/01/initial_story.md",
+      "outputStoryArtifact": "attempts/01/repairs/01/story.md"
+    }
+  ],
+  "selectedRepairId": "01",
+  "artifacts": [
+    {
+      "type": "config",
+      "path": "config.json",
+      "sha256": "a9f2530fd4604e6b946f2c0c485697ef7251a3556c81bed43a3483eb1218eee8"
+    },
+    {
+      "type": "beatPlan",
+      "path": "beats.json",
+      "sha256": "1302e6d588ef31185b9ea9b099de73e0660fc362f895b809ff61b2466360725a"
+    },
+    {
+      "type": "beatValidation",
+      "path": "beat-validation.json",
+      "sha256": "cd7f8433b6e72c6ab04e6d5a4c6eb31cd83bb951744b81f3f086d03dacae6e2b"
+    },
+    {
+      "type": "story",
+      "path": "story.md",
+      "sha256": "4e030d15810e3af21b1f81ecf63085d939333eca331dd8f21c48ae29219b731f"
+    },
+    {
+      "type": "validation",
+      "path": "validation.json",
+      "sha256": "f6b198106543fedd03db58ad2a362e6acdfc710b18491ff8f1d1f38a0f3f970f"
+    },
+    {
+      "type": "review",
+      "path": "review.json",
+      "sha256": "dec7e99816d2fbe043bd744b29c43e78b66a22e589c98d64d96368341173933c"
+    },
+    {
+      "type": "commercialReview",
+      "path": "commercial-review.json",
+      "sha256": "8267261921d4115f3d68dcc4d613aecf8adf8b924d67e66edbd00bd8f760e941"
+    },
+    {
+      "type": "quality",
+      "path": "quality.json",
+      "sha256": "fa9e1ad13c11e26be26fefc9f6ed63e3fbe579d17305340e6f9b55fefa0d4102"
+    },
+    {
+      "type": "story",
+      "path": "attempts/01/story.md",
+      "sourceAttemptId": "01",
+      "sha256": "4e030d15810e3af21b1f81ecf63085d939333eca331dd8f21c48ae29219b731f"
+    },
+    {
+      "type": "validation",
+      "path": "attempts/01/validation.json",
+      "sourceAttemptId": "01",
+      "sha256": "f6b198106543fedd03db58ad2a362e6acdfc710b18491ff8f1d1f38a0f3f970f"
+    },
+    {
+      "type": "review",
+      "path": "attempts/01/review.json",
+      "sourceAttemptId": "01",
+      "sha256": "dec7e99816d2fbe043bd744b29c43e78b66a22e589c98d64d96368341173933c"
+    },
+    {
+      "type": "commercialReview",
+      "path": "attempts/01/commercial-review.json",
+      "sourceAttemptId": "01",
+      "sha256": "8267261921d4115f3d68dcc4d613aecf8adf8b924d67e66edbd00bd8f760e941"
+    },
+    {
+      "type": "quality",
+      "path": "attempts/01/quality.json",
+      "sourceAttemptId": "01",
+      "sha256": "fa9e1ad13c11e26be26fefc9f6ed63e3fbe579d17305340e6f9b55fefa0d4102"
+    },
+    {
+      "type": "repairRequest",
+      "path": "attempts/01/repairs/01/request.json",
+      "sourceAttemptId": "01",
+      "sourceRepairId": "01",
+      "sha256": "7b262162225835043cf06a07225e7d11abd5084dd661089949b4ec1da88bb733"
+    },
+    {
+      "type": "repairStory",
+      "path": "attempts/01/repairs/01/story.md",
+      "sourceAttemptId": "01",
+      "sourceRepairId": "01",
+      "sha256": "4e030d15810e3af21b1f81ecf63085d939333eca331dd8f21c48ae29219b731f"
+    },
+    {
+      "type": "repairValidation",
+      "path": "attempts/01/repairs/01/validation.json",
+      "sourceAttemptId": "01",
+      "sourceRepairId": "01",
+      "sha256": "f6b198106543fedd03db58ad2a362e6acdfc710b18491ff8f1d1f38a0f3f970f"
+    },
+    {
+      "type": "repairReview",
+      "path": "attempts/01/repairs/01/review.json",
+      "sourceAttemptId": "01",
+      "sourceRepairId": "01",
+      "sha256": "e31548b83bae77f31281405161a10ac63d8dca8c8faf6283e3b6a01538529070"
+    }
+  ],
+  "startedAt": "2026-01-01T12:00:00.000Z",
+  "completedAt": "2026-01-01T12:00:00.000Z"
+}

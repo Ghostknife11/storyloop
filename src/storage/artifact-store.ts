@@ -16,6 +16,8 @@ import {
   type RepairMetadata,
   type RepairRequestRecord,
 } from "@/types/repair";
+import type { RunManifest } from "@/types/run-manifest";
+import { runManifestOf } from "@/types/run-manifest";
 
 /**
  * §13/§22 ArtifactStore：只负责创建目录、保存 JSON / Markdown / Metadata、返回路径。
@@ -36,6 +38,9 @@ const REPAIRS_DIR = "repairs";
 
 /** §30 首次修订前的初始正文：只有真的发生过修订才写，没修订的 Attempt 不需要它。 */
 const INITIAL_STORY = "initial_story.md";
+
+/** v1.6.0 运行清单：与 metadata.json 并排放在 Run 根目录，两者互不替代。 */
+const RUN_MANIFEST_FILE = "run-manifest.json";
 
 /**
  * §19 产物写入失败：磁盘满 / 权限不足 / 目录被占用都归这一类。
@@ -141,6 +146,16 @@ export class ArtifactStore {
 
   putMetadata(runId: string, metadata: Record<string, unknown>): string {
     return this.putJson(runId, "metadata.json", metadata);
+  }
+
+  /**
+   * v1.6.0 运行清单：与 metadata.json 并排落盘，内容经过 validateRunManifest 校验。
+   *
+   * 这里不接拒收语义：调用方在写之前已经自己校验过（Pipeline 落盘前后各校验一次），
+   * 出错时抛 ArtifactWriteError，由 Pipeline 的 catch 收尾成一次显式失败。
+   */
+  putManifest(runId: string, manifest: RunManifest): string {
+    return this.putJson(runId, RUN_MANIFEST_FILE, manifest);
   }
 
   runExists(runId: string): boolean {
@@ -278,6 +293,38 @@ export class ArtifactStore {
 
   readRunMetadata(runId: string): Record<string, unknown> | null {
     return this.readJson(runId, "metadata.json");
+  }
+
+  /**
+   * v1.6.0 运行清单的读回。
+   * v1.6.0 之前生成的 Run 没有这个文件，返回 null——读接口照常给出那一版的其它内容。
+   */
+  readRunManifest(runId: string): RunManifest | null {
+    const raw = this.readJson(runId, RUN_MANIFEST_FILE);
+    if (raw === null) return null;
+    return runManifestOf(raw);
+  }
+
+  /**
+   * v1.6.0 装配 Manifest 时判断某个产物文件是否真的在磁盘上。
+   * 只接受 Run 内相对路径（attempts/…、beats.json 之类）；越界路径按「不存在」处理，
+   * 不让拼接路径决定了能不能穿越目录这件事。
+   */
+  artifactExists(runId: string, artifactPath: string): boolean {
+    try {
+      return existsSync(this.resolveInRun(this.runDir(runId), artifactPath));
+    } catch {
+      return false;
+    }
+  }
+
+  /** v1.6.0 读回产物原文算 SHA-256；文件不在或读不动时给 null。 */
+  readArtifactText(runId: string, artifactPath: string): string | null {
+    try {
+      return this.readText(runId, artifactPath);
+    } catch {
+      return null;
+    }
   }
 
   readAttemptMetadata(runId: string, attemptNumber: number): Record<string, unknown> | null {

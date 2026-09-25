@@ -205,7 +205,7 @@ describe("§49 Happy Path：Attempt 1 直接 accepted，产物完整", () => {
     const runDir = join(dir, "runs", result.run_id);
     expect(readdirSync(runDir).sort()).toEqual([
       "attempts", "beats.json", "config.json", "metadata.json", "quality.json",
-      "review.json", "story.md", "validation.json",
+      "review.json", "run-manifest.json", "story.md", "validation.json",
     ]);
     expect(readFileSync(join(runDir, "beats.json"), "utf8")).toContain("证人失踪");
     expect(readFileSync(join(runDir, "story.md"), "utf8")).toContain("# 消失的目击者");

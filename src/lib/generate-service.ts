@@ -12,6 +12,7 @@ import { BeatValidator } from "@/lib/beat-validator";
 import { StoryRepairer } from "@/lib/story-repairer";
 import { RepairStrategy } from "@/core/repair-strategy";
 import { GenerationPipeline, type GenerationResult } from "@/core/pipeline";
+import type { RunManifest } from "@/types/run-manifest";
 import { ArtifactStore } from "@/storage/artifact-store";
 import { logger } from "@/lib/logger";
 import { appSettings } from "@/lib/app-config";
@@ -179,6 +180,8 @@ export interface RunOk {
   repair_count: number;
   /** §38：只含摘要，不带完整正文。 */
   attempts: AttemptSummary[];
+  /** v1.6.0 这次 Run 的出身清单（run-manifest.json 的同一内容）；写盘失败时是 null。 */
+  manifest: RunManifest | null;
 }
 
 /** §11 统一错误响应体：{error:{code,message,run_id?,stage?}}。 */
@@ -271,6 +274,8 @@ function runOkOf(result: GenerationResult): RunOk {
     // §40：Run 级 repair_count 由各 Attempt 的修订次数累加，不另建统计口径。
     repair_count: result.attempts.reduce((sum, a) => sum + a.repairs.length, 0),
     attempts: result.attempts.map(attemptSummary),
+    // v1.6.0：出身清单与 run-manifest.json 一字不差，POST 直接就把它带回来
+    manifest: result.manifest,
   };
   if (result.validation_error) ok.validation_error = result.validation_error;
   if (result.review_error) ok.review_error = result.review_error;
@@ -673,6 +678,8 @@ export interface RunDetail {
   commercial_review_status: string;
   /** §26：统一质量快照。v1.2.0 之前的 Run 没有 quality.json，按同一套规则临时装配。 */
   quality: QualityResult | null;
+  /** v1.6.0 出身清单；v1.6.0 之前生成的 Run 没有 run-manifest.json，为 null。 */
+  manifest: RunManifest | null;
   attempts: AttemptSummary[];
 }
 
@@ -901,6 +908,10 @@ export async function getRun(
         // §8：采纳结论沿用 Run 级 quality_status，不另立一套判定
         qualityStatus === "accepted",
       ),
+      // v1.6.0：出身清单按文件读。读不到（v1.6.0 之前的 Run）或文件被手改坏，
+      // 都归一成 null——与 qualityResultOf / beatValidationResultOf 同一套容错约定，
+      // 不让坏数据进响应，也不让读接口 500（compatibility §16）。
+      manifest: store.readRunManifest(runId),
       attempts,
     },
   };
