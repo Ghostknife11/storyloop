@@ -160,7 +160,7 @@ function runDeps(llm: FakeLLM, beatValidation?: BeatValidationResult) {
 }
 
 describe("v1.0.0 API 冻结 — 错误契约", () => {
-  it("错误码白名单恰好是十三种", () => {
+  it("错误码白名单恰好是十六种", () => {
     expect([...API_ERROR_CODES].sort()).toEqual(
       [
         "ARTIFACT_WRITE_FAILED",
@@ -168,6 +168,9 @@ describe("v1.0.0 API 冻结 — 错误契约", () => {
         "BEAT_VALIDATION_FAILED",
         "COMMERCIAL_REVIEW_FAILED",
         "CONFIG_INVALID",
+        "EXPERIMENT_CONFLICT",
+        "EXPERIMENT_INVALID",
+        "EXPERIMENT_NOT_FOUND",
         "GENERATION_FAILED",
         "INTERNAL_ERROR",
         "LLM_REQUEST_FAILED",

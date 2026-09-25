@@ -39,7 +39,7 @@ import { logger } from "@/lib/logger";
 import { safeText } from "@/lib/safe-text";
 import { llmSettings } from "@/lib/app-config";
 import { projectVersion as readProjectVersion } from "@/lib/version";
-import type { RunManifest } from "@/types/run-manifest";
+import type { RunManifest, ExperimentProvenance } from "@/types/run-manifest";
 import { buildRunManifest, type ManifestAttemptInput } from "@/lib/tracking/manifest-builder";
 
 /**
@@ -343,8 +343,10 @@ export class GenerationPipeline {
     config: StoryConfig,
     runtime?: GenerateRuntime,
     retryPolicy?: RetryPolicy,
+    /** v1.7.0：这次 Run 是某个受控实验的样本时带上实验出身；普通 Run 不传。 */
+    experiment?: ExperimentProvenance,
   ): Promise<GenerationResult> {
-    return this.runStages(createRunContext(this.projectVersion), config, undefined, runtime, retryPolicy);
+    return this.runStages(createRunContext(this.projectVersion), config, undefined, runtime, retryPolicy, experiment);
   }
 
   /** §29 Manual：用户编辑后的 BeatPlan 直接进入生成，仍形成一个 Run。 */
@@ -353,8 +355,10 @@ export class GenerationPipeline {
     beatPlan: BeatPlan,
     runtime?: GenerateRuntime,
     retryPolicy?: RetryPolicy,
+    /** v1.7.0 同 run()：实验样本的出身由调用方（实验执行器）传入。 */
+    experiment?: ExperimentProvenance,
   ): Promise<GenerationResult> {
-    return this.runStages(createRunContext(this.projectVersion), config, beatPlan, runtime, retryPolicy);
+    return this.runStages(createRunContext(this.projectVersion), config, beatPlan, runtime, retryPolicy, experiment);
   }
 
   private async runStages(
@@ -363,6 +367,8 @@ export class GenerationPipeline {
     suppliedPlan: BeatPlan | undefined,
     runtime?: GenerateRuntime,
     retryPolicyArg?: RetryPolicy,
+    /** v1.7.0 实验出身：一路带到 Manifest，不参与任何流程判断。 */
+    experiment?: ExperimentProvenance,
   ): Promise<GenerationResult> {
     const rid = ctx.run_id;
     let beatPlan: BeatPlan | undefined = suppliedPlan;
@@ -482,7 +488,7 @@ export class GenerationPipeline {
         ),
         started_at: ctx.started_at,
         finished_at: new Date().toISOString(),
-        manifest: this.writeManifest(ctx, rid, runtime, policy, records, selectedAttemptNumber),
+        manifest: this.writeManifest(ctx, rid, runtime, policy, records, selectedAttemptNumber, experiment),
       };
     } catch (e) {
       // §18/§19/§20：失败阶段可识别，已产出的文件不删除
@@ -508,7 +514,7 @@ export class GenerationPipeline {
       // v1.6.0：失败也要留下出身记录——「这个 Run 死在哪个版本、哪次 Attempt、用了什么参数」
       // 正是最需要查的一件事。此时没有 promote，运行根目录里只有 config / beats 与 attempt 级文件，
       // Manifest 如实只列这些（selectedAttemptId 不出现）。
-      this.writeManifest(ctx, rid, runtime, policy, records, null);
+      this.writeManifest(ctx, rid, runtime, policy, records, null, experiment);
       throw new PipelineError(
         ["Run", rid, "failed at", ctx.current_stage ?? "unknown", ":", detail].join(" "),
         rid,
@@ -526,6 +532,8 @@ export class GenerationPipeline {
    *
    * 失败取舍：故事已经产出，记录出身不该把成功的 Run 判失败；但不悄悄吞掉，
    * 日志留告警，并返回 null 让调用方知道这份 Run 没有 Manifest。
+   *
+   * v1.7.0：experiment 原样进清单（不参与上面的判断，也不因它失败）。
    */
   private writeManifest(
     ctx: RunContext,
@@ -534,6 +542,7 @@ export class GenerationPipeline {
     policy: RetryPolicy,
     records: AttemptRecord[],
     selectedAttemptNumber: number | null,
+    experiment?: ExperimentProvenance,
   ): RunManifest | null {
     const attempts: ManifestAttemptInput[] = records.map((r) => ({
       attemptNumber: r.attempt.attempt_number,
@@ -547,7 +556,7 @@ export class GenerationPipeline {
     }));
     try {
       const manifest = buildRunManifest(
-        { runId, startedAt: ctx.started_at, runtime, policy, attempts, selectedAttemptNumber },
+        { runId, startedAt: ctx.started_at, runtime, policy, attempts, selectedAttemptNumber, experiment },
         this.artifactStore,
       );
       this.artifactStore.putManifest(runId, manifest);

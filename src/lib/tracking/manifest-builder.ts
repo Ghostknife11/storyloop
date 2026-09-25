@@ -9,6 +9,8 @@
  * 文件不存在时对应产物条目不出现，`run-manifest.json` 自己也不进清单——它没办法记自己的摘要。
  *
  * 明确不做：不比较两次 Run、不统计失败原因、不给任何结论打分。这里只回答「是什么」。
+ * v1.7.0 的 `experiment` 块同样由调用方传进来（实验出身是调用方才知道的事实），
+ * 装配器不从产物里推断「这次 Run 是不是实验样本」。
  */
 
 import type { ArtifactStore } from "@/storage/artifact-store";
@@ -27,6 +29,7 @@ import {
   RUN_MANIFEST_SCHEMA_VERSION,
   type ArtifactManifestEntry,
   type AttemptManifestEntry,
+  type ExperimentProvenance,
   type ModelSnapshot,
   type ParameterSnapshot,
   type RepairManifestEntry,
@@ -99,6 +102,11 @@ export interface RunManifestInput {
   attempts: ManifestAttemptInput[];
   /** 入选 Attempt 的编号；没有产生入选 Attempt（失败 / 全部耗尽）时是 null。 */
   selectedAttemptNumber: number | null;
+  /**
+   * v1.7.0：这次 Run 是某个受控实验的样本时带上它的出身（experimentId / variantId / repetition）。
+   * 普通 Run 不传，Manifest 里 `experiment` 键不出现——与 v1.6.0 逐字一致。
+   */
+  experiment?: ExperimentProvenance;
 }
 
 function attemptRel(attemptNumber: number, file: string): string {
@@ -308,5 +316,6 @@ export function buildRunManifest(
     artifacts,
     startedAt: input.startedAt,
     completedAt: now().toISOString(),
+    ...(input.experiment !== undefined ? { experiment: input.experiment } : {}),
   };
 }

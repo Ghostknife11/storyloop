@@ -15,8 +15,13 @@
  * `run-manifest.json` 是 v1.6.0 新增的独立文件，自带 `schemaVersion`，用 camelCase 记字段，
  * 与冻结契约物理隔离——改它不需要动任何既有字段的语义。
  *
+ * v1.7.0 在这里追加一个可选字段 `experiment`（见文末 ExperimentProvenance）：一次 Run 如果是
+ * 某个受控实验的样本，单独拿到这份清单时也能看出它属于哪个实验、哪个 Variant、第几次 repetition。
+ * 纯 additive：没有实验的 Run 这个键不出现，读法与 v1.6.0 逐字一致，schemaVersion 不递增
+ * ——没有改动任何既有字段的语义。
+ *
  * 实现：`src/lib/tracking/manifest-builder.ts`（装配）、`src/core/pipeline.ts`（落盘时机）
- * 契约测试：`tests/test_run_manifest_models.test.ts`、
+ * 契约测试：`tests/test_run_manifest.test.ts`、
  *           `tests/test_contract_docs_sync.test.ts`（文档字段表 ↔ 真实产物双向比对）
  */
 
@@ -182,6 +187,24 @@ export interface RunManifest {
   startedAt: string;
   /** Manifest 写入时刻（Run 已完成或已失败）；与 metadata 的 finished_at 同一口径。 */
   completedAt: string;
+  /** v1.7.0 additive：这次 Run 是某个实验的样本时才有；普通 Run 整个键不出现。 */
+  experiment?: ExperimentProvenance;
+}
+
+/**
+ * v1.7.0 实验出身：这份 Run 是某个受控实验的一条样本。
+ *
+ * 只记三个事实：属于哪个实验、哪个 Variant、第几次 repetition。刻意不记
+ * 「这个 Variant 相对基准改了什么」——定义里写的是计划，Manifest 里写的是实况，
+ * 两者各自保留（TASK §48），在 Manifest 里再复述一遍计划只会多出一个会说谎的地方。
+ *
+ * 没有这个块的 Run 就是一次普通生成：v1.7.0 之前生成的 Run、以及不是实验样本的 Run 都不带它。
+ */
+export interface ExperimentProvenance {
+  experimentId: string;
+  variantId: string;
+  /** 从 1 开始的 repetition 序号（TASK §33）。 */
+  repetition: number;
 }
 
 /**
@@ -368,6 +391,20 @@ function artifactEntryOf(raw: unknown): ArtifactManifestEntry {
   return entry;
 }
 
+function experimentProvenanceOf(raw: unknown): ExperimentProvenance {
+  if (typeof raw !== "object" || raw === null) throw new RunManifestError("experiment 必须是对象");
+  const r = raw as Record<string, unknown>;
+  const repetition = numOf(r.repetition, "experiment.repetition");
+  if (!Number.isInteger(repetition) || repetition < 1) {
+    throw new RunManifestError("experiment.repetition 必须是从 1 开始的整数");
+  }
+  return {
+    experimentId: strOf(r.experimentId, "experiment.experimentId"),
+    variantId: strOf(r.variantId, "experiment.variantId"),
+    repetition,
+  };
+}
+
 /** 结构校验：形状不对就抛 RunManifestError（写盘前自查用）。 */
 export function validateRunManifest(raw: unknown): RunManifest {
   if (typeof raw !== "object" || raw === null) throw new RunManifestError("manifest 必须是对象");
@@ -415,6 +452,9 @@ export function validateRunManifest(raw: unknown): RunManifest {
     artifacts: (artifactsRaw ?? []).map(artifactEntryOf),
     startedAt: strOf(r.startedAt, "startedAt"),
     completedAt: strOf(r.completedAt, "completedAt"),
+    ...(r.experiment !== undefined && r.experiment !== null
+      ? { experiment: experimentProvenanceOf(r.experiment) }
+      : {}),
   };
 }
 

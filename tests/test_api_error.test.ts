@@ -61,6 +61,10 @@ describe("§11 稳定错误码", () => {
       "ARTIFACT_WRITE_FAILED",
       // v1.4.0：BeatPlan 结构校验自身失败
       "BEAT_VALIDATION_FAILED",
+      // v1.7.0：受控实验的三个码
+      "EXPERIMENT_INVALID",
+      "EXPERIMENT_NOT_FOUND",
+      "EXPERIMENT_CONFLICT",
       "INTERNAL_ERROR",
     ]);
     expect(new Set(API_ERROR_CODES).size).toBe(API_ERROR_CODES.length);

@@ -17,6 +17,11 @@
 import { PipelineError } from "@/core/pipeline";
 import { LLMError, LLMTimeoutError } from "@/lib/llm";
 import { safeText } from "@/lib/safe-text";
+import {
+  ExperimentNotFoundError,
+  ExperimentStateError,
+  ExperimentValidationError,
+} from "@/types/experiment";
 
 /** §11 稳定错误码。新增错误必须复用这里的码，不允许每个路由自造字符串。 */
 export const API_ERROR_CODES = [
@@ -34,6 +39,11 @@ export const API_ERROR_CODES = [
   "ARTIFACT_WRITE_FAILED",
   // v1.4.0：BeatPlan 结构校验自身失败（模型超时 / 输出非法 / 模板缺失）
   "BEAT_VALIDATION_FAILED",
+  // v1.7.0：受控实验的三个码。定义不合法（含凭据形状的键、越界、白名单外字段）走 INVALID；
+  // 实验不存在走 NOT_FOUND；实验已经跑过、定义不可变走 CONFLICT——改条件就复制成新实验。
+  "EXPERIMENT_INVALID",
+  "EXPERIMENT_NOT_FOUND",
+  "EXPERIMENT_CONFLICT",
   "INTERNAL_ERROR",
 ] as const;
 
@@ -158,6 +168,17 @@ export function toApiError(e: unknown): ApiError {
     if (USER_ERROR_NAMES.has(inner.name)) {
       return new ApiError("CONFIG_INVALID", safeText(inner.message), 400, runIdOf(e), stageOf(e));
     }
+  }
+  // v1.7.0 实验的三个专属错误：前置判定全部在 LLM 请求之前，因此这些分支里
+  // runIdOf(e) 一定是 undefined（还没有任何 Run），只带 code 与 message。
+  if (e instanceof ExperimentValidationError) {
+    return new ApiError("EXPERIMENT_INVALID", safeText(e.message), 400);
+  }
+  if (e instanceof ExperimentNotFoundError) {
+    return new ApiError("EXPERIMENT_NOT_FOUND", safeText(e.message), 404);
+  }
+  if (e instanceof ExperimentStateError) {
+    return new ApiError("EXPERIMENT_CONFLICT", safeText(e.message), 409);
   }
   // 具体类型都没命中，才退回 PipelineError 的阶段壳：阶段能定位，但不值得单独一个码。
   if (e instanceof PipelineError) {
