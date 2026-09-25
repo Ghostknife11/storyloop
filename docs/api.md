@@ -40,7 +40,7 @@
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `config` | StoryConfig | 可选；不传时整个请求体当 StoryConfig（但 `POST /api/plan` 不支持包装） |
-| `model` / `baseUrl` / `temperature` | string / string / number | 可选，覆盖服务端 LLM 设置 |
+| `model` / `baseUrl` / `temperature` | string / string / number | 可选，覆盖服务端 LLM 设置；**温度只驱动规划与生成**——审阅固定 `0.3`、修订固定 `0.5`、Beat 结构校验固定 `0.2`，三者与生成温度相互独立，请求体里的 `temperature` 对它们不生效 |
 | `retry_policy` | object | 可选；**只被 `/api/runs`、`/api/runs/from-plan`、`/api/generate` 读取**，其它路由静默忽略 |
 
 `retry_policy` 字段：`max_attempts`（整数 1~5，缺省 2）、`min_review_score`（0~100，缺省 70）、

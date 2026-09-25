@@ -221,6 +221,41 @@ npm install
 git checkout 1.3.0
 ```
 
+## 从 1.4.0 升级到 1.4.1
+
+**没有任何需要改代码的地方。** 没有新文件、新字段、新路由、新错误码，1.4.0 写的产物
+可以直接读，1.4.1 写的 Run 回落到 1.4.0 也能读（差别只在读接口给出的值与 CLI 的提示行）。
+
+需要知道的四件事：
+
+1. **`attempt` 摘要的审阅分与其它接口对齐。** 有审阅维度时，
+   `AttemptSummary.review_score` 以前取 `review.score` 原值，与 `quality.overall_score`、
+   与 RetryPolicy 比的门槛分不是同一个数；现在三处同口径（都走 `reviewOverallScore`）。
+   **没有维度时逐字不变。**
+2. **坏结论文件不再让读接口 500。** `review.json` / `validation.json` / `quality.json` /
+   `beat-validation.json` 被改坏（半份 JSON、缺字段、数值越界）时，读接口仍然 200，
+   对应字段是 `null`——与 v1.2.0 起 `quality.json` 的处理方式一致。
+3. **CLI 的温度讲清楚了。** `plan` 现在把 `--temperature` 透传进请求体（1.4.0 时漏了）；
+   `review` / `repair` 收到 `--temperature` 会明确打一行「已忽略」，因为它们用固定温度
+   （0.3 / 0.5）——这一点从 1.0.0 起就没变过，只是以前不说。
+4. **三处前端行为。** Review Again / Validate Again 针对当前展示的正文重新出结论
+   （只有展示的正是 Run 落盘那一版时才覆盖 run 目录里的结论）；复制 / 下载导出的是
+   当前展示的正文；`artifacts` 里的 `attempts/NN/` 前缀只加在 attempt 级的四类文件上。
+   另外 `--help` 出现在无法识别的参数之后也照样给用法。
+
+```bash
+git fetch && git checkout 1.4.1     # tag 不带 v 前缀
+npm install
+```
+
+回滚到 1.4.0 的代价只有一处：有审阅维度时 attempt 摘要的分会退回 `review.score` 原值，
+与同一次尝试的 metadata / `quality.overall_score` 不再是同一个数（这正是 1.4.1 修的问题）；
+其余差别只是读回容错与 CLI 的提示行。产物布局、字段、路由、错误码完全一致：
+
+```bash
+git checkout 1.4.0
+```
+
 ## 从 0.9.x 升级到 1.0.0
 
 ### 行为变化（需要注意的两处）
@@ -266,7 +301,7 @@ git checkout 1.3.0
 ## 升级操作
 
 ```bash
-git fetch && git checkout 1.4.0     # tag 不带 v 前缀；从 0.9.x 升级时 checkout 1.0.0 亦可
+git fetch && git checkout 1.4.1     # tag 不带 v 前缀；从 0.9.x 升级时 checkout 1.0.0 亦可
 npm install
 cp .env.example .env                # 填入 LLM_API_KEY 后即可跑
 npm run dev                         # Web UI
@@ -286,5 +321,7 @@ npx tsx scripts/generate-cli.ts run --config configs/example_story.json
 HTTP 行为与 1.1.0 相同；合法的公网 IPv4-mapped 地址会再次被误拒（只影响少数 IPv6 部署）。
 从 1.2.0 回滚到 1.1.1 同样不需要迁移：1.2.0 新增的 `quality.json` 与 metadata 的三个新字段
 只是被旧版本忽略，旧版本不会因为多一个文件而读不了 Run；CLI 与 HTTP 行为逐字相同。
+从 1.4.1 回滚到 1.4.0 同样不需要迁移，唯一可见的差别就是上面那处分数字口：
+带审阅维度的 attempt 摘要会退回 `review.score` 原值，其余只是少了读回容错与 CLI 提示行。
 从 1.4.0 回滚到 1.3.0 也只有一处行为差别：带 `error` 级结构问题的 BeatPlan 会重新一路生成
 到 Attempt 阶段，多出来的 `beat-validation.json` 与 `beat_validation_*` 字段被旧版本忽略。

@@ -565,7 +565,7 @@ storygen repair    对已有正文定点修订一次
 | `--config` | 全部 | 必填：StoryConfig JSON 文件 |
 | `--beats` | run / repair | 手动模式用编辑过的 BeatPlan 直接生成 |
 | `--story` | review / validate / repair | 要处理的正文文件 |
-| `--model` / `--base-url` / `--temperature` | 全部（validate 除外） | 覆盖服务端 LLM 设置 |
+| `--model` / `--base-url` / `--temperature` | 全部（validate 除外） | 覆盖服务端 LLM 设置；**温度只作用于规划与生成**——审阅固定 0.3、修订固定 0.5，两者与生成温度相互独立（v1.4.1 起 CLI 会明说这一点） |
 | `--max-attempts` / `--min-score` | run | 1~5 / 0~100 |
 | `--enable-repair` / `--no-repair` / `--max-repairs` | run | 定点修订开关与上限 0~3 |
 | `--issue-type` / `--issue-message` / `--out` | repair | 修订类别 / 问题原文 / 输出路径 |
@@ -581,7 +581,7 @@ storygen repair    对已有正文定点修订一次
 | 配置 | 来源 | 说明 |
 |---|---|---|
 | **Application Settings** | 环境变量 + 默认值 | `RUNS_DIR` / `LOG_LEVEL` / `LLM_TIMEOUT`；与模型无关，不是每请求可调的 |
-| **LLM Settings** | 请求覆盖 > 环境变量 > 默认值 | `LLM_BASE_URL` / `LLM_MODEL` / `temperature` / `timeoutMs`，全部非敏感 |
+| **LLM Settings** | 请求覆盖 > 环境变量 > 默认值 | `LLM_BASE_URL` / `LLM_MODEL` / `temperature` / `timeoutMs`，全部非敏感；温度只驱动规划与生成，审阅 / 修订 / Beat 校验各有固定温度 |
 | **StoryConfig** | 请求体 / `configs/*.json` | 故事内容与创作目标 |
 | **RetryPolicy** | 请求体可选 `retry_policy` | 五项策略，见上 |
 
@@ -638,6 +638,15 @@ v1.4.0 在 Planning 之后加了一道 BeatPlan 结构校验（`BeatValidationRe
 1.4.0 写的 Run 回落到 1.3.x 只是多一份被忽略的文件与几个被忽略的 metadata 字段。
 唯一的行为变化在生成链路上：骨架结构带 error 级问题时 Run 会在写正文之前结束，
 这类 Run 以前会一路生成到 Attempt 阶段。
+v1.4.1 是一次修订：没有新能力、没有新文件、新字段或新路由，只把 1.0.0 ~ 1.4.0 里
+「文档写了实现没做到」和「口径没走到底」的地方改回文档承诺的样子。从 1.4.0 升到 1.4.1
+**不需要改任何代码**，1.4.0 写的产物可以直接读。要紧的有三条：`attempt` 摘要的审阅分
+改走 `reviewOverallScore`（有维度时与 RetryPolicy 比的门槛分、`quality.overall_score`
+是同一个数，没有维度时逐字不变）；`review.json` / `validation.json` / `quality.json` /
+`beat-validation.json` 被改坏时读接口仍然 200、对应字段是 `null`，不再 500；CLI 的
+`--temperature` 现在会透传给规划，而审阅 / 修订收到它会明确打一行「已忽略」
+（它们用固定温度 0.3 / 0.5，这一点从 1.0.0 起就没变）。回滚到 1.4.0 的代价也只有一处：
+有审阅维度时 attempt 摘要的分会退回 `review.score` 原值。
 v1.3.0 给审阅结论加了四个可选的基础维度（连贯性 / 叙事 / 人物 / 因果），整体分改为四维均分，
 纯 additive：从 1.2.x 升到 1.3.0 **不需要改任何代码**，1.2.x 写的产物可以直接读，
 1.3.0 写的 Run 回落到 1.2.x 只是多一个被忽略的 `dimensions` 字段。
@@ -655,7 +664,7 @@ attempt 级 metadata 的 `error` 没有错误时是 `null`（以前按条件写�
 两者都是「字段从可能没有变成一定有」，不会让旧读取方崩掉。
 
 ```bash
-git fetch && git checkout 1.4.0     # tag 不带 v 前缀
+git fetch && git checkout 1.4.1     # tag 不带 v 前缀
 npm install
 cp .env.example .env
 npx tsx scripts/generate-cli.ts run --config configs/example_story.json
@@ -704,6 +713,11 @@ v1.4.0 的 BeatPlan 结构校验另有四个测试文件：
 `test_beat_validation_pipeline`（硬失败阻断、warning 放行、校验器自身异常、不注入时与
 v1.3.0 逐字一致）、`test_beat_validation_api`（新路由、错误码、旧 Run 读回）、
 `test_beat_validation_ui`（面板状态推导，含「骨架不过 ≠ 校验器失败」）。
+
+v1.4.1 的修补回归散在原有文件里：分数口径（`test_generation_attempt`）、
+读回容错与原子写（`test_artifact_store`、`test_retry_api`）、CLI 温度透传与帮助
+（`test_cli`）、`beat_validation_error`（`test_beat_validation_pipeline`）、
+产物清单前缀（`test_ui_artifacts`）。
 
 所有测试都不调用真实 LLM：LLM 由注入的桩对象或 `FakeLLM` 替代（`tests/helpers/fixtures.ts`），
 `fetch` 也被桩掉。重试相关断言同样只用桩，从不触发真实模型调用。

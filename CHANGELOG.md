@@ -114,6 +114,97 @@ API 的 `beat_validation` 字段与前端 Beat Validation 面板三处。
 
 ---
 
+## [1.4.1] —— 2026-09-25
+
+v1.4.1 是**修订版本**：没有新能力、没有新文件、没有新字段、没有新路由。
+回到 1.0.0 ~ v1.4.0 的每条承诺逐条核对，把「文档写了但实现没做到」与「上一版定好的口径
+没走到底」的地方改回承诺的样子，外加两处让坏数据能一路带到响应体外面的读路径问题。
+
+### Fixed
+
+- **`attempt` 摘要的审阅分与门槛分、质量快照同口径。** v1.3.0 起整体分的唯一实现是
+  `reviewOverallScore`（有维度时取四维均分），各级 metadata 与 `quality.overall_score`
+  都走它；唯独 `AttemptSummary.review_score`（`src/core/generation-attempt.ts`）还在取
+  `review.score` 原值。于是模型给了维度时，同一个 Run 里 Attempt 摘要显示 90、
+  `quality.overall_score` 显示 83、`RetryPolicy` 拿 83 去比 `min_review_score`——
+  三个本应相同的数字不一致。现在摘要也走 `reviewOverallScore`；**没有维度时逐字不变**
+- **读回容错：坏结论文件不再让读接口 500。** `ArtifactStore` 的九个读方法
+  （`readRepairValidation` / `readRepairReview` / `readAttemptValidation` /
+  `readAttemptReview` / `readFinalValidation` / `readFinalReview` / `readFinalQuality` /
+  `readFinalBeatValidation` / `readAttemptQuality`）原来直接把磁盘内容 `as` 成类型返回，
+  一份被手改坏的 `review.json`（半份 JSON、缺一个维度、分数越界）会让 `GET /api/runs/<id>`
+  抛到 500，或者把形状不对的对象原样带进响应体。v1.4.1 起读回一律先过 schema 归一化
+  （新增 `reviewResultOf` / `validationResultOf` / `beatValidationResultOf`），
+  不认识就按「没有结论」处理：字段是 `null`、接口仍然 200。这与 v1.2.0 起
+  `quality.json` 的处理方式同一条原则。**不改变「解析失败」的既有判定**——审阅阶段拿到
+  形状不对的结论仍是 `REVIEW_FAILED`，那一刻必须给一个诚实答案
+- **`beat_validation_error` 现在真的会返回。** `docs/api.md` 的 Run 响应表从 v1.4.0 起就
+  写了这个字段，`GenerationResult`（`src/core/pipeline.ts`）却没有它：`BeatValidator`
+  自身抛异常时这段文字只落在 metadata 里，HTTP 层拿不到。现在补上，并与
+  `validation_error` / `review_error` 同一套「有错误才带这个键」的约定
+  （`src/lib/generate-service.ts` 的 `RunOk` 与 `src/lib/api.ts` 的 `RunOkApi` 同步）
+- **CLI 的 `plan` 漏了透传 `--temperature`。** `run` / `review` / `repair` 都把运行时覆盖
+  放进请求体，只有 `plan`（它不走服务层）把 `--temperature` 整个丢掉了：命令行上给了
+  0.42，规划却照旧用默认的 0.7。现在四个子命令一致。同时 `review` / `repair` 收到
+  `--temperature` 会明确打一行「已忽略」——它们用固定温度 0.3 / 0.5（Beat 结构校验固定
+  0.2），这一点从 v1.0.0 起就没变，只是以前不说，看起来像参数被吞了
+- **`--help` 被无法识别的参数挡住。** `storygen run --nonsense --help` 以前按参数错误收场
+  （退出码 2、用法打到 stderr），因为解析在遇到第一个未知参数时就停了。现在先扫一遍有没有
+  `--help` / `-h`：有就给用法、退出码 0，位置不再重要
+- **「重新」操作可能作用在另一版正文上。** Review Again / Validate Again 原来固定重放
+  Run 落盘的那一版，而当前展示的可能是某次 attempt 或修订后的正文——点一下「重新审阅」，
+  面板里出现的结论描述的是另一段文字。现在以当前展示的正文为准；只有当当前展示的正是
+  Run 落盘那一版时，才覆盖 run 目录里的 `review.json` / `validation.json`
+  （`run_id` 才跟着传）。相应地，复制 / 下载导出的也是当前展示的正文，
+  而不是切到修订版后仍然复制落盘那一版
+- **产物清单给 run 级文件加了 attempt 前缀。** 查看第 2 次 attempt 时，`artifacts` 里的
+  `config.json` / `beats.json` / `beat-validation.json` 也被拼成
+  `attempts/02/config.json`，点进去只会 404。现在 `attempts/NN/` 前缀只加在 attempt 级的
+  四类文件（`story` / `validation` / `review` / `quality`）上，run 级三项照旧不带前缀
+  （新增纯函数 `attemptArtifactPath`，`src/lib/artifacts-view.ts`）
+- **切换 attempt 时的过期响应会回写正文。** 连点两次「查看」，先发出的那次晚回来时会把
+  已经切走的那一版正文写到当前视图上。现在每次请求带一个自增序号，回来时序号过期就丢弃
+- **落盘不是原子的。** `promoteAttempt` 与 `putText` 直接写最终路径，写一半被中断
+  （进程被杀、磁盘满）就留下半份 `story.md` / `review.json`，下一次读就是一个坏产物。
+  改成「同目录临时文件 + rename」；临时文件只多一个前导点、落在它自己那一层
+  （`.story.md.tmp` 与 `story.md` 同目录），不会挤到 Run 根目录冒充产物
+
+### Security
+
+- 本次改动没有扩大任何攻击面：读回容错只收紧已有的读路径（坏数据不再原样进响应体），
+  原子写只是换了写盘顺序。请求体 `baseUrl` 的公网地址关卡（v1.1.0 / v1.1.1 的口径）
+  原样未动，回归测试仍在；没有任何新增的外部输入路径，也没有引入凭据
+
+### Tests
+
+- `tests/test_generation_attempt.test.ts` 新增 1 条：有维度时摘要取四维均分（90 + 80/82/84/86
+  → 83）、没有维度时取 `review.score`（74）
+- `tests/test_artifact_store.test.ts` 新增 attempt 级临时文件位置、rename 失败时目标不被
+  半份文件替换，以及 7 条读回容错（缺维度、顶层是数组、半份 JSON、坏问题码、坏 Beat 校验
+  结论、坏 `quality.json`、attempt 级文件、以及「归一化后与写入时逐字相同」的对照）
+- `tests/test_retry_api.test.ts` 新增 2 条：attempt 级 `review.json` 缺一个维度、
+  Run 根 `validation.json` 是半份 JSON，读接口都是 200 且对应字段为 `null`
+- `tests/test_cli.test.ts` 新增 3 条（`--temperature` 透传给规划、审阅 / 修订固定温度 +
+  「已忽略」提示，断言落在真正发给模型的那次请求上）与 1 条（`--help` 在无法识别的参数之后
+  照样给用法、退出码 0）
+- `tests/test_beat_validation_pipeline.test.ts` 新增 1 条：校验器抛异常时
+  `GenerationResult` 带 `beat_validation_error`，没异常与没注入时都没有这个键
+- `tests/test_ui_artifacts.test.ts` 新增 4 条产物清单前缀用例与 2 条 `RunOk` 可选字段用例
+- **测试总量：1009 passed / 66 files**（1.4.0 为 986 / 65）。全部用例仍只用假模型 / 假组件，
+  不调真实接口、不碰真实主机
+
+### Compatibility
+
+- 1.4.0 → 1.4.1 无破坏性变更，也不需要迁移：没有新字段、没有删字段、没有改路由、
+  没有改错误码、没有新文件，1.4.0 写的产物可以直接读。读出来的结果也逐字一致，唯一例外是
+  「模型给了维度」的 attempt 摘要分数——而那正是 v1.3.0 文档承诺的口径
+- 回滚到 1.4.0 的代价只有这一处：带审阅维度时 attempt 摘要的分会退回 `review.score` 原值，
+  与同一次尝试的 metadata / `quality.overall_score` 不再是同一个数
+- 明细见 [docs/upgrade.md](./docs/upgrade.md) 的「从 1.4.0 升级到 1.4.1」与
+  [docs/compatibility.md](./docs/compatibility.md) 的「v1.4.1 的修订」
+
+---
+
 ## [1.3.0] —— 2026-09-24
 
 v1.3.0 给审阅结论加了**四个基础质量维度**（连贯性 / 叙事 / 人物 / 因果），让同一篇正文的质量
