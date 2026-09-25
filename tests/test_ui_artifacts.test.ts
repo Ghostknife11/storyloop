@@ -5,7 +5,7 @@ import type { RunOk } from "@/lib/generate-service";
 
 /**
  * §42 产物清单的展示口径：Run 响应里的 artifacts 是**运行根目录**那一层，
- * 看某一次 Attempt 时只有 promote 清单里那四个文件在 attempt 目录下真实存在。
+ * 看某一次 Attempt 时只有 promote 清单里那五个文件在 attempt 目录下真实存在。
  * 运行级文件（config / beat_plan / metadata / beat_validation）不能加 attempts/NN/ 前缀，
  * 否则清单会列出根本不存在的路径。
  */
@@ -19,6 +19,8 @@ const runArtifacts: Record<string, string> = {
   validation: "validation.json",
   review: "review.json",
   quality: "quality.json",
+  // v1.5.0：商业可读性结论同样进 promote 清单，attempt 目录与 Run 根目录各有一份
+  commercial_review: "commercial-review.json",
 };
 
 describe("attemptArtifactPath（§42）", () => {
@@ -28,11 +30,19 @@ describe("attemptArtifactPath（§42）", () => {
     }
   });
 
-  it("看非入选 Attempt 时，只有 attempt 目录里真实存在的四个文件加前缀", () => {
+  it("看非入选 Attempt 时，只有 attempt 目录里真实存在的五个文件加前缀", () => {
     expect(attemptArtifactPath("story", "story.md", 1, 2)).toBe("attempts/01/story.md");
     expect(attemptArtifactPath("validation", "validation.json", 3, 2)).toBe("attempts/03/validation.json");
     expect(attemptArtifactPath("review", "review.json", 1, 2)).toBe("attempts/01/review.json");
     expect(attemptArtifactPath("quality", "quality.json", 1, 2)).toBe("attempts/01/quality.json");
+    // v1.5.1：commercial_review 也在 promote 清单里——看别的 Attempt 时它同样要指到
+    // attempt 目录那份。少了这一条，清单会把入选 Attempt 的结论当成当前这份显示。
+    expect(attemptArtifactPath("commercial_review", "commercial-review.json", 1, 2)).toBe(
+      "attempts/01/commercial-review.json",
+    );
+    expect(attemptArtifactPath("commercial_review", "commercial-review.json", 7, 2)).toBe(
+      "attempts/07/commercial-review.json",
+    );
   });
 
   it("运行级文件不加前缀：attempt 目录里没有这些文件", () => {
