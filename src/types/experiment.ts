@@ -282,6 +282,18 @@ function numInRange(raw: unknown, field: string, min: number, max: number): numb
 /** §35：id 只允许单个目录名（实验目录就用它），不接受用户输入里带路径或遍历。 */
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
+/**
+ * 这一个 id 能不能当目录名用：单段、以字母或数字开头、不含路径分隔符，
+ * 也不是 "." / ".."（落到实验根目录本身等于把根当成一个实验）。
+ *
+ * POST 用 `idOf` 校验（错误信息细，直接告诉用户错在哪）；
+ * 读与跑的路由用这个判定——不合法一律当「不存在」，404，
+ * 免得把 URL 里的原句喂给路径解析（v1.7.1：`exp/../../x` 曾走到 500）。
+ */
+export function isExperimentId(value: unknown): value is string {
+  return typeof value === "string" && value !== "." && value !== ".." && ID_PATTERN.test(value);
+}
+
 function idOf(raw: unknown, field: string): string {
   const value = strOf(raw, field, 64);
   if (value === "." || value === ".." || value.includes("/") || value.includes("\\")) {

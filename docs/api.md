@@ -36,7 +36,7 @@
 | `INTERNAL_ERROR` | 500 | 未预期异常；message 固定为「服务器内部错误」，不带堆栈与原始异常文本 |
 | `EXPERIMENT_INVALID` | 400 | v1.7.0 新增：实验定义不合法——结构不对、变体数或重复次数越界、总样本数超上限、override 键不在白名单、`story_config` 之外的位置出现凭据形状的字段 |
 | `EXPERIMENT_NOT_FOUND` | 404 | v1.7.0 新增：实验 id 不存在 |
-| `EXPERIMENT_CONFLICT` | 409 | v1.7.0 新增：实验 id 已存在，或该实验已经跑过（第三个文件 `results.json` 已落盘） |
+| `EXPERIMENT_CONFLICT` | 409 | v1.7.0 新增：实验 id 已存在、实验已经跑过（第三个文件 `results.json` 已落盘），或这个实验正在运行中 |
 
 用户错误（改请求就能解决）一律 4xx，运行时错误 5xx。响应里永远不出现堆栈、
 本机绝对路径或凭据：异常文本会先过 `src/lib/safe-text.ts`。
@@ -107,7 +107,7 @@
 | POST | `/api/experiments` | v1.7.0 新增：登记一份实验定义（只写 `definition.json`，不跑） |
 | GET | `/api/experiments` | v1.7.0 新增：实验列表，按 `created_at` 倒序 |
 | GET | `/api/experiments/<experiment_id>` | v1.7.0 新增：实验详情 + `runs` + `result`（没跑过时两者为 `null`） |
-| POST | `/api/experiments/<experiment_id>/run` | v1.7.0 新增：按定义批量跑，逐格写 `runs.json`，收尾写 `results.json` |
+| POST | `/api/experiments/<experiment_id>/run` | v1.7.0 新增：按定义批量跑，逐格写 `runs.json`，收尾写 `results.json`；已在运行时返回 409 |
 
 ## 响应字段
 
@@ -290,48 +290,60 @@ Run 不存在与 Attempt 不存在共用 `RUN_NOT_FOUND` 这个 code，只能靠
 
 前者只返回 `{ "prompt": "..." }`；后者只返回 `{ "status": "ok" }`。
 
-### 实验入口（v1.7.0 新增）
+### 实验入口（v1.7.0 新增，1.7.1 修订响应体说明）
 
 四个入口都是 JSON in / JSON out，没有 SSE 也没有进度推送：`run` 是同步跑完再返回。
+实验相关的响应体一律 camelCase，与磁盘上的 `definition.json` / `runs.json` /
+`results.json` 同一个口径，没有第二层字段翻译。
 
 **`POST /api/experiments`** 请求体就是一份实验定义：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `experiment_id` | string | 必填；同时是目录名，已存在 → 409 `EXPERIMENT_CONFLICT` |
+| `experimentId` | string | 必填；同时是目录名。只能由字母、数字、点、下划线、连字符组成且以字母或数字开头；同名 → 409 `EXPERIMENT_CONFLICT` |
 | `name` | string | 必填 |
-| `hypothesis` | string | 可选；想验证什么 |
+| `description` | string | 可选；这次想验证什么 |
 | `base` | object | 必填；四个固定条件（见 [experiments.md](./experiments.md)） |
 | `variants` | array | 必填；1~4 个变体，按数组顺序执行 |
-| `schema_version` | string | `"1"` |
+| `repetitions` | number | 可选，缺省 1；1~5 |
+| `schemaVersion` | string | `"1"` |
 
-成功返回 201 `{ experiment, created: true }`；此时只写了 `definition.json`，
-`runs.json` 与 `results.json` 都不存在。
+成功返回 201，响应体就是这份定义本身（`experimentId` 在里头）。此时只写了
+`definition.json`，`runs.json` 与 `results.json` 都不存在。
 
-**`GET /api/experiments`** 返回 `{ experiments, total }`，按 `created_at` 倒序。
-列表项只有 `experiment_id` / `name` / `hypothesis` / `variant_count` / `repetitions` /
-`total_runs` / `created_at` / `has_result`——**不带结果**，看数字要点进详情。
-`total` 就是本次返回的条数，没有分页参数也没有 total 总数口径。
+**`GET /api/experiments`** 返回 `{ "experiments": [...] }`，按 `createdAt` 倒序。
+列表项只有 `experimentId` / `name` / `repetitions` / `variantCount` / `totalRuns` /
+`createdAt` / `status` / `successCount` / `failureCount`，另有两个可选键——
+`description`（定义里写了才有）与 `completedAt`（跑完才有）。**不带任何样本详情**，
+看数字要点进详情。没有分页参数，也没有 `total` 字段：`experiments` 数组的长度就是全部。
 
 **`GET /api/experiments/<experiment_id>`** 返回三块：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `definition` | object | 登记时那份定义，逐字读回 |
-| `runs` | array \| null | v1.7.0 新增：逐格进度，每项 `{ variant_id, repetition, run_id, status, failure }`；没跑过是 `null` |
+| `runs` | object \| null | 逐格进度：`{ experimentId, totalRuns, entries: [{ variantId, repetition, runId, status, failure? }] }`；没跑过是 `null` |
 | `result` | object \| null | 没收尾（`results.json` 不存在）是 `null` |
 
-`result` 里：`counts`（`run_count` / `success_count` / `failure_count`）、
-`variants`（按定义顺序，每项 `variant_id` / `variant_name` / `run_count` /
-`success_count` / `failure_count` / `mean_overall_score` / `mean_commercial_score` /
-`mean_dimensions`）与 `runs`。`mean_*` 在没有任何成功样本时是 `null` 而不是 `0`——
-「没有数字」和「数字是零」是两件事。**没有 winner、没有 rank、没有排名字段。**
+`result` 里是 `experimentId` / `status` / `runs` / `summary` / `startedAt` / `completedAt`：
 
-**`POST /api/experiments/<experiment_id>/run`** 无请求体。跑完返回 `{ run, persisted }`，
-其中 `run` 与上面详情的 `result` 同形。行为：
+- `runs`：逐条样本引用，每项 `variantId` / `repetition` / `runId` / `status` /
+  `overallScore` / `commercialScore`。两个分数读自这条 Run 自己的产物，读不到就是 `null`
+  （v1.7.1 之前这两项从不落盘，界面上每一行都显示「—」）
+- `summary`：`runCount` / `successCount` / `failureCount` 三个计数，加 `variants`
+  一个数组——按定义顺序排列，每项 `variantId` / `runCount` / `successCount` /
+  `failureCount` / `meanOverallScore` / `meanCommercialScore` 与八个维度均值
+  （`meanCoherence` / `meanNarrative` / `meanCharacter` / `meanCausality` /
+  `meanHook` / `meanPacing` / `meanEngagement` / `meanPayoff`）。
+  均值只对有分数的样本求，一个都没有时是 `null` 而不是 `0`——
+  「没有数字」和「数字是零」是两件事。**没有 winner、没有 rank、没有排名字段。**
 
+**`POST /api/experiments/<experiment_id>/run`** 无请求体。跑完返回的就是上面那份
+`result`（不是 `{ run, persisted }` 包装）。行为：
+
+- 这个实验正在跑（同一进程里已有执行链）→ 409 `EXPERIMENT_CONFLICT`
 - 已经跑过（`results.json` 已存在）→ 409 `EXPERIMENT_CONFLICT`，不会重跑也不会覆盖
-- 服务端 `LLM_API_KEY` 没配 → 400，里层是 `LLM_REQUEST_FAILED`
+- 服务端 `LLM_API_KEY` 没配 → 400 `EXPERIMENT_INVALID`（一个样本都不发）
 - 单格失败不中断：剩下的格子继续跑，失败格在 `runs.json` 里带 `status: "failed"`
   与失败原因，全部跑完才写 `results.json`
 

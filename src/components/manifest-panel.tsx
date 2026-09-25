@@ -5,6 +5,7 @@ import type { RunManifest } from "@/types/run-manifest";
 import {
   artifactCountOf,
   attemptStatusText,
+  experimentProvenanceText,
   manifestPanelState,
   modelRowText,
   promptRowsOf,
@@ -28,6 +29,8 @@ export function ManifestPanel({ manifest }: ManifestPanelProps) {
   const state = manifestPanelState(manifest);
   if (state.kind === "hidden") return null;
   const m = state.manifest;
+  // v1.7.1：实验样本在面板里说清自己的出身；普通 Run 是 null，这一行不出现
+  const experimentRow = experimentProvenanceText(m);
 
   return (
     <details className="mb-4 rounded-2xl border border-border bg-muted/40 p-3 sm:p-4" open>
@@ -44,6 +47,7 @@ export function ManifestPanel({ manifest }: ManifestPanelProps) {
           <Row label="Project version" value={m.project.version} mono />
           {m.project.commit ? <Row label="Commit" value={m.project.commit} mono /> : null}
           <Row label="Model" value={modelRowText(m)} mono />
+          {experimentRow !== null ? <Row label="Experiment" value={experimentRow} mono /> : null}
         </section>
 
         <section className="space-y-1.5">

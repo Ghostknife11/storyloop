@@ -87,6 +87,17 @@ export function modelRowText(manifest: RunManifest): string {
     .join("；");
 }
 
+/**
+ * v1.7.1 新增：这条 Run 是不是某个受控实验的样本。
+ * 返回 null 表示普通 Run（清单里没有 experiment 块，与 v1.6.0 逐字一致）。
+ * 摆出来的是「它属于谁」，不摆「它排第几」——出身面板不参与任何比较。
+ */
+export function experimentProvenanceText(manifest: RunManifest): string | null {
+  const e = manifest.experiment;
+  if (!e || typeof e.experimentId !== "string") return null;
+  return `experiment ${e.experimentId} · variant ${e.variantId} · repetition ${e.repetition}`;
+}
+
 /** 标题右侧那个数字：清单里登记的产物条数。 */
 export function artifactCountOf(manifest: RunManifest): number {
   return manifest.artifacts.length;

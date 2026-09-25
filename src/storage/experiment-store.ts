@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFile
 import { basename, join, resolve, sep } from "node:path";
 import {
   experimentDefinitionOf,
+  isExperimentId,
   type ExperimentDefinition,
   type ExperimentResult,
   type ExperimentRunIndex,
@@ -68,10 +69,14 @@ export class ExperimentStore {
     return this.experimentsRoot;
   }
 
-  /** §35 Path Traversal 防护：experimentId 已经过 idOf 校验，这里再做一次 containment check。 */
+  /**
+   * §35 Path Traversal 防护：experimentId 已经过 idOf 校验，这里再做一次 containment check。
+   * 根目录自身也不算——`resolve(root, ".")` 与 `resolve(root, "")` 都等于根，
+   * 放过去就等于把 experiments/ 根当成一个实验来读写（v1.7.1 补上这一条）。
+   */
   private experimentDir(experimentId: string): string {
     const dir = resolve(this.experimentsRoot, experimentId);
-    if (dir !== this.experimentsRoot && !dir.startsWith(this.experimentsRoot + sep)) {
+    if (dir === this.experimentsRoot || !dir.startsWith(this.experimentsRoot + sep)) {
       throw new ExperimentWriteError(experimentId, undefined);
     }
     return dir;
@@ -145,7 +150,9 @@ export class ExperimentStore {
     } catch {
       return [];
     }
-    return names.filter((name) => this.exists(name)).sort();
+    // 手放进来的目录名也可能不是合法 id（`.` 开头、带分隔符……）：列不出来就别列，
+    // 更不该拿它去拼路径
+    return names.filter((name) => isExperimentId(name) && this.exists(name)).sort();
   }
 
   // ---------------------------------------------------------------------------

@@ -354,6 +354,7 @@ v1.6.0 之前生成的 Run 没有它，读接口返回 `null`，界面面板整�
 v1.7.0 起，实验里跑出来的每个样本在这份清单上多一个可选的 `experiment` 块
 （`experimentId` / `variantId` / `repetition`）。普通 Run 没有这个键，读取时整个键不出现；
 它只记录出身，不参与任何流程判断，也不会因为写不进清单而让一次成功的 Run 变成失败。
+出身面板从 v1.7.1 起把这行摆出来（`Experiment experiment-id · variant x · repetition n`）。
 
 ## 受控实验（Experiment Framework，v1.7.0）
 
@@ -383,14 +384,16 @@ ExperimentDefinition（base + variants[] + repetitions）
 
 结果（`ExperimentResult`）只有计数与均值两类数字：`runCount` / `successCount` /
 `failureCount` 与九个均值（整体分、商业分、四个质量维度、四个商业维度）。缺分数的样本
-不参与均值，界面显示 `—`。**没有排序、没有赢家、没有显著性检验、没有自动调参。**
+不参与均值，界面显示 `—`。`results.json` 的 `runs` 数组还逐条记下每个样本自己的
+`overallScore` / `commercialScore`（读自它自己的产物，v1.7.1 补上），所以样本行也有数字可看。
+**没有排序、没有赢家、没有显著性检验、没有自动调参。**
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | POST | `/api/experiments` | `{schemaVersion:"1", name, experimentId, base, variants, repetitions}` → 201，只建不跑 |
 | GET | `/api/experiments` | 列表：每个实验一行（变体数 × 次数、状态、成败计数） |
 | GET | `/api/experiments/<experiment_id>` | `{definition, runs, result}`；没跑过时 `runs` 与 `result` 是 `null` |
-| POST | `/api/experiments/<experiment_id>/run` | 跑完整个实验，回传 `ExperimentResult` |
+| POST | `/api/experiments/<experiment_id>/run` | 跑完整个实验，回传 `ExperimentResult`；已在运行时 409 |
 
 界面：`/experiments`（列表 + 创建）、`/experiments/<experiment_id>`（变体卡片、结果表、
 样本行，每条样本可点进既有的 Run 详情）。完整契约见 [docs/experiments.md](docs/experiments.md)。
@@ -691,7 +694,7 @@ HTTP 状态码仍然是 200（这是一次成功的业务结果，不是错误�
 | `VALIDATION_FAILED_INTERNAL` | 500 | Validator 自身崩溃（不是「校验不通过」） |
 | `EXPERIMENT_INVALID` | 400 | v1.7.0 新增：实验定义不合法（含凭据 / 地址 / 原始提示词形状的键），或服务端没配 `LLM_API_KEY` 却请求跑实验 |
 | `EXPERIMENT_NOT_FOUND` | 404 | v1.7.0 新增：`experiment_id` 不存在 |
-| `EXPERIMENT_CONFLICT` | 409 | v1.7.0 新增：同名实验已存在，或这份实验已经跑过（定义与结果都不可变） |
+| `EXPERIMENT_CONFLICT` | 409 | v1.7.0 新增：同名实验已存在、这份实验已经跑过（定义与结果都不可变），或它正在运行中 |
 | `ARTIFACT_WRITE_FAILED` | 500 | 产物写入失败（磁盘 / 权限 / 目录被占用） |
 | `INTERNAL_ERROR` | 500 | 未预期异常；message 固定为「服务器内部错误」 |
 
@@ -773,6 +776,8 @@ mapped / NAT64 地址按内嵌的那个地址判
   `model` / `temperature` / `retry.maxAttempts` / `retry.minReviewScore` 四个
 - **没有自动调参与自动搜索**：实验只执行你写下来的条件，不尝试新组合、不根据结果反推更好的
   参数、不优化 Prompt；同一份定义重跑会被 409 挡住（定义与结果都不可变）
+- **实验没有断点续跑**：跑到一半被杀，磁盘上留着前几格的进度（`GET` 看得见），但再次开跑是
+  从第一格重新开始，已经花过钱的样本会再跑一遍；跑的时候不要中途杀进程
 - **没有高级可观测性**：只做工程日志（等级 + `run_id` / `attempt` / `repair` 上下文 + 脱敏），
   没有 Metrics / Trace / Prometheus / OpenTelemetry / Dashboard
 - **没有失败归因与因果图**：修订只按类别改一次，不回答「为什么会失败」、

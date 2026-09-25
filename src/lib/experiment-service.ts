@@ -24,6 +24,7 @@ import {
   ExperimentNotFoundError,
   ExperimentStateError,
   ExperimentValidationError,
+  isExperimentId,
   validateExperimentDefinition,
   type ExperimentDefinition,
   type ExperimentResult,
@@ -33,6 +34,23 @@ import {
 export { ExperimentNotFoundError, ExperimentStateError, ExperimentValidationError };
 
 export type ExperimentDeps = ExperimentRunnerDeps;
+
+/**
+ * 正在跑的实验 id（进程内）。
+ *
+ * v1.7.0 只有一道「results.json 存在就 409」，两个请求同时进来时两边的预检都通过，
+ * 于是同一个实验被跑两遍——两倍付费请求，两份 runs.json 互相覆盖。
+ * 这里加一把进程内的锁：同一时间一个实验只允许一条执行链。
+ * 覆盖范围是本进程：多进程部署（多个 worker）要的是共享存储上的锁，这一版没有。
+ */
+const runningExperiments = new Set<string>();
+
+/** 读 / 跑一条实验前的 id 判定：不合法就是「不存在」，404，不进路径解析。 */
+function assertKnownId(experimentId: string): void {
+  if (!isExperimentId(experimentId)) {
+    throw new ExperimentNotFoundError(`实验 ${experimentId} 不存在`);
+  }
+}
 
 /** 默认依赖：runs/ 与 experiments/ 都由 RUNS_DIR 推导。 */
 function storeOf(deps: ExperimentDeps): ExperimentStore {
@@ -138,6 +156,7 @@ export interface ExperimentDetail {
 }
 
 export async function getExperiment(experimentId: string, deps: ExperimentDeps = {}): Promise<ExperimentDetail> {
+  assertKnownId(experimentId);
   const store = storeOf(deps);
   const definition = store.readDefinition(experimentId);
   if (definition === null) {
@@ -150,18 +169,35 @@ export async function getExperiment(experimentId: string, deps: ExperimentDeps =
   };
 }
 
-/** POST /api/experiments/<id>/run：预检通过就跑完整个实验。 */
+/**
+ * POST /api/experiments/<id>/run：预检通过就跑完整个实验。
+ *
+ * 三道闸门按顺序过：id 不像目录名 → 404；正在跑 → 409；预检（不存在 / 跑过 /
+ * 没密钥）→ 各自的码。锁从「开始跑」一直持有到「results.json 写完或抛异常」，
+ * 所以第二个请求只会撞到 409，不会跟着一起烧钱。
+ */
 export async function runExperimentById(
   experimentId: string,
   deps: ExperimentDeps = {},
 ): Promise<ExperimentResult> {
-  preflight(experimentId, deps);
-  const store = storeOf(deps);
-  const definition = store.readDefinition(experimentId);
-  if (definition === null) {
-    throw new ExperimentNotFoundError(`实验 ${experimentId} 不存在`);
+  assertKnownId(experimentId);
+  if (runningExperiments.has(experimentId)) {
+    throw new ExperimentStateError(`实验 ${experimentId} 正在运行中：等这一次跑完再试，不要同时跑两份`);
   }
-  const result = await new ExperimentRunner({ ...deps, experimentStore: store }).run(definition);
+  preflight(experimentId, deps);
+  runningExperiments.add(experimentId);
+  let result: ExperimentResult;
+  try {
+    const store = storeOf(deps);
+    const definition = store.readDefinition(experimentId);
+    if (definition === null) {
+      throw new ExperimentNotFoundError(`实验 ${experimentId} 不存在`);
+    }
+    result = await new ExperimentRunner({ ...deps, experimentStore: store }).run(definition);
+  } finally {
+    // 无论成功、部分失败还是抛异常，锁都要还回去——否则这个实验永远不能再跑
+    runningExperiments.delete(experimentId);
+  }
   logger.info(`experiment ${experimentId} finished (${result.status})`);
   return result;
 }

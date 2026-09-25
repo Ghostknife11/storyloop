@@ -179,6 +179,22 @@ describe("ExperimentRunner — 完整跑完", () => {
     expect(new Set(result.runs.map((r) => r.runId)).size).toBe(2);
     expect(existsSync(join(dir, "experiments", "exp-manifest", "results.json"))).toBe(true);
   });
+
+  it("每条样本引用带上自己的两个分数（v1.7.1：v1.7.0 漏了这两个字段）", async () => {
+    const dir = withTmpDir();
+    // 结构审阅四维 90 / 90 / 90 / 90 → 整体 90；商业四维 82 → 82
+    const llm = scriptedLLM([...variantScript(STORY, 90), ...variantScript(STORY, 82)]);
+    const result = await new ExperimentRunner({ llm: llm as never }).run(seed(dir, "exp-scores", 1));
+
+    expect(result.runs.map((r) => r.overallScore)).toEqual([90, 82]);
+    expect(result.runs.map((r) => r.commercialScore)).toEqual([90, 82]);
+    // 分数与均值同源：都是从这条 Run 自己的产物里读的
+    expect(result.summary.variants.map((v) => v.meanOverallScore)).toEqual([90, 82]);
+
+    // 磁盘上也要有：界面是从 results.json 拿这两个数字的
+    const results = readJson(dir, "experiments/exp-scores/results.json");
+    expect((results.runs as Array<Record<string, unknown>>).map((r) => r.overallScore)).toEqual([90, 82]);
+  });
 });
 
 describe("ExperimentRunner — 部分失败", () => {
@@ -210,6 +226,10 @@ describe("ExperimentRunner — 部分失败", () => {
     const results = readJson(dir, "experiments/exp-partial/results.json");
     expect(results.status).toBe("partial");
     expect((results.runs as unknown[]).length).toBe(2);
+    // 失败的样本：分数是 null 而不是 0，也没有被从引用里抹掉
+    const refs = results.runs as Array<Record<string, unknown>>;
+    expect(refs.map((r) => r.overallScore)).toEqual([90, null]);
+    expect(refs.map((r) => r.commercialScore)).toEqual([90, null]);
   });
 
   it("均值只对有分数的样本求：跑不出来的一条不补 0", async () => {

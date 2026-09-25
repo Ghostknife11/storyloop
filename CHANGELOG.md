@@ -13,6 +13,57 @@ All notable changes to Storyloop.
 
 ---
 
+## [1.7.1] —— 2026-09-26
+
+1.7.1 是对 1.7.0 的一次审查修订：把刚发布的实验框架读一遍，修掉三个真问题。
+没有新能力、没有新路由、没有新字段语义，两个已有字段终于被填上。
+
+### Fixed
+
+- **样本行不再永远是「—」**：`results.json` 的 `runs` 数组现在逐条带上这条样本自己的
+  `overallScore` 与 `commercialScore`（读自它自己的 `quality.json` / `commercial-review.json`，
+  读不到是 `null`）。1.7.0 的 `referencesOf` 漏了这两个字段，于是详情页每一行样本都显示
+  「整体 — · 商业 —」，分数明明就在各自的产物里。分数只读一次，引用与均值同源
+- **同一个实验不会同时跑两遍**：`POST /api/experiments/<id>/run` 现在有一把进程内的锁，
+  同一时间一条执行链；第二个请求直接 409 `EXPERIMENT_CONFLICT`（「正在运行中」）。
+  1.7.0 只有「results.json 存在就 409」一道闸门，两个并发请求会双双通过预检，
+  把整个实验跑两遍——两倍付费请求，两份 `runs.json` 互相覆盖
+- **不像目录名的 id 一律 404**：`GET` / `POST run` 一个 `experiment_id` 之前先过
+  `isExperimentId`。1.7.0 里 `exp/../../x` 这种输入会走到存储层的 containment 检查，
+  抛出没有对应错误码的 `ExperimentWriteError`，最后变成 500；按契约「找不到」就该是 404。
+  存储层的 containment 兜底也补上了「根目录自身不算实验目录」——`resolve(root, ".")`
+  等于根，根目录不是实验目录
+
+### Changed
+
+- `run-manifest` 的出身面板多一行 `Experiment`：这条 Run 属于哪个实验、哪个变体、
+  第几次 repetition。1.7.0 把 `experiment` 块写进了清单却没有在界面上摆出来；
+  普通 Run 没有这个键，这一行也就不出现
+
+### Docs
+
+- `docs/api.md` 的实验入口一节按实现重写：响应体是 camelCase（不是 snake_case），
+  `GET /api/experiments` 只返回 `{ experiments }`（没有 `total`，列表项没有 `has_result`，
+  有 `status` / `successCount` / `failureCount`），详情的 `runs` 是
+  `{ experimentId, totalRuns, entries[] }` 而不是数组，`POST .../run` 回传的就是
+  `ExperimentResult` 本身。1.7.0 那一版把这三个形状都写错了
+- `docs/experiments.md` 写明两件此前没写的事：中断后重跑从第一格开始（不做断点续跑），
+  以及同一时间一个实验只允许一条执行链（进程内）
+- README：409 的第二种含义、样本行现在有分数、已知限制补一条「实验没有断点续跑」
+- 1.7.0 的条目本身也有一处笔误已就地订正：定义字段写成了 `hypothesis`，
+  实现里从来没有这个字段，只有 `description`（同一个可选的 500 字内说明）
+
+### Compatibility
+
+- 1.7.0 → 1.7.1 无破坏性变更：没有删字段、没有改字段名、没有改路由。`result.runs`
+  多出两个键（`overallScore` / `commercialScore`），旧实验的结果文件里没有它们，
+  读到的就是 `null`，界面照老样子显示 `—`
+- 1.7.0 已经跑完的实验不会因为升级而变成「能再跑一次」：`results.json` 还在，
+  409 照旧
+- **测试总量：1204 passed / 78 files**（1.7.0 为 1197 / 77）
+
+---
+
 ## [1.7.0] —— 2026-09-26
 
 v1.7.0 回答「如果只改模型、只改 prompt、只改 temperature，会发生什么？」。做法不是再做一套生成系统，
@@ -29,7 +80,7 @@ v1.7.0 回答「如果只改模型、只改 prompt、只改 temperature，会发
   下每个实验一个目录，含 `definition.json`、`runs.json`、`results.json`。实验只写自己那份
   目录，Run 一律照旧落在 `runs/` 下；`runs/` 与 `experiments/` 都不进 Git
 - **`ExperimentDefinition` 模型与校验**（`src/core/experiment-config.ts`）：`schemaVersion` 恒为
-  `"1"`，字段 camelCase。定义含 `name` / `hypothesis` / `base` / `variants`；`base` 是四个固定
+  `"1"`，字段 camelCase。定义含 `name` / `description` / `base` / `variants`；`base` 是四个固定
   条件——`story_config`、`beat_plan` 与 `beatPlanMode`、`model_config`、`generation_parameters`
   与 `retry_policy`
 - **四个可改变量，白名单合并**：`model`（`modelConfig.model`）、`generation.temperature`、

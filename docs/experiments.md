@@ -106,7 +106,21 @@ experiments/
 每跑完一格就重写一次 `runs.json`：进程中途被杀，磁盘上已经留下「前几格跑出了哪些
 runId、失败在哪一步」，`GET` 能如实显示 partial，而不是一片空白。
 
+但**中断后重跑是从第一格重新开始**，不会接着剩下的格子跑：`results.json` 不存在时
+预检照样放行，于是已经花过钱的样本会再跑一遍。这一版刻意不做断点续跑——它要为
+「哪一格算跑完、复用时分数怎么算」再引入一套状态语义，那不是顺手能加对的东西。
+要省钱就避免中途杀进程。
+
+同一时间一个实验只允许一条执行链（进程内）：第二个 `POST .../run` 直接拿到
+409 `EXPERIMENT_CONFLICT`，不会跟着一起烧钱。多进程部署（多个 worker）不在这把锁的
+覆盖范围内——那种部署要的是共享存储上的锁，这一版没有。
+
 整体状态（`statusOf`）：全部成功 → `completed`；有成有败 → `partial`；全部失败 → `failed`。
+
+`results.json` 的 `runs` 数组逐条记下每个跑出 runId 的样本：`variantId` /
+`repetition` / `runId` / `status`，外加这条样本自己的 `overallScore` 与
+`commercialScore`——两者读自这条 Run 自己的 `quality.json` / `commercial-review.json`，
+读不到就是 `null`。v1.7.0 漏了这两个字段，界面上每一行样本都显示「—」。
 
 ## 聚合口径
 
@@ -138,8 +152,8 @@ runId、失败在哪一步」，`GET` 能如实显示 partial，而不是一片�
 | 情形 | code | HTTP |
 |---|---|---|
 | 定义结构不合法（含凭据形状的键） | `EXPERIMENT_INVALID` | 400 |
-| 实验不存在 | `EXPERIMENT_NOT_FOUND` | 404 |
-| 已存在同名实验 / 已经跑过 | `EXPERIMENT_CONFLICT` | 409 |
+| 实验不存在——也包括 id 根本不是合法目录名（`exp/../../x` 这类） | `EXPERIMENT_NOT_FOUND` | 404 |
+| 已存在同名实验 / 已经跑过 / 正在运行中 | `EXPERIMENT_CONFLICT` | 409 |
 | 服务端没配 `LLM_API_KEY` 且没有注入客户端 | `EXPERIMENT_INVALID` | 400 |
 
 单条样本失败用它在 Pipeline 里那个错误码（`LLM_REQUEST_FAILED` / `GENERATION_FAILED` …）

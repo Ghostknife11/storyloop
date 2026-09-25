@@ -27,7 +27,7 @@ import {
   validateRunManifest,
   type RunManifest,
 } from "@/types/run-manifest";
-import { manifestPanelState, shortDigest, temperatureRowsOf } from "@/lib/manifest-view";
+import { experimentProvenanceText, manifestPanelState, shortDigest, temperatureRowsOf } from "@/lib/manifest-view";
 import {
   SAMPLE_BEAT_PLAN,
   SAMPLE_BEAT_VALIDATION,
@@ -506,6 +506,46 @@ describe("v1.6.0 出身清单 — 旧 Run 与界面兜底", () => {
     expect(shortDigest(manifest.prompts[0].digest)).toBe(manifest.prompts[0].digest?.slice(0, 12));
     expect(shortDigest(undefined)).toBeNull();
     expect(temperatureRowsOf(manifest).length).toBe(6);
+  });
+
+  it("视图层：实验样本的出身一行文字，普通 Run 没有这一行（v1.7.1 补的展示）", () => {
+    const skeleton = {
+      schemaVersion: RUN_MANIFEST_SCHEMA_VERSION,
+      runId: "20260926_101500_expsmp",
+      project: { version: "1.7.1" },
+      models: {},
+      prompts: [],
+      parameters: {
+        generation: { temperature: 0.8 },
+        planning: { temperature: 0.7 },
+        review: { temperature: 0.3 },
+        commercialReview: { temperature: 0.3 },
+        beatValidation: { temperature: 0.2 },
+        repair: { temperature: 0.5 },
+        retry: {
+          maxAttempts: 3,
+          minReviewScore: 70,
+          retryOnValidationFailure: true,
+          enableRepair: true,
+          maxRepairsPerAttempt: 2,
+        },
+      },
+      storyConfigRef: "config.json",
+      attempts: [],
+      repairs: [],
+      artifacts: [],
+      startedAt: "2026-09-26T10:15:00.000Z",
+      completedAt: "2026-09-26T10:20:00.000Z",
+    };
+
+    // v1.6.0 的清单没有 experiment 块 → 不摆这一行
+    expect(experimentProvenanceText(validateRunManifest(skeleton))).toBeNull();
+    // v1.7.0 起实验样本带这个块 → 一行「它属于谁」，不带任何排名语义
+    const sample = validateRunManifest({
+      ...skeleton,
+      experiment: { experimentId: "exp-ab-001", variantId: "model-b", repetition: 2 },
+    });
+    expect(experimentProvenanceText(sample)).toBe("experiment exp-ab-001 · variant model-b · repetition 2");
   });
 
   it("sha256Hex 与 node 的 crypto 逐字节一致", () => {

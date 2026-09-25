@@ -32,7 +32,7 @@ import {
   type ExperimentRunReference,
   type ExperimentStatus,
 } from "@/types/experiment";
-import { experimentCountsOf, summarizeExperiment } from "@/lib/experiment-summary";
+import { experimentCountsOf, runScoresOf, summarizeExperiment, type ExperimentRunScores } from "@/lib/experiment-summary";
 
 /**
  * 实验执行依赖。
@@ -106,10 +106,13 @@ export class ExperimentRunner {
     }
 
     const completedAt = new Date().toISOString();
+    // 分数只读一次：引用（给界面每一行）与汇总（给均值）必须看到同一批数字，
+    // 分两次读就给了它们互相矛盾的机会
+    const scoresByRun = scoresByRunId(this.artifactStore, index.entries);
     const result: ExperimentResult = {
       experimentId: checked.experimentId,
       status: statusOf(index),
-      runs: referencesOf(index),
+      runs: referencesOf(index, scoresByRun),
       summary: {
         ...experimentCountsOf(index.entries),
         variants: summarizeExperiment(checked, index.entries, this.artifactStore),
@@ -182,19 +185,41 @@ function statusOf(index: ExperimentRunIndex): ExperimentStatus {
   return "partial";
 }
 
-/** results.json 里的样本引用：顺序与 runs.json 一致（不按成绩重排）。 */
-function referencesOf(index: ExperimentRunIndex): ExperimentRunReference[] {
+/**
+ * results.json 里的样本引用：顺序与 runs.json 一致（不按成绩重排）。
+ *
+ * v1.7.0 起每条引用带上这条样本自己的两个分数（没有就是 null）：
+ * v1.7.0 漏了这一步，界面上每一行样本都显示「整体 — · 商业 —」，
+ * 明明分数就写在那条 Run 的 quality.json / commercial-review.json 里。
+ */
+function referencesOf(
+  index: ExperimentRunIndex,
+  scores: Map<string, ExperimentRunScores>,
+): ExperimentRunReference[] {
   const refs: ExperimentRunReference[] = [];
   for (const entry of index.entries) {
     if (entry.runId === null) continue;
+    const own = scores.get(entry.runId);
     refs.push({
       variantId: entry.variantId,
       repetition: entry.repetition,
       runId: entry.runId,
       status: entry.status === "failed" ? "failed" : "completed",
+      overallScore: own?.overallScore ?? null,
+      commercialScore: own?.commercialScore ?? null,
     });
   }
   return refs;
+}
+
+/** 每个跑出 runId 的格子读一次自己的产物；读不到就整格不进表（分数按 null 算）。 */
+function scoresByRunId(store: ArtifactStore, entries: ExperimentRunIndexEntry[]): Map<string, ExperimentRunScores> {
+  const out = new Map<string, ExperimentRunScores>();
+  for (const entry of entries) {
+    if (entry.runId === null || out.has(entry.runId)) continue;
+    out.set(entry.runId, runScoresOf(entry.runId, store));
+  }
+  return out;
 }
 
 /** 便捷入口：建好存储就开跑（预检在 service 层做，见 src/lib/experiment-service.ts）。 */
