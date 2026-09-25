@@ -18,6 +18,7 @@ import { ValidationPanel } from "@/components/validation-panel";
 import { BeatValidationPanel } from "@/components/beat-validation-panel";
 import { AttemptPanel } from "@/components/attempt-panel";
 import { QualityPanel } from "@/components/quality-panel";
+import { CommercialPanel } from "@/components/commercial-panel";
 import {
   ManualRepair,
   RepairPanel,
@@ -26,6 +27,7 @@ import {
 } from "@/components/repair-panel";
 import {
   fetchRunAttempt, generateFromPlan, planStory, previewPrompt, reviewStory, validateStory,
+  reviewStoryCommercial,
   validateStoryBeats,
   RunApiError, type RepairDetailApi, type RunApiResult,
 } from "@/lib/api";
@@ -41,6 +43,7 @@ import type { ReviewResult } from "@/types/review-result";
 import type { ValidationResult } from "@/types/validation-result";
 import type { QualityResult } from "@/types/quality";
 import type { BeatValidationResult } from "@/types/beat-validation";
+import type { CommercialReviewResult } from "@/types/commercial-review";
 
 type Phase = "idle" | "generating" | "success" | "error";
 type PlanPhase = "idle" | "planning" | "success" | "error";
@@ -195,6 +198,10 @@ export default function GeneratePage() {
   // §34：Review Again 只重新审阅当前正文，不重新生成 Story
   const [reReviewing, setReReviewing] = useState(false);
   const [reviewOverride, setReviewOverride] = useState<ReviewResult | null>(null);
+  // v1.5.0 TASK §31：Commercial Review Again 与 Review Again 完全并列——
+  // 两个按钮、两个接口、两份互不覆盖的结论，谁也不会触发对方的请求。
+  const [reCommercialReviewing, setReCommercialReviewing] = useState(false);
+  const [commercialReviewOverride, setCommercialReviewOverride] = useState<CommercialReviewResult | null>(null);
   const [revalidating, setRevalidating] = useState(false);
   const [validationOverride, setValidationOverride] = useState<ValidationResult | null>(null);
   // §36：默认展示 selected_attempt；点开其它 Attempt 才切过去
@@ -203,6 +210,8 @@ export default function GeneratePage() {
     story: string;
     validation: ValidationResult | null;
     review: ReviewResult | null;
+    /** v1.5.0 TASK §17：这一次尝试的商业可读性结论，与 review 各自独立。 */
+    commercial_review: CommercialReviewResult | null;
     quality: QualityResult | null;
   } | null>(null);
   // §36/§37：当前查看的 Attempt 的修订详情与修订前的正文（用于 Repair 面板与 Before / After）
@@ -221,6 +230,8 @@ export default function GeneratePage() {
   /** §35 同一原因：state 是异步的，双击时第二次回调看到的还是旧值，
    *  所以「正在请求」这件事必须用 ref 同步挡住，不能只靠 state。 */
   const reReviewingRef = useRef(false);
+  /** v1.5.0 同 §35：商业审阅也要防连点，且与 reReviewingRef 互不影响。 */
+  const reCommercialReviewingRef = useRef(false);
   const revalidatingRef = useRef(false);
   const beatValidatingRef = useRef(false);
   /** §36 快速切换 Attempt 会并发多个读回请求：用递增序号认领最后一次点击，
@@ -285,6 +296,8 @@ export default function GeneratePage() {
     setPhase("idle");
     setReReviewing(false);
     setReviewOverride(null);
+    setReCommercialReviewing(false);
+    setCommercialReviewOverride(null);
     setRevalidating(false);
     setValidationOverride(null);
     setViewAttempt(null);
@@ -425,6 +438,8 @@ export default function GeneratePage() {
     setRunFailed(false);
     setReReviewing(false);
     setReviewOverride(null);
+    setReCommercialReviewing(false);
+    setCommercialReviewOverride(null);
     setRevalidating(false);
     setValidationOverride(null);
     setBeatValidating(false);
@@ -517,6 +532,35 @@ export default function GeneratePage() {
     } finally {
       reReviewingRef.current = false;
       setReReviewing(false);
+    }
+  }
+
+  // v1.5.0 TASK §27 Commercial Review Again：只对当前正文重跑四个商业维度。
+  // 走独立的 /api/review/commercial，不重新生成 Story，也不触碰结构审阅的 review.json。
+  async function handleCommercialReviewAgain() {
+    if (reCommercialReviewingRef.current || !result) return;
+    reCommercialReviewingRef.current = true;
+    setReCommercialReviewing(true);
+    try {
+      const review = await reviewStoryCommercial(
+        formToConfig(form),
+        baseStory,
+        {
+          model: settings.model || undefined,
+          baseUrl: settings.baseUrl || undefined,
+          temperature: settings.temperature,
+        },
+        // §30：与 Review Again 同一条边界——只有当前展示的正是 Run 落盘的那一版
+        // 才覆盖 run 目录里的 commercial-review.json。
+        shownStoryIsRunStory ? result.run_id : undefined,
+      );
+      setCommercialReviewOverride(review);
+      toast.success(`Commercial Review 完成：${review.score} / 100`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "商业审阅失败");
+    } finally {
+      reCommercialReviewingRef.current = false;
+      setReCommercialReviewing(false);
     }
   }
 
@@ -641,6 +685,7 @@ export default function GeneratePage() {
         story: detail.story,
         validation: detail.validation,
         review: detail.review,
+        commercial_review: detail.commercial_review,
         quality: detail.quality,
       });
       setAttemptInfo({
@@ -671,6 +716,14 @@ export default function GeneratePage() {
   const shownReviewStatus = viewAttempt
     ? (viewAttempt.review ? "completed" : "not_started")
     : reviewOverride ? "completed" : result?.review_status ?? "not_started";
+  /** v1.5.0 TASK §27：商业结论跟着当前看的 Attempt 切，与 shownReview 同一套规则，
+   *  但两者互不影响——重审阅结构不会顶掉商业分，反过来也一样。 */
+  const shownCommercialReview = viewAttempt
+    ? viewAttempt.commercial_review
+    : commercialReviewOverride ?? result?.commercial_review ?? null;
+  const shownCommercialReviewStatus = viewAttempt
+    ? (viewAttempt.commercial_review ? "completed" : "not_started")
+    : commercialReviewOverride ? "completed" : result?.commercial_review_status ?? "not_started";
   /** v1.2.0 §26：同样跟着当前看的 Attempt 切；手动审阅/校验不影响质量快照（§36 只改正文与结论）。 */
   const shownQuality = viewAttempt ? viewAttempt.quality : result?.quality ?? null;
   /** §36：当前看的是哪一次 Attempt。 */
@@ -1156,6 +1209,16 @@ export default function GeneratePage() {
                       reReviewing={reReviewing}
                       disabled={!baseStory}
                       onReviewAgain={handleReviewAgain}
+                    />
+                    {/* v1.5.0 TASK §27 商业可读性面板：与 Review 完全并列的第二份结论。
+                        §29 只描述可读性，不做市场化预言；分数只来自四维均分。 */}
+                    <CommercialPanel
+                      commercialReview={shownCommercialReview}
+                      commercialReviewStatus={shownCommercialReviewStatus}
+                      commercialReviewError={result.commercial_review_error}
+                      reReviewing={reCommercialReviewing}
+                      disabled={!baseStory}
+                      onReviewAgain={handleCommercialReviewAgain}
                     />
                     {/* §42 产物清单：只展示文件名，不展示服务端绝对路径（§67） */}
                     <div className="mb-4 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
