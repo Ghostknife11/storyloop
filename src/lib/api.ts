@@ -6,6 +6,7 @@ import type { QualityResult } from "@/types/quality";
 import type { BeatValidationResult } from "@/types/beat-validation";
 import type { CommercialReviewResult } from "@/types/commercial-review";
 import type { RunManifest } from "@/types/run-manifest";
+import type { RunTelemetry } from "@/types/telemetry";
 
 /** §34/§38 单个 Attempt 摘要：只带结论，不带完整正文。 */
 export interface AttemptSummaryApi {
@@ -255,6 +256,9 @@ export interface RunDetailApi {
   quality: QualityResult | null;
   /** v1.6.0 这次 Run 的出身清单；v1.6.0 之前生成的 Run 没有这个文件，为 null。 */
   manifest: RunManifest | null;
+  /** v1.8.0 §25 这次 Run 的遥测。旧 Run 没有 telemetry.json 时是 null，
+   *  Observability 面板据此显示「Telemetry unavailable for this run」。 */
+  telemetry: RunTelemetry | null;
   attempts: AttemptSummaryApi[];
 }
 
@@ -314,6 +318,20 @@ export async function fetchRunAttempt(runId: string, attemptNumber: number): Pro
     undefined,
     "读取 Attempt 失败",
   )) as AttemptDetailApi;
+}
+
+/**
+ * §25 GET /api/runs/<run_id>/telemetry：读回这次 Run 的遥测。
+ * §43 旧 Run 没有 telemetry.json 时接口仍返回 200，body.telemetry 是 null。
+ * 详情接口（fetchRun）已经带了同一份数据，单独取只用于只想看遥测的场合。
+ */
+export async function fetchRunTelemetry(runId: string): Promise<RunTelemetry | null> {
+  const data = (await requestJson(
+    `/api/runs/${encodeURIComponent(runId)}/telemetry`,
+    undefined,
+    "读取 Telemetry 失败",
+  )) as { telemetry?: RunTelemetry | null };
+  return data.telemetry ?? null;
 }
 
 /** §30 Prompt Preview（config 必填，beat_plan 可选）。 */

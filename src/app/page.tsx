@@ -20,6 +20,8 @@ import { AttemptPanel } from "@/components/attempt-panel";
 import { QualityPanel } from "@/components/quality-panel";
 import { CommercialPanel } from "@/components/commercial-panel";
 import { ManifestPanel } from "@/components/manifest-panel";
+import { TelemetryPanel } from "@/components/telemetry-panel";
+import type { RunTelemetry } from "@/types/telemetry";
 import {
   ManualRepair,
   RepairPanel,
@@ -27,7 +29,7 @@ import {
   repairStageLabels,
 } from "@/components/repair-panel";
 import {
-  fetchRunAttempt, generateFromPlan, planStory, previewPrompt, reviewStory, validateStory,
+  fetchRunAttempt, fetchRunTelemetry, generateFromPlan, planStory, previewPrompt, reviewStory, validateStory,
   reviewStoryCommercial,
   validateStoryBeats,
   RunApiError, type RepairDetailApi, type RunApiResult,
@@ -186,6 +188,10 @@ export default function GeneratePage() {
   const [beatValidating, setBeatValidating] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [result, setResult] = useState<RunApiResult | null>(null);
+  /** v1.8.0 §26：这次 Run 的执行遥测。读完后仍是 null 就是旧 Run（没有 telemetry.json），
+   *  此时不显示面板，改为一句「Telemetry unavailable for this run」（§29）。 */
+  const [telemetry, setTelemetry] = useState<RunTelemetry | null>(null);
+  const [telemetryStage, setTelemetryStage] = useState<"idle" | "loading" | "loaded">("idle");
   const [runTitle, setRunTitle] = useState("");
   const [runStage, setRunStage] = useState<RunStage>("idle");
   const [runFailed, setRunFailed] = useState(false);
@@ -295,6 +301,8 @@ export default function GeneratePage() {
     setFailedRunId(null);
     setPreview(null);
     setPhase("idle");
+    setTelemetry(null);
+    setTelemetryStage("idle");
     setReReviewing(false);
     setReviewOverride(null);
     setReCommercialReviewing(false);
@@ -477,6 +485,19 @@ export default function GeneratePage() {
       );
       // §36：发生过修订时补一次请求，拿修订详情与修订前的正文（没有修订就不额外请求）
       void loadAttemptInfo(data, data.selected_attempt);
+      // v1.8.0 §25：遥测单独读一次。POST 响应里没有它——响应契约保持不变（§45），
+      // 而遥测在 Run 结束时已经落盘，所以这一次请求一定能读到 1.8.0 起的 Run。
+      setTelemetryStage("loading");
+      void fetchRunTelemetry(data.run_id)
+        .then((t) => {
+          setTelemetry(t);
+          setTelemetryStage("loaded");
+        })
+        .catch(() => {
+          // 遥测读不到不影响正文与任何结论：只当这次没有可观测数据
+          setTelemetry(null);
+          setTelemetryStage("loaded");
+        });
     } catch (e) {
       clearStepperTimers();
       const msg = e instanceof Error ? e.message : "未知错误";
@@ -488,6 +509,21 @@ export default function GeneratePage() {
       setRunFailed(true);
       setPhase("error");
       toast.error(msg);
+      // v1.8.0 §15：失败的 Run 也落 telemetry.json，失败阶段同样要能看见。
+      // 没有 run_id（还没开始建产物就失败了）时无从读起，保持 idle。
+      if (e instanceof RunApiError && e.runId) {
+        const failedId = e.runId;
+        setTelemetryStage("loading");
+        void fetchRunTelemetry(failedId)
+          .then((t) => {
+            setTelemetry(t);
+            setTelemetryStage("loaded");
+          })
+          .catch(() => {
+            setTelemetry(null);
+            setTelemetryStage("loaded");
+          });
+      }
     } finally {
       busyRef.current = false;
     }
@@ -1135,6 +1171,11 @@ export default function GeneratePage() {
                 )}
                 <div className="text-muted-foreground mt-1 text-xs break-all">{errorMsg}</div>
                 <div className="text-[11px] text-muted-foreground mt-1">BeatPlan 已保留，可直接再次点击 Generate Story。</div>
+                {/* v1.8.0 §26：失败 Run 的遥测（失败阶段 + 已经跑过的阶段与调用）。
+                    读不到时也不占位——没有遥测就不展示可观测面板（§29）。 */}
+                <div className="mt-3">
+                  <TelemetryPanel telemetry={telemetry} />
+                </div>
               </div>
             )}
 
@@ -1236,6 +1277,16 @@ export default function GeneratePage() {
                     {/* v1.6.0 出身面板：这次 Run 的版本 / 模型 / 提示词 / 参数 / Attempt 事实。
                         §37 旧 Run 没有 run-manifest.json 时整个面板不出现。 */}
                     <ManifestPanel manifest={result.manifest} />
+                    {/* v1.8.0 §26 Observability 面板：总量 / 阶段时间线 / LLM 调用 / 失败阶段。
+                        §29 读完了却一份遥测都没有（1.8.0 之前生成的 Run）时给一句说明，
+                        不补零、不猜数。 */}
+                    {telemetryStage === "loaded" && telemetry === null ? (
+                      <div className="mb-4 rounded-2xl border border-border bg-muted/40 p-3 text-[11px] text-muted-foreground">
+                        Telemetry unavailable for this run —— 这次 Run 没有 telemetry.json（1.8.0 之前的产物）。
+                      </div>
+                    ) : (
+                      <TelemetryPanel telemetry={telemetry} />
+                    )}
                     {/* §37 Before / After Story：只有这次 Attempt 真的修过才给两个 Tab */}
                     {hasBeforeStory && (
                       <div className="mb-3 flex flex-wrap items-center gap-1.5 text-[11px] font-mono">
