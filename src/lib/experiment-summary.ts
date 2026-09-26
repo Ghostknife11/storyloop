@@ -19,10 +19,12 @@ import type { ExperimentDefinition, ExperimentVariantSummary } from "@/types/exp
 import type {
   ExperimentEfficiency,
   ExperimentEfficiencyMetric,
+  ExperimentFailureDistribution,
 } from "@/types/experiment";
 import type { QualityDimensionKey } from "@/types/quality-dimensions";
 import type { CommercialDimensionKey } from "@/types/commercial-review";
 import type { RunTelemetry } from "@/types/telemetry";
+import type { FailureCategory } from "@/types/failure-analysis";
 
 /** 一条样本读回来的分数（缺的项是 null，不补 0）。
  *  维度只搬分数：短评是给人读的一句话，不进均值。 */
@@ -159,6 +161,28 @@ function efficiencyOf(samples: { efficiency: ExperimentRunEfficiency }[]): Exper
 }
 
 /**
+ * v1.9.0 §52 一组样本的失败类别分布。
+ *
+ * 数据源是每个样本自己的 failure-analysis.json（§35 读不到就是没分析过：不进任何计数）。
+ * 只数主要类别——一条样本可能有几个次要类别，逐条去重会让总数超过样本数（§52）。
+ */
+function failureDistributionOf(runIds: string[], store: ArtifactStore): ExperimentFailureDistribution {
+  const counts: Partial<Record<FailureCategory, number>> = {};
+  let analyzedCount = 0;
+  let classifiedCount = 0;
+  for (const runId of runIds) {
+    const analysis = store.readFailureAnalysis(runId);
+    if (analysis === null) continue;
+    analyzedCount += 1;
+    const category = analysis.primaryCategory;
+    if (category === null) continue;
+    classifiedCount += 1;
+    counts[category] = (counts[category] ?? 0) + 1;
+  }
+  return { analyzedCount, classifiedCount, counts };
+}
+
+/**
  * 按 definition.variants 的顺序分组聚合。
  *
  * 顺序就是定义里的声明顺序，不按分数重排——重排这一步就是排名，
@@ -195,6 +219,11 @@ export function summarizeExperiment(
       meanPayoff: meanOfField(samples, (s) => s.commercial?.payoff),
       // v1.8.0 §23：效率指标同样按 Variant 分组，同样只对真有的样本求
       efficiency: efficiencyOf(samples),
+      // v1.9.0 §52：失败类别分布同样按 Variant 分组，同样只数真有分析的样本
+      failures: failureDistributionOf(
+        cells.map((cell) => cell.runId as string),
+        store,
+      ),
     };
   });
 }

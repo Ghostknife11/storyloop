@@ -248,10 +248,11 @@ describe("ExperimentRunner — 部分失败", () => {
     expect(b.meanCommercialScore).toBeNull();
     expect(b.successCount).toBe(0);
     expect(b.failureCount).toBe(1);
-    // 没有赢家字段：键集合里只有计数、均值、效率与 id
+    // 没有赢家字段：键集合里只有计数、均值、效率、失败类别分布与 id
     expect(Object.keys(a).sort()).toEqual([
       "efficiency",
       "failureCount",
+      "failures",
       "meanCausality",
       "meanCharacter",
       "meanCoherence",

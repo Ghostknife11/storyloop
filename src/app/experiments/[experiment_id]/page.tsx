@@ -15,6 +15,7 @@ import {
 } from "@/lib/api";import {
   efficiencyCellText,
   experimentStatusLabel,
+  failureDistributionText,
   meanText,
   msText,
   resultRowsOf,
@@ -63,6 +64,11 @@ function hasAnyEfficiency(rows: ExperimentResultRow[]): boolean {
   return rows.some((row) =>
     (Object.values(row.efficiency) as { sampleCount: number }[]).some((m) => m.sampleCount > 0),
   );
+}
+
+/** v1.9.0 §52：一个变体一条样本都没有失败分析时（1.9.0 之前跑的实验），这张表不占地方。 */
+function hasAnyFailureDistribution(rows: ExperimentResultRow[]): boolean {
+  return rows.some((row) => row.failures !== null);
 }
 
 export default function ExperimentDetailPage() {
@@ -240,6 +246,43 @@ export default function ExperimentDetailPage() {
                           {efficiencyCellText(row.efficiency[col.key], row.runCount, col.format)}
                         </td>
                       ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {rows !== null && hasAnyFailureDistribution(rows) && (
+          <section className="space-y-2">
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 className="text-xs font-medium text-muted-foreground">失败类别分布</h2>
+              <p className="text-[10px] text-muted-foreground">
+                按主要失败类别数样本；没有 failure-analysis.json 的样本不进分母（不当作「没有失败」）
+              </p>
+            </div>
+            <div className="rounded-2xl border border-border bg-muted/40 backdrop-blur overflow-x-auto">
+              <table className="w-full text-[11px]">
+                <thead>
+                  <tr className="text-muted-foreground">
+                    <th className="text-left font-medium px-3 py-2">变体</th>
+                    <th className="text-right font-medium px-2 py-2 whitespace-nowrap">有分析</th>
+                    <th className="text-right font-medium px-2 py-2 whitespace-nowrap">分出类别</th>
+                    <th className="text-left font-medium px-3 py-2 whitespace-nowrap">分布</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => (
+                    <tr key={row.variantId} className="border-t border-border">
+                      <td className="px-3 py-2 font-medium">{row.variantName}</td>
+                      <td className="px-2 py-2 text-right font-mono">
+                        {row.failures ? `${row.failures.analyzedCount}/${row.runCount}` : "—"}
+                      </td>
+                      <td className="px-2 py-2 text-right font-mono">
+                        {row.failures ? row.failures.classifiedCount : "—"}
+                      </td>
+                      <td className="px-3 py-2 font-mono">{failureDistributionText(row.failures)}</td>
                     </tr>
                   ))}
                 </tbody>

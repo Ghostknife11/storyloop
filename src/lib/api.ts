@@ -7,7 +7,7 @@ import type { BeatValidationResult } from "@/types/beat-validation";
 import type { CommercialReviewResult } from "@/types/commercial-review";
 import type { RunManifest } from "@/types/run-manifest";
 import type { RunTelemetry } from "@/types/telemetry";
-import type { FailureAnalysisResult } from "@/types/failure-analysis";
+import type { FailureAnalysisResult, FailureCategory } from "@/types/failure-analysis";
 
 /** §34/§38 单个 Attempt 摘要：只带结论，不带完整正文。 */
 export interface AttemptSummaryApi {
@@ -539,6 +539,15 @@ export interface ExperimentEfficiencyMetricApi {
   sampleCount: number;
 }
 
+/** v1.9.0 §52 一个 Variant 的失败类别分布：类别 → 样本数，没出现过的类别整个键不出现。 */
+export interface ExperimentFailureDistributionApi {
+  /** 这一组里真有失败分析的样本数（1.9.0 之前的样本没有，不计入）。 */
+  analyzedCount: number;
+  /** 分出了主要失败类别的样本数。 */
+  classifiedCount: number;
+  counts: Partial<Record<FailureCategory, number>>;
+}
+
 /** v1.8.0 §23 一个 Variant 的效率聚合（每个样本自己的 telemetry.json）。 */
 export interface ExperimentEfficiencyApi {
   durationMs: ExperimentEfficiencyMetricApi;
@@ -569,6 +578,9 @@ export interface ExperimentVariantSummaryApi {
   /** v1.8.0 §23：效率指标。同样只对真有的样本求，一个都没有时各项是 null。
    *  v1.8.0 之前跑出来的实验没有这一块（可缺），界面按「没有数据」处理，不当 0。 */
   efficiency?: ExperimentEfficiencyApi;
+  /** v1.9.0 §52：失败类别分布。v1.9.0 之前跑出来的实验没有这一块（可缺），
+   *  界面按「没有失败分类数据」处理，不当 0。 */
+  failures?: ExperimentFailureDistributionApi;
 }
 
 export interface ExperimentResultApi {

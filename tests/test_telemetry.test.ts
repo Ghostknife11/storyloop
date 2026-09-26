@@ -831,10 +831,11 @@ describe("§44 实验样本：每个子 Run 都有自己的 telemetry.json", () 
     expect(efficiency.retries).toEqual({ mean: 1, sampleCount: 1 });
     // 一项 usage 都没有的样本：token 均值是 null、样本数 0
     expect(efficiency.totalTokens).toEqual({ mean: null, sampleCount: 0 });
-    // 没有赢家字段：分组行里只有计数、均值与效率
+    // 没有赢家字段：分组行里只有计数、均值、效率、失败类别分布与 id
     expect(Object.keys(rows[0]).sort()).toEqual([
       "efficiency",
       "failureCount",
+      "failures",
       "meanCausality",
       "meanCharacter",
       "meanCoherence",

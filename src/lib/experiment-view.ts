@@ -16,8 +16,10 @@ import type { ExperimentDetailApi, ExperimentDefinitionApi, ExperimentListItemAp
 import type {
   ExperimentEfficiencyApi,
   ExperimentEfficiencyMetricApi,
+  ExperimentFailureDistributionApi,
   ExperimentVariantSummaryApi,
 } from "@/lib/api";
+import { CATEGORY_LABELS, type FailureCategory } from "@/types/failure-analysis";
 
 /** 实验状态 → 一行文案。语气中性：partial 不是失败，pending 不是错误。 */
 export function experimentStatusLabel(status: string): { label: string; tone: "neutral" | "good" | "warn" | "bad" } {
@@ -80,6 +82,16 @@ export interface ExperimentResultRow {
   meanPayoff: number | null;
   /** v1.8.0 §23：同一行的效率数字。没有遥测的样本不进分母，所以这里可能是 null。 */
   efficiency: ExperimentEfficiencyApi;
+  /** v1.9.0 §52：同一行的失败类别分布；1.9.0 之前的实验没有这块，是 null。 */
+  failures: ExperimentFailureDistributionRow | null;
+}
+
+/** v1.9.0 §52 一行失败类别分布：类别 → 条数，外加两个分母说明。 */
+export interface ExperimentFailureDistributionRow {
+  analyzedCount: number;
+  classifiedCount: number;
+  /** 按 FailureCategory 的优先级顺序排好，没出现过的类别不进来。 */
+  items: { category: FailureCategory; label: string; count: number }[];
 }
 
 /** 还没跑出结果时返回 null（界面整段隐藏，不显示空表）。 */
@@ -109,8 +121,40 @@ export function resultRowsOf(detail: ExperimentDetailApi | null): ExperimentResu
       meanEngagement: summary?.meanEngagement ?? null,
       meanPayoff: summary?.meanPayoff ?? null,
       efficiency: efficiencyOf(summary),
+      failures: failureDistributionOf(summary),
     };
   });
+}
+
+/**
+ * v1.9.0 §52 摘要 → 行。没有这一块（1.9.0 之前跑出来的实验）时返回 null，
+ * 界面据此整段隐藏，不当 0、也不显示「全部没有失败」。
+ * 顺序按 FailureCategory 的固定优先级，不按条数重排——重排就是排名。
+ */
+function failureDistributionOf(
+  summary: ExperimentVariantSummaryApi | undefined,
+): ExperimentFailureDistributionRow | null {
+  const failures: ExperimentFailureDistributionApi | undefined = summary?.failures;
+  if (failures === undefined) return null;
+  const counts = failures.counts ?? {};
+  const items = (Object.keys(CATEGORY_LABELS) as FailureCategory[])
+    .filter((category) => typeof counts[category] === "number")
+    .map((category) => ({
+      category,
+      label: CATEGORY_LABELS[category],
+      count: counts[category] ?? 0,
+    }));
+  return {
+    analyzedCount: typeof failures.analyzedCount === "number" ? failures.analyzedCount : 0,
+    classifiedCount: typeof failures.classifiedCount === "number" ? failures.classifiedCount : 0,
+    items,
+  };
+}
+
+/** §52 分布的一行文案：`正文生成问题 ×2 · 重试次数用尽 ×1`；一条都没有时是「—」。 */
+export function failureDistributionText(row: ExperimentFailureDistributionRow | null): string {
+  if (row === null || row.items.length === 0) return "—";
+  return row.items.map((item) => `${item.label} ×${item.count}`).join(" · ");
 }
 
 /** v1.7.1 之前跑出来的实验没有 efficiency 块：各项按「没有数据」处理，不是按 0。 */

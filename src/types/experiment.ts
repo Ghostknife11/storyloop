@@ -23,6 +23,7 @@ import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
 import { validateRetryPolicy, type RetryPolicy } from "@/core/retry-policy";
 import type { ExperimentProvenance } from "@/types/run-manifest";
+import type { FailureCategory } from "@/types/failure-analysis";
 
 export type { ExperimentProvenance };
 
@@ -143,6 +144,8 @@ export interface ExperimentVariantSummary {
   meanPayoff: number | null;
   /** v1.8.0 §23/§24：这一组的效率指标。同样只对真有数据的样本求。 */
   efficiency: ExperimentEfficiency;
+  /** v1.9.0 §52：这一组的失败类别分布（按主要类别数）。 */
+  failures: ExperimentFailureDistribution;
 }
 
 /**
@@ -155,6 +158,26 @@ export interface ExperimentVariantSummary {
 export interface ExperimentEfficiencyMetric {
   mean: number | null;
   sampleCount: number;
+}
+
+/**
+ * v1.9.0 §52 一个 Variant 的失败类别分布：这一组里分出了主要失败类别的样本各有多少。
+ *
+ * 三个口径必须先说清楚，否则数字会被读错：
+ *   1. 只数**主要**类别（failure-analysis.json 的 primaryCategory）。一条样本可能有
+ *      多个次要类别，逐条去重会让总数超过样本数。
+ *   2. `analyzedCount` 是这一组里真有 failure-analysis.json 的样本数。v1.9.0 之前
+ *      跑出来的样本没有这份文件，它们不进任何计数——「没分析过」不是「没有失败」。
+ *   3. 没有出现过的类别整个键不出现。写 0 与「这一类没被统计过」是两件事，
+ *      与 v1.8.0 效率指标的 sampleCount 同一套记法。
+ */
+export interface ExperimentFailureDistribution {
+  /** 这一组里有失败分析的样本数（1.9.0 之前的样本没有，不计入）。 */
+  analyzedCount: number;
+  /** 分出了主要失败类别的样本数。 */
+  classifiedCount: number;
+  /** 主要类别 → 样本数；没有出现过的类别整个键不出现。 */
+  counts: Partial<Record<FailureCategory, number>>;
 }
 
 /** v1.8.0 §23 效率指标：每个 Run 一份 telemetry.json，读它自己的数。 */
