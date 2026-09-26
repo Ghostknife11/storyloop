@@ -42,6 +42,7 @@ import {
 import { QualityAssembler } from "@/core/quality-assembler";
 import { qualityResultOf, type QualityResult } from "@/types/quality";
 import { TelemetryCollector } from "@/core/telemetry-collector";
+import type { RunTelemetry } from "@/types/telemetry";
 import type { QualityStatus } from "@/core/pipeline";
 import { projectVersion as readProjectVersion } from "@/lib/version";
 import type { BeatValidationResult } from "@/types/beat-validation";
@@ -691,6 +692,9 @@ export interface RunDetail {
   quality: QualityResult | null;
   /** v1.6.0 出身清单；v1.6.0 之前生成的 Run 没有 run-manifest.json，为 null。 */
   manifest: RunManifest | null;
+  /** v1.8.0 §25：这次 Run 的遥测（equally additive）。没有 telemetry.json 的旧 Run 是 null，
+   *  UI 据此显示「Telemetry unavailable for this run」，不补零、不猜数。 */
+  telemetry: RunTelemetry | null;
   attempts: AttemptSummary[];
 }
 
@@ -923,9 +927,42 @@ export async function getRun(
       // 都归一成 null——与 qualityResultOf / beatValidationResultOf 同一套容错约定，
       // 不让坏数据进响应，也不让读接口 500（compatibility §16）。
       manifest: store.readRunManifest(runId),
+      // v1.8.0 §25：旧 Run 没有 telemetry.json（或被手改坏）时是 null
+      telemetry: store.readRunTelemetry(runId),
       attempts,
     },
   };
+}
+
+export type RunTelemetryLookupResult =
+  | { status: 200; json: { telemetry: RunTelemetry | null } }
+  | { status: 400; json: RunError }
+  | { status: 404; json: RunError };
+
+/**
+ * §25 GET /api/runs/{run_id}/telemetry：把这次 Run 的遥测原样读回。
+ * §15/§43 旧 Run 没有 telemetry.json，此时**仍然 200**，但 body 是 `{"telemetry": null}`——
+ * 遥测缺失不是服务端错误，UI 据此显示「Telemetry unavailable for this run」。
+ */
+export async function getRunTelemetry(
+  runIdRaw: unknown,
+  store: ArtifactStore = new ArtifactStore(appSettings().runsDir),
+): Promise<RunTelemetryLookupResult> {
+  const runId = runIdOf(runIdRaw);
+  if (runId === null) {
+    return { status: 400, json: errorBody("CONFIG_INVALID", "run_id 非法：必须是单个目录名") };
+  }
+  let exists: boolean;
+  try {
+    exists = store.runExists(runId);
+  } catch {
+    return { status: 400, json: errorBody("CONFIG_INVALID", `run_id 非法：${runId}`) };
+  }
+  if (!exists) {
+    return { status: 404, json: errorBody("RUN_NOT_FOUND", `run_id 不存在：${runId}`) };
+  }
+  // readRunTelemetry 已经三层降级：文件缺失 / JSON 坏 / 形状不对都归一成 null。
+  return { status: 200, json: { telemetry: store.readRunTelemetry(runId) } };
 }
 
 /**

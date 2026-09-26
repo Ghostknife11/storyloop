@@ -111,6 +111,8 @@ const ROUTES: ReadonlyArray<readonly [string, string]> = [
   ["api/runs/from-plan", "POST"],
   ["api/runs/[run_id]", "GET"],
   ["api/runs/[run_id]/attempts/[attempt_number]", "GET"],
+  // v1.8.0：读回这一次 Run 的执行遥测（旧 Run 也照常 200，body.telemetry 是 null）
+  ["api/runs/[run_id]/telemetry", "GET"],
   ["api/validate", "POST"],
   // v1.4.0：手动校验剧情骨架的结构
   ["api/validate-beats", "POST"],
@@ -499,6 +501,8 @@ describe("v1.0.0 API 冻结 — Run 入口", () => {
       "selected_attempt",
       "status",
       "story",
+      // v1.8.0 §25：执行遥测与旧 Run 的 null，同样是纯追加字段
+      "telemetry",
       "validation",
       "validation_status",
     ]);
