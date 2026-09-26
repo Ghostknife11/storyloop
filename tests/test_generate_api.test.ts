@@ -97,7 +97,7 @@ describe("POST /api/runs（v0.6.0 Automatic Run）", () => {
     expect(calls).toHaveLength(1);
     expect(readdirSync(runDir).sort()).toEqual([
       "attempts", "beats.json", "config.json", "metadata.json", "quality.json",
-      "run-manifest.json", "story.md", "validation.json",
+      "run-manifest.json", "story.md", "telemetry.json", "validation.json",
     ]);
     expect(JSON.parse(readFileSync(join(runDir, "config.json"), "utf8")).protagonist?.name).toBe("陈岚");
     expect(JSON.parse(readFileSync(join(runDir, "beats.json"), "utf8")).beats).toHaveLength(2);

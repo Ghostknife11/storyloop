@@ -53,7 +53,7 @@ import {
  * 全部用例只用 FakeLLM / 假组件与合成样例，不调任何真实模型接口。
  */
 
-/** 运行级固定文件名（v1.0.0 冻结，v1.6.0 追加 run-manifest.json）。 */
+/** 运行级固定文件名（v1.0.0 冻结，v1.6.0 追加 run-manifest.json，v1.8.0 追加 telemetry.json）。 */
 const RUN_FILES = [
   "beat-validation.json",
   "beats.json",
@@ -64,6 +64,7 @@ const RUN_FILES = [
   "review.json",
   "run-manifest.json",
   "story.md",
+  "telemetry.json",
   "validation.json",
 ] as const;
 
@@ -202,7 +203,7 @@ describe("v1.6.0 出身清单 — 真实 Pipeline 的落盘结果", () => {
     expect(existsSync(manifestPath)).toBe(true);
   });
 
-  it("运行级固定文件正好十个，run-manifest.json 是其中之一", async () => {
+  it("运行级固定文件正好十一个，run-manifest.json 是其中之一", async () => {
     const { store, result } = await runWith([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW]);
     const runDir = store.resolveRunDir(result.run_id);
     expect(readdirSync(runDir).filter((name) => !name.startsWith(".")).sort()).toEqual(

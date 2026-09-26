@@ -16,6 +16,7 @@ import { QualityAssembler } from "@/core/quality-assembler";
 import { validateStoryConfig } from "@/types/story-config";
 import { validateBeatValidationResult } from "@/types/beat-validation";
 import { validateCommercialReviewResult, commercialOverallScore } from "@/types/commercial-review";
+import { validateRunTelemetry } from "@/types/telemetry";
 import {
   MISSING_ENDING,
   SAMPLE_BEAT_PLAN,
@@ -46,7 +47,8 @@ const LOW_REVIEW = JSON.stringify({ score: 41, summary: "正文冲突没有展�
 /** v1.0.0 冻结的运行级文件名；v1.2.0 追加 quality.json（§20）；
  *  v1.4.0 追加 beat-validation.json（BeatPlan 在生成正文前的结构校验结论）；
  *  v1.5.0 追加 commercial-review.json（商业可读性审阅结论）；
- *  v1.6.0 追加 run-manifest.json（这次 Run 的出身清单，与 metadata.json 并列）。 */
+ *  v1.6.0 追加 run-manifest.json（这次 Run 的出身清单，与 metadata.json 并列）；
+ *  v1.8.0 追加 telemetry.json（执行过程：阶段耗时 / LLM 调用 / usage）。 */
 const RUN_FILES = [
   "beat-validation.json",
   "beats.json",
@@ -57,6 +59,7 @@ const RUN_FILES = [
   "review.json",
   "run-manifest.json",
   "story.md",
+  "telemetry.json",
   "validation.json",
 ] as const;
 
@@ -379,6 +382,36 @@ describe("v1.0.0 官方示例 Run", () => {
     expectHasAll(Object.keys(repairMeta).sort(), REPAIR_META_REQUIRED, "示例 repair metadata");
   });
 
+  it("示例 telemetry.json 过 schema，且「没有 usage」的那次不被当成 0", () => {
+    const telemetry = validateRunTelemetry(
+      JSON.parse(readFileSync(join(exampleRoot, "telemetry.json"), "utf8")) as unknown,
+    );
+    expect(telemetry.runId).toBe("20260101_120000_example");
+    expect(telemetry.status).toBe("completed");
+    // 6 次调用里只有 5 次拿到了 usage，汇总必须是 5，绝不补成 6
+    expect(telemetry.totals.llmCalls).toBe(6);
+    expect(telemetry.totals.usageSampleCount).toBe(5);
+    expect(telemetry.llmCalls.filter((c) => c.totalTokens === undefined)).toHaveLength(1);
+    // 费用这个仓库不估：没有任何一条调用带 cost
+    expect(telemetry.llmCalls.every((c) => c.cost === undefined)).toBe(true);
+    // 一次 Attempt、一轮修订、零重试——与示例 metadata 的 repair_count / attempt_count 同口径
+    expect(telemetry.totals.retries).toBe(0);
+    expect(telemetry.totals.repairs).toBe(1);
+    // 每个跑完的阶段都带得齐三个字段（§36）
+    for (const stage of telemetry.stages) {
+      expect(stage.status).toBe("completed");
+      expect(stage.startedAt).toBeTruthy();
+      expect(stage.completedAt).toBeTruthy();
+      expect(stage.durationMs).toBeGreaterThanOrEqual(0);
+    }
+    // §60：跑完的阶段就这几个字段，没有任何「原因」字段；attemptNumber 只在段内阶段有
+    for (const stage of telemetry.stages) {
+      const expected = ["completedAt", "durationMs", "stage", "startedAt", "status"];
+      if (stage.attemptNumber !== undefined) expected.push("attemptNumber");
+      expect(Object.keys(stage).sort()).toEqual(expected.sort());
+    }
+  });
+
   it("示例是安全合成内容：不含密钥、真实邮箱、个人路径", () => {
     const files = [
       "story.md",
@@ -386,6 +419,7 @@ describe("v1.0.0 官方示例 Run", () => {
       "review.json",
       "commercial-review.json",
       "metadata.json",
+      "telemetry.json",
       "config.json",
       "beats.json",
       "beat-validation.json",
