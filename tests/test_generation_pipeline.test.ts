@@ -151,7 +151,7 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
 
     const runDir = join(dir, "runs", result.run_id);
     expect(readdirSync(runDir).sort()).toEqual([
-      "attempts", "beats.json", "config.json", "metadata.json", "quality.json",
+      "attempts", "beats.json", "config.json", "failure-analysis.json", "metadata.json", "quality.json",
       "review.json", "run-manifest.json", "story.md", "telemetry.json", "validation.json",
     ]);
     expect(readFileSync(join(runDir, "story.md"), "utf8")).toContain("# 消失的目击者");

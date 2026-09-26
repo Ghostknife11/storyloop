@@ -27,6 +27,12 @@
 > Repair 计数、失败阶段、真实可得的 usage / cost。同样自带 `schemaVersion`、用 camelCase。
 > 字段表、计数语义与「拿不到就是 null」的记法见 [telemetry.md](./telemetry.md)。
 >
+> v1.9.0 在这一约束下新增了 `failure-analysis.json`（只在 Run 根目录一份）与两个运行级
+> metadata 字段：`failure_analysis_status` / `primary_failure_category`。它是**对上面这些
+> 已经存在的事实的确定性分类**——不新增观测，只回答「有没有失败、算哪一类、在哪个阶段、
+> 有哪些证据」。同样自带 `schemaVersion`、用 camelCase，字段表见
+> [failure-analysis.md](./failure-analysis.md)。
+>
 > 实现：`src/core/pipeline.ts` + `src/storage/artifact-store.ts`
 > 契约测试：`tests/test_contract_artifacts.test.ts`（存在性与必填字段）、
 > `tests/test_contract_docs_sync.test.ts`（本文件的字段表 ↔ 真实产物逐字段一致）
@@ -48,6 +54,7 @@ runs/
     ├── metadata.json                  # 运行级 metadata
     ├── run-manifest.json               # 这次 Run 的出身清单（v1.6.0 新增；只在 Run 根目录一份）
     ├── telemetry.json                 # 这次 Run 的执行过程（v1.8.0 新增；只在 Run 根目录一份）
+    ├── failure-analysis.json          # 这次 Run 的失败分类（v1.9.0 新增；只在 Run 根目录一份）
     └── attempts/
         └── 01/                        # 第 1 次尝试，两位数字
             ├── story.md               # 该次尝试的最终正文（有修订时为修订后）
@@ -69,12 +76,14 @@ runs/
 固定规则：
 
 - attempt 与 repair 目录名都是两位数字 `01`、`02`…（上限 99）
-- 运行级目录里除了 `attempts/` 只有那十一个文件，没有别的
-- `run-manifest.json`（v1.6.0 新增）与 `telemetry.json`（v1.8.0 新增）都**只在 Run 根目录
-  一份**：`attempts/` 与 `repairs/` 下都没有它们。清单里登记的产物路径可以指向这两层，
+- 运行级目录里除了 `attempts/` 只有那十二个文件，没有别的
+- `run-manifest.json`（v1.6.0 新增）、`telemetry.json`（v1.8.0 新增）与
+  `failure-analysis.json`（v1.9.0 新增）都**只在 Run 根目录一份**：`attempts/` 与 `repairs/`
+  下都没有它们。清单里登记的产物路径可以指向这两层，
   但它自己不出现在自己登记的条目里（记不了自己的摘要），也不登记任何 `metadata.json`——
   那三层文件由 metadata 契约负责，清单只管「跑了什么」；遥测则反过来只管「怎么跑的」，
-  不登记任何正文或提示词内容
+  不登记任何正文或提示词内容。失败分析排在最后写：它读的正是前面这些文件，
+  所以它自己既不被清单登记，也不参与对自己的分类
 - `beat-validation.json`（v1.4.0 新增）是**运行级独有**的一份：BeatPlan 在第一个 Attempt
   之前校验一次，`attempts/` 与 `repairs/` 下都没有它。骨架结构带 `error` 级 issue 时 Run
   在这里就结束了，此时运行级目录只有 `config.json` / `beats.json` /
@@ -133,6 +142,8 @@ runs/
 | `commercial_review_error` | string | 商业审阅者自身抛异常 | v1.5.0 新增：这一步自身失败的原因；**商业分低不算错误**，那种情况结论照常落盘、这个字段不出现 |
 | `error` | string | Run 失败 | Run 级失败原因，已过 `safe-text`；成功时整个字段不出现 |
 | `duration_ms` / `llm_call_count` | number / number | Run 收尾后（`completed` 与 `failed` 都有） | v1.8.0 新增：从同一次 Run 的 `telemetry.json` 转述来的两个摘要数（全程毫秒数、逻辑 LLM 调用次数）。**主数据源是 telemetry.json**，这里只是转述；遥测本身不可用时这两个键不出现，绝不补 0 |
+| `failure_analysis_status` | string | Run 收尾后 | v1.9.0 新增：这次失败分析跑出来没有，取值为 `none` / `detected` / `partial` / `unknown`，分析器自己出错时是 `unavailable`。与同目录 `failure-analysis.json` 的 `status` 同一个值 |
+| `primary_failure_category` | string | 同上，且确实分出了类别 | v1.9.0 新增：主要失败类别（取值见 `failure-analysis.json`）。**没有主要失败类别时这个键整个不出现**——`none` 与 `unavailable` 都不写，不拿一个类别占位 |
 | `artifacts` | object | 必有 | 文件名索引，键序即 `artifactsOf` 的写入序：`config` / `beat_plan` / `story` / `metadata`，有结论时再加 `beat_validation` / `validation` / `review` / `quality` / `commercial_review`（v1.5.1 修正此前把 `commercial_review` 排在 `quality` 前的写法） |
 
 运行级 `metadata.json` 是**整体快照**：每次阶段推进都整份重写，不与上一次合并。因此在中断

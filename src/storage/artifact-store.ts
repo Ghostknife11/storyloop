@@ -20,6 +20,8 @@ import type { RunManifest } from "@/types/run-manifest";
 import { runManifestOf } from "@/types/run-manifest";
 import type { RunTelemetry } from "@/types/telemetry";
 import { runTelemetryOf, validateRunTelemetry } from "@/types/telemetry";
+import type { FailureAnalysisResult } from "@/types/failure-analysis";
+import { failureAnalysisOf, validateFailureAnalysis } from "@/types/failure-analysis";
 
 /**
  * §13/§22 ArtifactStore：只负责创建目录、保存 JSON / Markdown / Metadata、返回路径。
@@ -46,6 +48,9 @@ const RUN_MANIFEST_FILE = "run-manifest.json";
 
 /** v1.8.0 运行级遥测：执行过程（阶段耗时 / 调用 / usage），与上面两份互不替代。 */
 const TELEMETRY_FILE = "telemetry.json";
+
+/** v1.9.0 运行级失败分析：对上面这些事实做的确定性分类，自己不产生新事实。 */
+const FAILURE_ANALYSIS_FILE = "failure-analysis.json";
 
 /**
  * §19 产物写入失败：磁盘满 / 权限不足 / 目录被占用都归这一类。
@@ -151,6 +156,25 @@ export class ArtifactStore {
 
   putMetadata(runId: string, metadata: Record<string, unknown>): string {
     return this.putJson(runId, "metadata.json", metadata);
+  }
+
+  /**
+   * v1.9.0 运行级失败分析：与 metadata.json / run-manifest.json / telemetry.json
+   * 并排放在 Run 根目录。它是**对已有事实做的分类**，自己不是新的事实来源。
+   *
+   * 落盘前过一遍 validateFailureAnalysis（与 putTelemetry 同一套口径）：
+   * 形状不对就在写盘那一刻抛 ArtifactWriteError，不留给以后的读者去猜。
+   */
+  putFailureAnalysis(runId: string, analysis: FailureAnalysisResult): string {
+    const checked = validateFailureAnalysis(analysis);
+    return this.putJson(runId, FAILURE_ANALYSIS_FILE, checked);
+  }
+
+  /** v1.9.0 读回失败分析：文件缺失 / JSON 坏 / 形状不对都归一成 null（§35 旧 Run）。 */
+  readFailureAnalysis(runId: string): FailureAnalysisResult | null {
+    const raw = this.readJson(runId, FAILURE_ANALYSIS_FILE);
+    if (raw === null) return null;
+    return failureAnalysisOf(raw);
   }
 
   /**

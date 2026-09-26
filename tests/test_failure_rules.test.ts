@@ -101,7 +101,12 @@ describe("v1.9.0 §40 errorCodesOf：真实异常 → 稳定码", () => {
   });
 
   it("§43 写盘失败 → ARTIFACT_WRITE_FAILED", () => {
-    const err = new PipelineError("run failed", "r1", "saving", new ArtifactWriteError("write failed"));
+    const err = new PipelineError(
+      "run failed",
+      "r1",
+      "saving",
+      new ArtifactWriteError("story.md", new Error("disk full")),
+    );
     expect(errorCodesOf(err)).toContain("ARTIFACT_WRITE_FAILED");
   });
 

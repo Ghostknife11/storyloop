@@ -45,6 +45,9 @@ import type { RunTelemetry } from "@/types/telemetry";
 import { projectVersion as readProjectVersion } from "@/lib/version";
 import type { RunManifest, ExperimentProvenance } from "@/types/run-manifest";
 import { buildRunManifest, type ManifestAttemptInput } from "@/lib/tracking/manifest-builder";
+import { analyzeStoredRun, failureAnalysisMetadataPatch } from "@/lib/failure-analysis-service";
+import type { FailureAnalysisResult } from "@/types/failure-analysis";
+import { errorCodesOf } from "@/lib/failure-rules";
 
 /**
  * §28 PipelineError：不吞异常，带 run_id / stage / message。
@@ -462,6 +465,45 @@ export class GenerationPipeline {
     }
   }
 
+  /**
+   * v1.9.0 failure-analysis.json：每次 Run 都写，成功的那次也写（§27/§28）。
+   *
+   * 做法与遥测不同：这里不持有内存状态，而是**回头读盘**——metadata、
+   * Manifest、遥测、各份结论文件都在盘上之后才分析。于是证据指向
+   * validation.json，读者打开那个文件就能对上（§3/§48）。
+   *
+   * §29 分析器自身出错（或写盘失败）绝不让一次成功的 Run 变失败：
+   * 只留一条 warning，metadata 里记 failure_analysis_status = unavailable，
+   * **不写任何猜测出来的类别**。
+   *
+   * §30：顺手把两个摘要字段补进 metadata。补不上去也不影响分析本身。
+   */
+  private writeFailureAnalysis(rid: string, extraCodes: string[] = []): void {
+    let analysis: FailureAnalysisResult;
+    try {
+      analysis = analyzeStoredRun(rid, this.artifactStore, extraCodes);
+      this.artifactStore.putFailureAnalysis(rid, analysis);
+    } catch (e) {
+      logger
+        .child({ run_id: rid })
+        .warning(`failure analysis unavailable: ${safeText(errorDetail(e))}`);
+      return;
+    }
+    try {
+      const meta = this.artifactStore.readRunMetadata(rid);
+      if (meta) {
+        this.artifactStore.putMetadata(rid, {
+          ...meta,
+          ...failureAnalysisMetadataPatch(analysis),
+        });
+      }
+    } catch (e) {
+      logger
+        .child({ run_id: rid })
+        .warning(`failure analysis summary not written: ${safeText(errorDetail(e))}`);
+    }
+  }
+
   private async runStages(
     ctx: RunContext,
     config: StoryConfig,
@@ -565,6 +607,17 @@ export class GenerationPipeline {
           llm_call_count: telemetry?.totals.llmCalls ?? null,
         }),
       );
+      // v1.9.0：先落 Manifest 再读盘做失败分析——分析要能看到尝试与修订的出身（§27）
+      const manifest = this.writeManifest(
+        ctx,
+        rid,
+        runtime,
+        policy,
+        records,
+        selectedAttemptNumber,
+        experiment,
+      );
+      this.writeFailureAnalysis(rid);
 
       return {
         run_id: rid,
@@ -598,7 +651,7 @@ export class GenerationPipeline {
         ),
         started_at: ctx.started_at,
         finished_at: new Date().toISOString(),
-        manifest: this.writeManifest(ctx, rid, runtime, policy, records, selectedAttemptNumber, experiment),
+        manifest,
       };
     } catch (e) {
       // §18/§19/§20：失败阶段可识别，已产出的文件不删除
@@ -633,6 +686,9 @@ export class GenerationPipeline {
       // 正是最需要查的一件事。此时没有 promote，运行根目录里只有 config / beats 与 attempt 级文件，
       // Manifest 如实只列这些（selectedAttemptId 不出现）。
       this.writeManifest(ctx, rid, runtime, policy, records, null, experiment);
+      // v1.9.0：失败的 Run 也要有失败分析——它正是最需要分类的那一次（§27）。
+      // 异常链上的真实错误码一并交给分析器（§40），遥测那边只记最内层一个。
+      this.writeFailureAnalysis(rid, errorCodesOf(e));
       throw new PipelineError(
         ["Run", rid, "failed at", ctx.current_stage ?? "unknown", ":", detail].join(" "),
         rid,

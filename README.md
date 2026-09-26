@@ -296,6 +296,7 @@ runs/
     ├── metadata.json    # 运行级 metadata
     ├── run-manifest.json  # 这次 Run 的出身清单（v1.6.0 新增，只在运行级一份）
     ├── telemetry.json    # 这次 Run 的执行过程：阶段耗时 / 调用次数 / 重试修订 / 失败阶段（v1.8.0 新增）
+    ├── failure-analysis.json  # 这次 Run 的失败分类：类别 / 信号 / 证据 / 首个失败阶段（v1.9.0 新增）
     └── attempts/
         ├── 01/
         │   ├── story.md          # 该次尝试的正文（发生过修订时为修订后的版本）
@@ -328,12 +329,16 @@ runs/
 `max_repairs_per_attempt`、`repair_count`、`beat_validation_status`、
 `beat_validation_passed`、`beat_validation_issue_count`、`beat_validation_error`、
 `commercial_review_status`、`commercial_score`、`commercial_review_error`、
-`duration_ms`、`llm_call_count`。
+`duration_ms`、`llm_call_count`、`failure_analysis_status`、`primary_failure_category`。
 `model` 始终是「本次真正生效的模型」（请求覆盖 → 环境变量 → 缺省值），attempt 级的 `error`
 没有错误时是 `null`——这两条是 v1.0.0 固定下来的字段语义。
 v1.8.0 起的 `duration_ms` / `llm_call_count` 是 `telemetry.json` 的转述：想看阶段耗时、
 每次模型调用的起止与 usage，去读 [docs/telemetry.md](docs/telemetry.md)，metadata 里的
 这两个数只是不用再翻一个文件时的快捷方式。
+v1.9.0 起的两个字段是 `failure-analysis.json` 的转述：`failure_analysis_status` 说这次分析
+跑出来没有（`none` / `detected` / `partial` / `unknown`，分析器自己出错时是 `unavailable`），
+`primary_failure_category` 只在确实分出了主要类别时才出现。分类口径与字段表见
+[docs/failure-analysis.md](docs/failure-analysis.md)。
 
 发生过修订时有一处**刻意的不对称**：运行级 `metadata.json` 里的 `validation_*` / `review_score`
 取自入选 Attempt **修订后**的结论，而同目录的 `validation.json` / `review.json`（以及

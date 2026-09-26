@@ -55,3 +55,16 @@ v1.8.0 起在 Run 根目录多一份 `telemetry.json`：这次 Run 的**执行�
 
 遥测只观察、不控制：这里的任何一个数都不参与重试、修订或采纳判定。
 字段含义见 [docs/telemetry.md](../../docs/telemetry.md)。
+
+v1.9.0 起在 Run 根目录多一份 `failure-analysis.json`：对上面这些**已经存在**的事实做的一次
+确定性失败分类——它不新增观测，也不解释为什么，只回答「这次 Run 有没有失败、算哪一类、
+在哪个阶段、有哪些证据」。样例这次是成功的，所以 `status` 是 `none`、`primaryCategory` 是
+`null`、`signals` 与 `evidence` 都是空数组，`summary` 就是那一句
+`No run-level failure detected.`。
+
+这个 `none` 不是「看起来没事」就填个没事：这次 Run 没有 error code、遥测状态是
+`completed`、唯一一次 Attempt 被采纳、质量分也过了线，四条事实全对上才敢写 `none`。换一次
+失败的 Run，这里就会出现带来源的信号和指向具体文件的证据。`metadata.json` 上对应的两个
+additive 摘要字段是 `failure_analysis_status`（= `none`）与 `primary_failure_category`
+（没有主要失败类别就不写这个键）。字段含义见
+[docs/failure-analysis.md](../../docs/failure-analysis.md)。

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "1",
+  "runId": "example_run",
+  "status": "none",
+  "primaryCategory": null,
+  "secondaryCategories": [],
+  "summary": "No run-level failure detected.",
+  "signals": [],
+  "evidence": [],
+  "firstFailureStage": null,
+  "terminalState": "completed"
+}
