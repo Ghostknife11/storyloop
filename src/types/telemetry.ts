@@ -149,8 +149,9 @@ export interface RepairTelemetry {
  * §11 Run 级汇总。
  *
  * token 三项与 usageSampleCount 的关系：三个值是「有值的那些调用」之和，
- * usageSampleCount 是「至少有一个 token 字段的调用」数。Provider 一次都没给 usage 时，
- * 三项是 null 而 llmCalls 是真实次数——「调了 6 次但一次都没拿到 usage」与
+ * usageSampleCount 是「至少有一个 token 字段的调用」数。Provider 一次都没给 usage 时
+ * 这三个键整个不出现（写盘时 null 被丢掉，与 llmCalls 里没有 usage 的那次同一种记法），
+ * 而 llmCalls 是真实次数——「调了 6 次但一次都没拿到 usage」与
  * 「一次都没调」在读起来必须是两件事。
  */
 export interface TelemetryTotals {
