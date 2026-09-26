@@ -38,3 +38,20 @@ v1.6.0 起在 Run 根目录多一份 `run-manifest.json`：这次 Run 的**出�
 清单里没有 `metadata.json` 与它自己——它记不了自己的摘要。摘要都是照磁盘上那份文件现算的，
 所以根目录这份 `story.md` 与 `attempts/01/story.md` 的 `sha256` 逐字相同（promote 过来的）。
 `baseUrl` 本身不写，只写来源类别。字段含义见 [docs/run-artifacts.md](../../docs/run-artifacts.md)。
+
+v1.8.0 起在 Run 根目录多一份 `telemetry.json`：这次 Run 的**执行过程**——每个阶段各跑了
+多久、六次模型调用各自的起止与 usage、一次 Attempt 与一轮修订的过程指标，以及 Run 级汇总。
+它与 `metadata.json` / `run-manifest.json` 三份并排，互不替代：metadata 记「这次发生了什么」，
+清单记「这次是拿什么跑出来的」，遥测记「这次是怎么跑过来的」。
+
+样例里有三处值得特别看一眼：
+
+- `llmCalls` 有 6 条，但 `call-002`（骨架校验）没有 `inputTokens` / `outputTokens` /
+  `totalTokens`——Provider 那一次没给 usage。于是 `totals.usageSampleCount` 是 5 而不是 6，
+  三项 token 是对那 5 次求和，**没有把缺失的那次当成 0**。
+- 整份文件里没有任何费用字段。这个仓库不维护价格表，Provider 也没在响应里给金额，
+  所以 cost 整个键都不出现——「不知道」不等于「不花钱」。
+- `stages` 里没有 `skipped` 项：这一步这一版接了什么，都真跑过了。
+
+遥测只观察、不控制：这里的任何一个数都不参与重试、修订或采纳判定。
+字段含义见 [docs/telemetry.md](../../docs/telemetry.md)。

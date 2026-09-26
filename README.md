@@ -319,9 +319,13 @@ runs/
 `attempt_count`、`selected_attempt`、`quality_status`、`enable_repair`、
 `max_repairs_per_attempt`、`repair_count`、`beat_validation_status`、
 `beat_validation_passed`、`beat_validation_issue_count`、`beat_validation_error`、
-`commercial_review_status`、`commercial_score`、`commercial_review_error`。
+`commercial_review_status`、`commercial_score`、`commercial_review_error`、
+`duration_ms`、`llm_call_count`。
 `model` 始终是「本次真正生效的模型」（请求覆盖 → 环境变量 → 缺省值），attempt 级的 `error`
 没有错误时是 `null`——这两条是 v1.0.0 固定下来的字段语义。
+v1.8.0 起的 `duration_ms` / `llm_call_count` 是 `telemetry.json` 的转述：想看阶段耗时、
+每次模型调用的起止与 usage，去读 [docs/telemetry.md](docs/telemetry.md)，metadata 里的
+这两个数只是不用再翻一个文件时的快捷方式。
 
 发生过修订时有一处**刻意的不对称**：运行级 `metadata.json` 里的 `validation_*` / `review_score`
 取自入选 Attempt **修订后**的结论，而同目录的 `validation.json` / `review.json`（以及

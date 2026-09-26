@@ -1,0 +1,199 @@
+{
+  "schemaVersion": "1",
+  "runId": "20260101_120000_example",
+  "startedAt": "2026-01-01T12:00:00.000Z",
+  "completedAt": "2026-01-01T12:00:42.400Z",
+  "durationMs": 42400,
+  "status": "completed",
+  "stages": [
+    {
+      "stage": "planning",
+      "status": "completed",
+      "startedAt": "2026-01-01T12:00:00.000Z",
+      "completedAt": "2026-01-01T12:00:02.100Z",
+      "durationMs": 2100
+    },
+    {
+      "stage": "validating_beat_plan",
+      "status": "completed",
+      "startedAt": "2026-01-01T12:00:02.100Z",
+      "completedAt": "2026-01-01T12:00:02.900Z",
+      "durationMs": 800
+    },
+    {
+      "stage": "generating",
+      "status": "completed",
+      "startedAt": "2026-01-01T12:00:02.900Z",
+      "completedAt": "2026-01-01T12:00:22.400Z",
+      "durationMs": 19500,
+      "attemptNumber": 1
+    },
+    {
+      "stage": "saving",
+      "status": "completed",
+      "startedAt": "2026-01-01T12:00:22.400Z",
+      "completedAt": "2026-01-01T12:00:22.500Z",
+      "durationMs": 100,
+      "attemptNumber": 1
+    },
+    {
+      "stage": "validating",
+      "status": "completed",
+      "startedAt": "2026-01-01T12:00:22.500Z",
+      "completedAt": "2026-01-01T12:00:22.600Z",
+      "durationMs": 100,
+      "attemptNumber": 1
+    },
+    {
+      "stage": "reviewing",
+      "status": "completed",
+      "startedAt": "2026-01-01T12:00:22.600Z",
+      "completedAt": "2026-01-01T12:00:30.900Z",
+      "durationMs": 8300,
+      "attemptNumber": 1
+    },
+    {
+      "stage": "repairing",
+      "status": "completed",
+      "startedAt": "2026-01-01T12:00:30.900Z",
+      "completedAt": "2026-01-01T12:00:36.400Z",
+      "durationMs": 5500,
+      "attemptNumber": 1
+    },
+    {
+      "stage": "revalidating",
+      "status": "completed",
+      "startedAt": "2026-01-01T12:00:36.400Z",
+      "completedAt": "2026-01-01T12:00:36.500Z",
+      "durationMs": 100,
+      "attemptNumber": 1
+    },
+    {
+      "stage": "rereviewing",
+      "status": "completed",
+      "startedAt": "2026-01-01T12:00:36.500Z",
+      "completedAt": "2026-01-01T12:00:41.200Z",
+      "durationMs": 4700,
+      "attemptNumber": 1
+    },
+    {
+      "stage": "reviewing_commercial",
+      "status": "completed",
+      "startedAt": "2026-01-01T12:00:41.200Z",
+      "completedAt": "2026-01-01T12:00:42.300Z",
+      "durationMs": 1100,
+      "attemptNumber": 1
+    },
+    {
+      "stage": "artifact_promotion",
+      "status": "completed",
+      "startedAt": "2026-01-01T12:00:42.300Z",
+      "completedAt": "2026-01-01T12:00:42.400Z",
+      "durationMs": 100
+    }
+  ],
+  "llmCalls": [
+    {
+      "id": "call-001",
+      "stage": "planning",
+      "model": "gpt-4o-mini",
+      "startedAt": "2026-01-01T12:00:00.050Z",
+      "completedAt": "2026-01-01T12:00:02.100Z",
+      "durationMs": 2050,
+      "status": "completed",
+      "inputTokens": 640,
+      "outputTokens": 380,
+      "totalTokens": 1020
+    },
+    {
+      "id": "call-002",
+      "stage": "validating_beat_plan",
+      "model": "gpt-4o-mini",
+      "startedAt": "2026-01-01T12:00:02.200Z",
+      "completedAt": "2026-01-01T12:00:02.900Z",
+      "durationMs": 700,
+      "status": "completed"
+    },
+    {
+      "id": "call-003",
+      "stage": "generating",
+      "model": "gpt-4o-mini",
+      "startedAt": "2026-01-01T12:00:03.100Z",
+      "completedAt": "2026-01-01T12:00:22.400Z",
+      "durationMs": 19300,
+      "status": "completed",
+      "inputTokens": 1180,
+      "outputTokens": 3200,
+      "totalTokens": 4380
+    },
+    {
+      "id": "call-004",
+      "stage": "reviewing",
+      "model": "gpt-4o-mini",
+      "startedAt": "2026-01-01T12:00:22.700Z",
+      "completedAt": "2026-01-01T12:00:30.900Z",
+      "durationMs": 8200,
+      "status": "completed",
+      "inputTokens": 3900,
+      "outputTokens": 520,
+      "totalTokens": 4420
+    },
+    {
+      "id": "call-005",
+      "stage": "repairing",
+      "model": "gpt-4o-mini",
+      "startedAt": "2026-01-01T12:00:31.000Z",
+      "completedAt": "2026-01-01T12:00:36.400Z",
+      "durationMs": 5400,
+      "status": "completed",
+      "inputTokens": 2100,
+      "outputTokens": 1450,
+      "totalTokens": 3550
+    },
+    {
+      "id": "call-006",
+      "stage": "reviewing_commercial",
+      "model": "gpt-4o-mini",
+      "startedAt": "2026-01-01T12:00:41.250Z",
+      "completedAt": "2026-01-01T12:00:42.300Z",
+      "durationMs": 1050,
+      "status": "completed",
+      "inputTokens": 3300,
+      "outputTokens": 380,
+      "totalTokens": 3680
+    }
+  ],
+  "attempts": [
+    {
+      "attemptId": "attempt-01",
+      "index": 1,
+      "status": "accepted",
+      "durationMs": 42300,
+      "generationCalls": 1,
+      "reviewCalls": 2,
+      "commercialReviewCalls": 1,
+      "repairCount": 1
+    }
+  ],
+  "repairs": [
+    {
+      "repairId": "repair-01",
+      "attemptId": "attempt-01",
+      "category": "general",
+      "status": "success",
+      "durationMs": 8700,
+      "llmCalls": 3
+    }
+  ],
+  "totals": {
+    "durationMs": 42400,
+    "llmCalls": 6,
+    "inputTokens": 11120,
+    "outputTokens": 5930,
+    "totalTokens": 17050,
+    "usageSampleCount": 5,
+    "retries": 0,
+    "repairs": 1,
+    "failedStages": 0
+  }
+}

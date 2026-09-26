@@ -123,6 +123,7 @@ runs/
 | `commercial_score` | number | 有商业可读性结论 | v1.5.0 新增：四个维度（Hook / Pacing / Engagement / Payoff）的均分，与 `commercial-review.json` 里的 `score`、API 的 `commercial_review.score` 同一个口径；这一步没跑成时整个字段不出现 |
 | `commercial_review_error` | string | 商业审阅者自身抛异常 | v1.5.0 新增：这一步自身失败的原因；**商业分低不算错误**，那种情况结论照常落盘、这个字段不出现 |
 | `error` | string | Run 失败 | Run 级失败原因，已过 `safe-text`；成功时整个字段不出现 |
+| `duration_ms` / `llm_call_count` | number / number | Run 收尾后（`completed` 与 `failed` 都有） | v1.8.0 新增：从同一次 Run 的 `telemetry.json` 转述来的两个摘要数（全程毫秒数、逻辑 LLM 调用次数）。**主数据源是 telemetry.json**，这里只是转述；遥测本身不可用时这两个键不出现，绝不补 0 |
 | `artifacts` | object | 必有 | 文件名索引，键序即 `artifactsOf` 的写入序：`config` / `beat_plan` / `story` / `metadata`，有结论时再加 `beat_validation` / `validation` / `review` / `quality` / `commercial_review`（v1.5.1 修正此前把 `commercial_review` 排在 `quality` 前的写法） |
 
 运行级 `metadata.json` 是**整体快照**：每次阶段推进都整份重写，不与上一次合并。因此在中断

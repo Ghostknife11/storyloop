@@ -26,6 +26,8 @@
   "quality_assembly_status": "completed",
   "overall_score": 82,
   "quality_issue_count": 1,
+  "duration_ms": 42400,
+  "llm_call_count": 6,
   "finished_at": "2026-01-01T12:00:00.000Z",
   "artifacts": {
     "config": "config.json",
