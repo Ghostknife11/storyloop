@@ -50,6 +50,28 @@ export function isFailureCategory(value: unknown): value is FailureCategory {
 }
 
 /**
+ * §33/§52 类别的中文展示标签：分析摘要、Run 面板、实验聚合共用同一份措辞。
+ *
+ * 放在这里而不是 `lib/failure-rules.ts`，是因为规则表为了 `instanceof PipelineError`
+ * 会把整条服务端链路（含 node:fs）拖进依赖图；界面只需要一份标签，
+ * 不该为此把产物读写代码打进浏览器包。
+ */
+export const CATEGORY_LABELS: Record<FailureCategory, string> = {
+  SECURITY: "安全策略阻止",
+  CONFIGURATION: "配置问题",
+  STORAGE: "产物存储问题",
+  PLANNING: "剧情骨架问题",
+  GENERATION: "正文生成问题",
+  VALIDATION: "正文校验问题",
+  REVIEWER: "审阅环节问题",
+  RETRY_EXHAUSTION: "重试次数用尽",
+  REPAIR_EXHAUSTION: "修订次数用尽",
+  QUALITY: "质量偏低",
+  COMMERCIAL: "商业可读性偏低",
+  UNKNOWN: "未能归类",
+};
+
+/**
  * §18 一条信号出自哪里。取值就是仓库里真实存在的事实来源，
  * 不发明「模型内部状态」这类拿不到证据的出处。
  */

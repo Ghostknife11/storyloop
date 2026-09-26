@@ -15,11 +15,8 @@
  * secondary 是其余类别按同一优先级排序——顺序确定，不靠输入顺序。
  */
 
-import {
-  CATEGORY_LABELS,
-  categoryOfCode,
-  categoryPriority,
-} from "@/lib/failure-rules";
+import { categoryOfCode, categoryPriority } from "@/lib/failure-rules";
+import { CATEGORY_LABELS } from "@/types/failure-analysis";
 import type { StageName } from "@/types/telemetry";
 import type {
   FailureAnalysisAttempt,

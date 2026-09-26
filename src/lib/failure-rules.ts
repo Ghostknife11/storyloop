@@ -186,23 +186,8 @@ export function sourceOfIssueCode(code: string): FailureSignalSource {
   return "metadata";
 }
 
-/** 类别的中文标签：metadata 摘要、UI、实验聚合共用同一份措辞。 */
-export const CATEGORY_LABELS: Record<FailureCategory, string> = {
-  SECURITY: "安全策略阻止",
-  CONFIGURATION: "配置问题",
-  STORAGE: "产物存储问题",
-  PLANNING: "剧情骨架问题",
-  GENERATION: "正文生成问题",
-  VALIDATION: "正文校验问题",
-  REVIEWER: "审阅环节问题",
-  RETRY_EXHAUSTION: "重试次数用尽",
-  REPAIR_EXHAUSTION: "修订次数用尽",
-  QUALITY: "质量偏低",
-  COMMERCIAL: "商业可读性偏低",
-  UNKNOWN: "未能归类",
-};
-
-/** 类别的英文稳定名：API / 聚合 / artifacts 里用的就是它，不做本地化。 */
+/** 类别的英文稳定名：API / 聚合 / artifacts 里用的就是它，不做本地化。
+ *  中文展示标签与它分开：见 types/failure-analysis.ts 的 CATEGORY_LABELS。 */
 export const CATEGORY_KEYS: Record<FailureCategory, string> = FAILURE_CATEGORIES.reduce(
   (acc, category) => {
     acc[category] = category;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { CATEGORY_LABELS } from "@/types/failure-analysis";
 import {
-  CATEGORY_LABELS,
   CATEGORY_PRIORITY,
   FAILURE_RULES,
   categoryOfCode,

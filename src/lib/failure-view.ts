@@ -1,4 +1,4 @@
-import { CATEGORY_LABELS } from "@/lib/failure-rules";
+import { CATEGORY_LABELS } from "@/types/failure-analysis";
 import type {
   FailureAnalysisResult,
   FailureCategory,
