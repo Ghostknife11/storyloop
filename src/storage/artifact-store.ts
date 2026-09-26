@@ -18,6 +18,8 @@ import {
 } from "@/types/repair";
 import type { RunManifest } from "@/types/run-manifest";
 import { runManifestOf } from "@/types/run-manifest";
+import type { RunTelemetry } from "@/types/telemetry";
+import { runTelemetryOf, validateRunTelemetry } from "@/types/telemetry";
 
 /**
  * §13/§22 ArtifactStore：只负责创建目录、保存 JSON / Markdown / Metadata、返回路径。
@@ -41,6 +43,9 @@ const INITIAL_STORY = "initial_story.md";
 
 /** v1.6.0 运行清单：与 metadata.json 并排放在 Run 根目录，两者互不替代。 */
 const RUN_MANIFEST_FILE = "run-manifest.json";
+
+/** v1.8.0 运行级遥测：执行过程（阶段耗时 / 调用 / usage），与上面两份互不替代。 */
+const TELEMETRY_FILE = "telemetry.json";
 
 /**
  * §19 产物写入失败：磁盘满 / 权限不足 / 目录被占用都归这一类。
@@ -146,6 +151,18 @@ export class ArtifactStore {
 
   putMetadata(runId: string, metadata: Record<string, unknown>): string {
     return this.putJson(runId, "metadata.json", metadata);
+  }
+
+  /**
+   * v1.8.0 运行级遥测：与 metadata.json / run-manifest.json 并排放在 Run 根目录。
+   *
+   * 落盘前过一遍 validateRunTelemetry：采集器是本仓库自己的代码，但「观测数据本身
+   * 长得不对」应该在写盘那一刻就炸出来，而不是留给以后的读者去猜。校验不过就抛
+   * ArtifactWriteError，与其它产物同一套失败口径。
+   */
+  putTelemetry(runId: string, telemetry: RunTelemetry): string {
+    const checked = validateRunTelemetry(telemetry);
+    return this.putJson(runId, TELEMETRY_FILE, checked);
   }
 
   /**
@@ -303,6 +320,17 @@ export class ArtifactStore {
     const raw = this.readJson(runId, RUN_MANIFEST_FILE);
     if (raw === null) return null;
     return runManifestOf(raw);
+  }
+
+  /**
+   * v1.8.0 遥测的读回。
+   * v1.8.0 之前生成的 Run 没有这个文件，返回 null——读接口照常给出那一版的其它内容，
+   * 由 UI 决定怎么展示「这一次运行没有遥测」。形状不对（被手改过）同样归一成 null。
+   */
+  readRunTelemetry(runId: string): RunTelemetry | null {
+    const raw = this.readJson(runId, TELEMETRY_FILE);
+    if (raw === null) return null;
+    return runTelemetryOf(raw);
   }
 
   /**

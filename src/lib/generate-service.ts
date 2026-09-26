@@ -41,6 +41,7 @@ import {
 } from "@/core/generation-attempt";
 import { QualityAssembler } from "@/core/quality-assembler";
 import { qualityResultOf, type QualityResult } from "@/types/quality";
+import { TelemetryCollector } from "@/core/telemetry-collector";
 import type { QualityStatus } from "@/core/pipeline";
 import { projectVersion as readProjectVersion } from "@/lib/version";
 import type { BeatValidationResult } from "@/types/beat-validation";
@@ -103,10 +104,15 @@ function runtimeOf(raw: Record<string, unknown>): GenerateRuntime {
  * 否则「服务端指向本地假模型」的联调用法会被自己挡掉。同理，运维在 LLM_BASE_URL
  * 里配的地址是受信配置，不走这里（它不来自请求体）。
  */
-async function clientFor(runtime: GenerateRuntime, injected?: LLMClient): Promise<LLMClient> {
+async function clientFor(
+  runtime: GenerateRuntime,
+  injected?: LLMClient,
+  /** v1.8.0：真构造客户端时把采集器接上——注入进来的客户端是调用方自己的，不动它。 */
+  telemetry?: TelemetryCollector,
+): Promise<LLMClient> {
   if (injected) return injected;
   await assertPublicBaseUrl(runtime.baseUrl);
-  return clientFromEnv(runtime);
+  return clientFromEnv(runtime, { telemetry });
 }
 
 /**
@@ -203,6 +209,8 @@ export interface RunDeps {
   /** v1.5.0 TASK §5：不注入就没有商业可读性审阅这一步，其余流程与 v1.4.0 一致。 */
   commercialReviewer?: CommercialReviewer;
   artifactStore?: ArtifactStore;
+  /** v1.8.0：测试可注入自己的采集器；不注入就由 buildPipeline 新建一个。 */
+  telemetry?: TelemetryCollector;
 }
 
 /**
@@ -213,9 +221,12 @@ export interface RunDeps {
  * §9 Repairer 用同一个 LLMClient；不注入 Repairer 时 Pipeline 完全不修（§51-E）。
  * §44 TASK §44：CommercialReviewer 的 LLMClient 与其它组件走同一条安全构建路径
  * （clientFor → assertPublicBaseUrl → clientFromEnv），不另开一条不受校验的入口。
+ * v1.8.0 §19：这一次 Run 的采集器在这里建，同时接给共享客户端与 Pipeline——
+ * 于是 LLM 调用数从同一个 wrapper 出来，阶段归属由 Pipeline 的阶段推进决定。
  */
 export async function buildPipeline(runtime: GenerateRuntime, deps: RunDeps = {}): Promise<GenerationPipeline> {
-  const llm = await clientFor(runtime, deps.llm);
+  const telemetry = deps.telemetry ?? new TelemetryCollector();
+  const llm = await clientFor(runtime, deps.llm, telemetry);
   const planner = deps.planner ?? new BeatPlanner(
     llm,
     join(PROJECT_ROOT, "prompts", "beat_planner.txt"),
@@ -247,7 +258,7 @@ export async function buildPipeline(runtime: GenerateRuntime, deps: RunDeps = {}
   return new GenerationPipeline(
     planner, generator, validator, reviewer, artifactStore, DEFAULT_RETRY_POLICY,
     repairer, repairStrategy, new QualityAssembler(), readProjectVersion(), beatValidator,
-    commercialReviewer,
+    commercialReviewer, telemetry,
   );
 }
 
