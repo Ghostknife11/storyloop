@@ -38,6 +38,10 @@ import type { QualityResult } from "@/types/quality";
 import { logger } from "@/lib/logger";
 import { safeText } from "@/lib/safe-text";
 import { llmSettings } from "@/lib/app-config";
+import { LLMTimeoutError } from "@/lib/llm";
+import { isStageName } from "@/types/telemetry";
+import { TelemetryCollector, type TelemetryErrorCode } from "@/core/telemetry-collector";
+import type { RunTelemetry } from "@/types/telemetry";
 import { projectVersion as readProjectVersion } from "@/lib/version";
 import type { RunManifest, ExperimentProvenance } from "@/types/run-manifest";
 import { buildRunManifest, type ManifestAttemptInput } from "@/lib/tracking/manifest-builder";
@@ -105,10 +109,57 @@ export interface GenerationResult {
 }
 
 /** §27/§28/§67 安全错误信息：node:fs 的异常文本带服务器绝对路径，LLM/HTTP 客户端的
- * 异常文本可能带回请求头，两者都不该进用户可见的 message / metadata。
- * 规则统一放在 src/lib/safe-text.ts，与 toApiError 共用一份，不各写一套正则。 */
+ *  异常文本可能带回请求头，两者都不该进用户可见的 message / metadata。
+ *  规则统一放在 src/lib/safe-text.ts，与 toApiError 共用一份，不各写一套正则。 */
 function errorDetail(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * v1.8.0 异常 → 稳定错误码（§22）。
+ *
+ * 与 api-error.ts 的 toApiError 是同一套判定的两个出口：先看最内层异常
+ * （LLM 失败要保留专属码），再看 PipelineError 的阶段壳。码表不同——
+ * 遥测这边只记「哪一类失败」，不记 HTTP 状态码那一套。
+ * 于是同一个失败在 API 响应里是 LLM_TIMEOUT，在 telemetry.json 里也是 LLM_TIMEOUT，
+ * 两边对得上；异常原文一个字都不进产物（§22）。
+ */
+export function telemetryCodeOf(e: unknown): TelemetryErrorCode {
+  let current: unknown = e;
+  const seen = new Set<unknown>();
+  while (current instanceof PipelineError && current.cause !== undefined && !seen.has(current)) {
+    seen.add(current);
+    current = current.cause;
+  }
+  if (current instanceof LLMTimeoutError) return "LLM_TIMEOUT";
+  if (current instanceof Error) {
+    if (current.message.includes("内容为空")) return "LLM_EMPTY_RESPONSE";
+    if (current.name === "LLMRequestError") return "LLM_REQUEST_FAILED";
+    if (current.name === "LLMTimeoutError") return "LLM_TIMEOUT";
+    switch (current.name) {
+      case "BeatParseError":
+        return "GENERATION_FAILED";
+      case "ReviewParseError":
+        return "REVIEW_COMPONENT_FAILED";
+      case "CommercialReviewParseError":
+      case "CommercialReviewValidationError":
+        return "COMMERCIAL_REVIEW_COMPONENT_FAILED";
+      case "ValidatorError":
+        return "VALIDATION_COMPONENT_FAILED";
+      case "BeatValidationParseError":
+      case "BeatValidationValidationError":
+        return "BEAT_VALIDATION_COMPONENT_FAILED";
+      case "ArtifactWriteError":
+        return "ARTIFACT_WRITE_FAILED";
+    }
+  }
+  // 骨架没过是流程给出的结论，不是异常——阶段壳上能认出来（§13）
+  if (e instanceof PipelineError) {
+    if (e.stage === "validating_beat_plan") return "BEAT_PLAN_REJECTED";
+    if (e.stage === "planning") return "GENERATION_FAILED";
+    return "GENERATION_FAILED";
+  }
+  return "RUN_FAILED";
 }
 
 /** §18 EMPTY_CONTENT 时没有可审阅的正文，跳过 Review；其它失败仍继续（§18 推荐）。 */
@@ -182,6 +233,12 @@ interface MetaPatch {
    * 占用的 quality_status（§29）。
    */
   quality?: QualityResult | null;
+  /**
+   * v1.8.0 §33 additive：两个摘要数，主数据源仍是 telemetry.json。
+   * 只在 Run 收尾时写（那时才知道全程多久、一共调了几次）。
+   */
+  duration_ms?: number | null;
+  llm_call_count?: number | null;
 }
 
 /** §25 Run 级策略字段：写进 metadata，中断后也能看到当时生效的策略。 */
@@ -336,6 +393,12 @@ export class GenerationPipeline {
     /** v1.5.0 TASK §5/§12 可选：不注入就完全没有商业可读性审阅，流程与 v1.4.0 逐字一致。
      *  与 BasicReviewer 是两个独立审阅者，不共用 Prompt、不共用结论。 */
     private commercialReviewer?: CommercialReviewer,
+    /**
+     * v1.8.0 可观测性采集器：一个 Run 一个。默认自带一个实例——
+     * 于是「记不记遥测」不是 Pipeline 的开关，遥测永远在记；接不接只决定
+     * LLM 调用数从哪儿来（§19 统一入口在共享客户端上）。
+     */
+    private telemetry: TelemetryCollector = new TelemetryCollector(),
   ) {}
 
   /** §6 Automatic：StoryConfig → Plan → 若干 Attempt → 选中的那一个。 */
@@ -361,6 +424,44 @@ export class GenerationPipeline {
     return this.runStages(createRunContext(this.projectVersion), config, beatPlan, runtime, retryPolicy, experiment);
   }
 
+  /**
+   * v1.8.0 阶段推进的唯一入口：ctx 与遥测一起动（§17 低侵入）。
+   *
+   * 采集器不知道这一步该不该进、也不判断成败——它只按这个名字计时，
+   * 收尾状态由 finish / failOpen 单独给。route 上「进下一个阶段」就等于
+   * 「上一个阶段结束」，所以 Pipeline 不需要给每一步套 try/finally。
+   *
+   * completed / failed 是 RunStatus 但不是遥测阶段：它们结束整次 Run，
+   * 由 finishTelemetry 统一结算，这里不另开一个阶段（否则会多出一条
+   * 没有起点可归的尾巴）。
+   */
+  private enter(ctx: RunContext, stage: RunStatus, attemptNumber: number | null = null): void {
+    transitionStage(ctx, stage, stage);
+    if (isStageName(stage)) this.telemetry.enter(stage, attemptNumber);
+  }
+
+  /**
+   * v1.8.0 telemetry.json：每次 Run 都写，失败的那次也写（§15）。
+   *
+   * 写完把这份遥测交回去，metadata 的两个摘要数（duration_ms / llm_call_count）
+   * 直接取它的 totals——主数据源只有一个，不在这儿另算一套。
+   * 写盘失败只留日志：可观测性缺失不能让一次成功的生成变成失败。
+   */
+  private finishTelemetry(
+    rid: string,
+    status: "completed" | "failed",
+    failure?: { stage?: string | null; code?: string | null },
+  ): RunTelemetry | null {
+    try {
+      const telemetry = this.telemetry.finish(status, failure);
+      this.artifactStore.putTelemetry(rid, telemetry);
+      return telemetry;
+    } catch (e) {
+      logger.child({ run_id: rid }).warning(`telemetry write failed: ${safeText(errorDetail(e))}`);
+      return null;
+    }
+  }
+
   private async runStages(
     ctx: RunContext,
     config: StoryConfig,
@@ -371,6 +472,8 @@ export class GenerationPipeline {
     experiment?: ExperimentProvenance,
   ): Promise<GenerationResult> {
     const rid = ctx.run_id;
+    // v1.8.0：run_id 生成之后才补得上（采集器在 Pipeline 构造时就建好了）
+    this.telemetry.bindRun(rid);
     let beatPlan: BeatPlan | undefined = suppliedPlan;
     const policy = validateRetryPolicy(retryPolicyArg ?? this.retryPolicy);
     const beatCheck: BeatCheck = { ...BEAT_CHECK_SKIPPED };
@@ -385,7 +488,7 @@ export class GenerationPipeline {
       this.artifactStore.createRunDirectory(rid);
       this.artifactStore.putConfig(rid, config);
 
-      transitionStage(ctx, "planning", "planning");
+      this.enter(ctx, "planning");
       this.artifactStore.putMetadata(rid, this.metaFor(ctx, runtime, { ...policyPatch(policy) }));
       // §8：Plan once——不要每次 Retry 都重新规划。
       if (!beatPlan) {
@@ -433,9 +536,14 @@ export class GenerationPipeline {
       // v1.2.0 §57：quality.json 一起晋升，根目录快照因此与 selected attempt 逐字一致。
       // v1.5.0 TASK §39：commercial-review.json 同样跟着晋升，于是根目录那份商业结论
       // 描述的正是 selected attempt 的 story.md，不会张冠李戴。
+      // v1.8.0：产物晋升是真实发生的一步，值得单独计时。它不是 RunStatus，
+      // 所以只以遥测阶段的形式存在，不进 metadata 的 current_stage。
+      this.telemetry.enter("artifact_promotion");
       this.artifactStore.promoteAttempt(rid, selected.attempt.attempt_number);
 
-      transitionStage(ctx, "completed", "completed");
+      this.enter(ctx, "completed");
+      // v1.8.0：先收遥测再写 metadata——两个摘要数从这里取，不另算一套
+      const telemetry = this.finishTelemetry(rid, "completed");
       this.artifactStore.putMetadata(
         rid,
         this.metaFor(ctx, runtime, {
@@ -453,6 +561,8 @@ export class GenerationPipeline {
           review: selected.attempt.review,
           review_error: selected.review_error,
           quality: selected.quality,
+          duration_ms: telemetry?.totals.durationMs ?? null,
+          llm_call_count: telemetry?.totals.llmCalls ?? null,
         }),
       );
 
@@ -496,6 +606,12 @@ export class GenerationPipeline {
       // §28/§9：原始异常只进服务端日志，带 run_id 与失败阶段
       logger.child({ run_id: rid }).error(`run failed at ${ctx.current_stage ?? "unknown"}`, e);
       failRun(ctx, ctx.current_stage ?? "unknown", detail);
+      // v1.8.0 §15：失败 Run 也留遥测——已跑完的阶段原样保留，开着的那个按 failed 收尾，
+      // failureStage 只记「在哪儿结束的」，不记为什么（§13/§60）。
+      const telemetry = this.finishTelemetry(rid, "failed", {
+        stage: ctx.current_stage ?? null,
+        code: telemetryCodeOf(e),
+      });
       try {
         this.artifactStore.putMetadata(
           rid,
@@ -506,6 +622,8 @@ export class GenerationPipeline {
             // 一次都没跑到才是 not_started），但不带结论本体——运行根目录那份文件
             // 要等 promote，而 promote 在失败路径上从未执行。
             ...commercialStatusPatch(commercialLast),
+            duration_ms: telemetry?.totals.durationMs ?? null,
+            llm_call_count: telemetry?.totals.llmCalls ?? null,
           }),
         );
       } catch {
@@ -584,9 +702,13 @@ export class GenerationPipeline {
     /** §7 结论先记进这个盒子再抛：硬失败时 runStages 的 catch 也要把它写进 metadata。 */
     out: BeatCheck,
   ): Promise<void> {
-    if (!this.beatValidator) return;
+    // §5：没接这一步时如实记 skipped——「没接」与「坏了」是两件事
+    if (!this.beatValidator) {
+      this.telemetry.skip("validating_beat_plan");
+      return;
+    }
 
-    transitionStage(ctx, "validating_beat_plan", "validating_beat_plan");
+    this.enter(ctx, "validating_beat_plan");
     this.artifactStore.putMetadata(
       rid,
       this.metaFor(ctx, runtime, {
@@ -653,7 +775,9 @@ export class GenerationPipeline {
     let generationError: string | null = null;
     let generationFailure: unknown = null;
 
-    transitionStage(ctx, "generating", "generating");
+    // v1.8.0 §9：Attempt 的作用域从 entering generating 算起；编号与 attempts/NN 一致
+    this.telemetry.beginAttempt(attemptNumber);
+    this.enter(ctx, "generating", attemptNumber);
     this.artifactStore.putMetadata(
       rid,
       this.metaFor(ctx, runtime, {
@@ -673,7 +797,7 @@ export class GenerationPipeline {
 
     // §17：先保存 Story，再 Validate / Review。
     if (story !== null) {
-      transitionStage(ctx, "saving", "saving");
+      this.enter(ctx, "saving", attemptNumber);
       this.artifactStore.putAttemptStory(rid, attemptNumber, config.title, story);
     }
 
@@ -767,6 +891,9 @@ export class GenerationPipeline {
       quality_issue_count: quality.issues.length,
     });
 
+    // v1.8.0 §9：这一次 Attempt 的结局。生成失败 = 没跑出正文；未采纳 = 还会重试。
+    this.telemetry.endAttempt(accepted ? "accepted" : story === null ? "failed" : "retried");
+
     return {
       attempt: {
         attempt_number: attemptNumber,
@@ -835,7 +962,7 @@ export class GenerationPipeline {
     let validationStatus: ValidationStatus = "not_started";
     let validationError: string | null = null;
 
-    transitionStage(ctx, stages.stage, stages.stage);
+    this.enter(ctx, stages.stage, attemptNumber);
     this.artifactStore.putMetadata(
       rid,
       this.metaFor(ctx, runtime, {
@@ -863,7 +990,7 @@ export class GenerationPipeline {
     // §16/§34：Review 失败不丢弃已生成的正文，也不把 Run 判为失败。
     // §18：EMPTY_CONTENT 时没有可审阅内容，跳过 Review。
     if (!skipReviewFor(validation)) {
-      transitionStage(ctx, stages.reviewStage, stages.reviewStage);
+      this.enter(ctx, stages.reviewStage, attemptNumber);
       this.artifactStore.putMetadata(
         rid,
         this.metaFor(ctx, runtime, {
@@ -918,11 +1045,14 @@ export class GenerationPipeline {
     policy: RetryPolicy,
     validation: ValidationResult | null,
   ): Promise<CommercialCheck> {
-    if (!this.commercialReviewer) return { ...COMMERCIAL_CHECK_SKIPPED };
     // §18 同一条规矩：正文是空的就没有商业表现可评，这一步直接跳过。
-    if (skipReviewFor(validation)) return { ...COMMERCIAL_CHECK_SKIPPED };
+    // 两种「没跑到」都如实记 skipped，与 metadata 的 not_started 同一个意思。
+    if (!this.commercialReviewer || skipReviewFor(validation)) {
+      this.telemetry.skip("reviewing_commercial", attemptNumber);
+      return { ...COMMERCIAL_CHECK_SKIPPED };
+    }
 
-    transitionStage(ctx, "reviewing_commercial", "reviewing_commercial");
+    this.enter(ctx, "reviewing_commercial", attemptNumber);
     this.artifactStore.putMetadata(
       rid,
       this.metaFor(ctx, runtime, {
@@ -1035,7 +1165,11 @@ export class GenerationPipeline {
         issue_message: target.issue_message,
       });
 
+      // v1.8.0 §10：修订作用域从这一刻开到「重新校验 / 重新审阅也跑完」为止，
+      // 于是 llmCalls 记的是这次修订引发的全部调用，不只是修正文那一次。
+      this.telemetry.beginRepair(target.issue_type);
       transitionStage(ctx, `Attempt ${attemptNumber} — Repairing`, "repairing");
+      this.telemetry.enter("repairing", attemptNumber);
       const outcome = await repairer.repair(repairRequestOf(target, current, config, plan));
 
       if (!outcome.success) {
@@ -1062,6 +1196,7 @@ export class GenerationPipeline {
         logger
           .child({ run_id: rid, attempt_number: attemptNumber, repair_number: repairNumber })
           .error("repair failed", outcome.notes ?? "未给出原因");
+        this.telemetry.endRepair("failed");
         break;
       }
 
@@ -1106,7 +1241,13 @@ export class GenerationPipeline {
         after_validation_passed: after.validation ? after.validation.passed : null,
       });
 
-      if (success) break;
+      if (success) {
+        this.telemetry.endRepair("success");
+        break;
+      }
+      // 修是修出来了，但重新校验 / 审阅之后仍没过——与 repairs/NN/metadata.json 的
+      // success=false 同一个口径（§21：采纳只由 decideRetry 说话）
+      this.telemetry.endRepair("failed");
     }
 
     return { story: current, check, decision, repairs };
@@ -1171,6 +1312,10 @@ export class GenerationPipeline {
       meta.overall_score = patch.quality.overall_score;
       meta.quality_issue_count = patch.quality.issues.length;
     }
+    // v1.8.0 §33：两个摘要数是遥测的转述，主数据源是 telemetry.json。
+    // 遥测没拿到（只在采集器本身坏掉的极端情况下）就不写这两个键，绝不补 0。
+    if (patch.duration_ms !== undefined) meta.duration_ms = patch.duration_ms;
+    if (patch.llm_call_count !== undefined) meta.llm_call_count = patch.llm_call_count;
     if (ctx.status === "completed" || ctx.status === "failed") {
       meta.finished_at = new Date().toISOString();
     }
