@@ -16,8 +16,13 @@
 import type { ArtifactStore } from "@/storage/artifact-store";
 import type { ExperimentRunIndexEntry } from "@/types/experiment";
 import type { ExperimentDefinition, ExperimentVariantSummary } from "@/types/experiment";
+import type {
+  ExperimentEfficiency,
+  ExperimentEfficiencyMetric,
+} from "@/types/experiment";
 import type { QualityDimensionKey } from "@/types/quality-dimensions";
 import type { CommercialDimensionKey } from "@/types/commercial-review";
+import type { RunTelemetry } from "@/types/telemetry";
 
 /** 一条样本读回来的分数（缺的项是 null，不补 0）。
  *  维度只搬分数：短评是给人读的一句话，不进均值。 */
@@ -78,6 +83,81 @@ function meanOfField(
   return meanOf(values);
 }
 
+// ---------------------------------------------------------------------------
+// v1.8.0 效率指标（TASK §23/§24）
+//
+// 与分数均值同一套口径，只是数据源换成每个样本自己的 telemetry.json：
+// 只对真有值的样本求均值，分母是有值的样本数（不是这一组的样本总数），
+// 于是「3 次调用里有 1 次拿到了 usage」不会被稀释成「平均 1/3 个 token」。
+// 1.8.0 之前跑出来的样本没有 telemetry.json，它们只是不进分母，不影响别的样本。
+// ---------------------------------------------------------------------------
+
+/** 一条样本读回来的效率原始值（缺的项是 undefined，不是 0）。 */
+export interface ExperimentRunEfficiency {
+  durationMs?: number | null;
+  llmCalls?: number | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  totalTokens?: number | null;
+  retries?: number | null;
+  repairs?: number | null;
+}
+
+/**
+ * 从这条 Run 自己的 telemetry.json 取效率值。
+ *
+ * 读不到（1.8.0 之前的 Run / 文件被手改坏 / 这一步整体缺失）就整份是空对象——
+ * 空对象表示「没有可用的效率数据」，不是「效率是 0」。
+ */
+export function runEfficiencyOf(runId: string, store: ArtifactStore): ExperimentRunEfficiency {
+  const telemetry: RunTelemetry | null = store.readRunTelemetry(runId);
+  if (telemetry === null) return {};
+  const totals = telemetry.totals;
+  return {
+    durationMs: totals.durationMs,
+    // 调用次数与重试次数是采集器必然给出的两项，没有它们说明这份遥测不完整
+    llmCalls: totals.llmCalls,
+    inputTokens: totals.inputTokens,
+    outputTokens: totals.outputTokens,
+    totalTokens: totals.totalTokens,
+    retries: totals.retries,
+    repairs: totals.repairs,
+  };
+}
+
+/** 一个指标：均值 + 有值样本数。一个样本都没有时是 {mean: null, sampleCount: 0}。 */
+function metricOf(
+  samples: { efficiency: ExperimentRunEfficiency }[],
+  pick: (efficiency: ExperimentRunEfficiency) => number | null | undefined,
+): ExperimentEfficiencyMetric {
+  let sampleCount = 0;
+  let total = 0;
+  for (const sample of samples) {
+    const value = pick(sample.efficiency);
+    if (typeof value === "number" && Number.isFinite(value)) {
+      total += value;
+      sampleCount += 1;
+    }
+  }
+  return {
+    mean: sampleCount === 0 ? null : Math.round((total / sampleCount) * 100) / 100,
+    sampleCount,
+  };
+}
+
+/** 一组样本的效率聚合。没有样本时六项都是 null + 0。 */
+function efficiencyOf(samples: { efficiency: ExperimentRunEfficiency }[]): ExperimentEfficiency {
+  return {
+    durationMs: metricOf(samples, (e) => e.durationMs),
+    llmCalls: metricOf(samples, (e) => e.llmCalls),
+    inputTokens: metricOf(samples, (e) => e.inputTokens),
+    outputTokens: metricOf(samples, (e) => e.outputTokens),
+    totalTokens: metricOf(samples, (e) => e.totalTokens),
+    retries: metricOf(samples, (e) => e.retries),
+    repairs: metricOf(samples, (e) => e.repairs),
+  };
+}
+
 /**
  * 按 definition.variants 的顺序分组聚合。
  *
@@ -93,7 +173,11 @@ export function summarizeExperiment(
 ): ExperimentVariantSummary[] {
   return definition.variants.map((variant) => {
     const cells = entries.filter((entry) => entry.variantId === variant.id && entry.runId !== null);
-    const samples = cells.map((cell) => ({ cell, scores: runScoresOf(cell.runId as string, store) }));
+    const samples = cells.map((cell) => ({
+      cell,
+      scores: runScoresOf(cell.runId as string, store),
+      efficiency: runEfficiencyOf(cell.runId as string, store),
+    }));
     return {
       variantId: variant.id,
       runCount: cells.length,
@@ -109,6 +193,8 @@ export function summarizeExperiment(
       meanPacing: meanOfField(samples, (s) => s.commercial?.pacing),
       meanEngagement: meanOfField(samples, (s) => s.commercial?.engagement),
       meanPayoff: meanOfField(samples, (s) => s.commercial?.payoff),
+      // v1.8.0 §23：效率指标同样按 Variant 分组，同样只对真有的样本求
+      efficiency: efficiencyOf(samples),
     };
   });
 }

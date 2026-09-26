@@ -13,6 +13,11 @@
  */
 
 import type { ExperimentDetailApi, ExperimentDefinitionApi, ExperimentListItemApi } from "@/lib/api";
+import type {
+  ExperimentEfficiencyApi,
+  ExperimentEfficiencyMetricApi,
+  ExperimentVariantSummaryApi,
+} from "@/lib/api";
 
 /** 实验状态 → 一行文案。语气中性：partial 不是失败，pending 不是错误。 */
 export function experimentStatusLabel(status: string): { label: string; tone: "neutral" | "good" | "warn" | "bad" } {
@@ -35,6 +40,27 @@ export function meanText(value: number | null | undefined): string {
   return typeof value === "number" && Number.isFinite(value) ? String(value) : "—";
 }
 
+/**
+ * v1.8.0 §24 效率一格：均值 + 有值样本数。
+ *
+ * 一个样本都没有时只显示「—」——不显示 `0/4`，那会让读者以为「跑过但全是 0」。
+ * 格式：`4.2s · 2/4`（毫秒数在这里换成人读时长）。
+ */
+export function efficiencyCellText(
+  metric: ExperimentEfficiencyMetricApi,
+  runCount: number,
+  format: (mean: number) => string,
+): string {
+  if (metric.mean === null || !Number.isFinite(metric.mean)) return "—";
+  return `${format(metric.mean)} · ${metric.sampleCount}/${runCount}`;
+}
+
+/** 毫秒 → 人读时长（与 Run 详情同一套口径）。 */
+export function msText(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
 /** 一行 = 一个 Variant 的聚合数字。顺序 = definition.variants 的顺序（不按分数排）。 */
 export interface ExperimentResultRow {
   variantId: string;
@@ -52,6 +78,8 @@ export interface ExperimentResultRow {
   meanPacing: number | null;
   meanEngagement: number | null;
   meanPayoff: number | null;
+  /** v1.8.0 §23：同一行的效率数字。没有遥测的样本不进分母，所以这里可能是 null。 */
+  efficiency: ExperimentEfficiencyApi;
 }
 
 /** 还没跑出结果时返回 null（界面整段隐藏，不显示空表）。 */
@@ -80,8 +108,25 @@ export function resultRowsOf(detail: ExperimentDetailApi | null): ExperimentResu
       meanPacing: summary?.meanPacing ?? null,
       meanEngagement: summary?.meanEngagement ?? null,
       meanPayoff: summary?.meanPayoff ?? null,
+      efficiency: efficiencyOf(summary),
     };
   });
+}
+
+/** v1.7.1 之前跑出来的实验没有 efficiency 块：各项按「没有数据」处理，不是按 0。 */
+const EMPTY_METRIC: ExperimentEfficiencyMetricApi = { mean: null, sampleCount: 0 };
+
+function efficiencyOf(summary: ExperimentVariantSummaryApi | undefined): ExperimentEfficiencyApi {
+  const e = summary?.efficiency;
+  return {
+    durationMs: e?.durationMs ?? EMPTY_METRIC,
+    llmCalls: e?.llmCalls ?? EMPTY_METRIC,
+    inputTokens: e?.inputTokens ?? EMPTY_METRIC,
+    outputTokens: e?.outputTokens ?? EMPTY_METRIC,
+    totalTokens: e?.totalTokens ?? EMPTY_METRIC,
+    retries: e?.retries ?? EMPTY_METRIC,
+    repairs: e?.repairs ?? EMPTY_METRIC,
+  };
 }
 
 /** 变体卡片：这个名字 + 它相对 Base 改了哪些变量（没改就不列）。 */

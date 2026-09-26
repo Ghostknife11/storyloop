@@ -13,11 +13,14 @@ import {
   RunApiError,
   type ExperimentDetailApi,
 } from "@/lib/api";import {
+  efficiencyCellText,
   experimentStatusLabel,
   meanText,
+  msText,
   resultRowsOf,
   runRowsOf,
   variantCardsOf,
+  type ExperimentResultRow,
 } from "@/lib/experiment-view";
 
 /**
@@ -41,6 +44,26 @@ const MEAN_COLUMNS = [
   { key: "meanEngagement", label: "E" },
   { key: "meanPayoff", label: "Pf" },
 ] as const;
+
+/**
+ * v1.8.0 §23 效率列。每格是「均值 · 有值样本数/本组样本数」：
+ * 一条样本没有 telemetry.json（1.8.0 之前跑的）时它不进分母，这一格就少算一个——
+ * 所以分母小于本组样本数是正常的，不是数据丢了。
+ */
+const EFFICIENCY_COLUMNS = [
+  { key: "durationMs", label: "平均时长", format: (v: number) => msText(v) },
+  { key: "llmCalls", label: "平均调用", format: (v: number) => String(v) },
+  { key: "totalTokens", label: "平均 token", format: (v: number) => String(v) },
+  { key: "retries", label: "平均重试", format: (v: number) => String(v) },
+  { key: "repairs", label: "平均修订", format: (v: number) => String(v) },
+] as const;
+
+/** 整组一个样本都没遥测时，这张表不值得占地方。 */
+function hasAnyEfficiency(rows: ExperimentResultRow[]): boolean {
+  return rows.some((row) =>
+    (Object.values(row.efficiency) as { sampleCount: number }[]).some((m) => m.sampleCount > 0),
+  );
+}
 
 export default function ExperimentDetailPage() {
   const params = useParams<{ experiment_id: string }>();
@@ -178,6 +201,43 @@ export default function ExperimentDetailPage() {
                       {MEAN_COLUMNS.map((col) => (
                         <td key={col.key} className="px-2 py-2 text-right font-mono">
                           {meanText(row[col.key])}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {rows !== null && detail.result && hasAnyEfficiency(rows) && (
+          <section className="space-y-2">
+            <div className="flex items-baseline justify-between gap-3">
+              <h2 className="text-xs font-medium text-muted-foreground">效率</h2>
+              <p className="text-[10px] text-muted-foreground">
+                每格「均值 · 有值样本数 / 本组样本数」；没有 telemetry.json 的样本不进分母，也不当 0
+              </p>
+            </div>
+            <div className="rounded-2xl border border-border bg-muted/40 backdrop-blur overflow-x-auto">
+              <table className="w-full text-[11px]">
+                <thead>
+                  <tr className="text-muted-foreground">
+                    <th className="text-left font-medium px-3 py-2">变体</th>
+                    {EFFICIENCY_COLUMNS.map((col) => (
+                      <th key={col.key} className="text-right font-medium px-2 py-2 whitespace-nowrap">
+                        {col.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => (
+                    <tr key={row.variantId} className="border-t border-border">
+                      <td className="px-3 py-2 font-medium">{row.variantName}</td>
+                      {EFFICIENCY_COLUMNS.map((col) => (
+                        <td key={col.key} className="px-2 py-2 text-right font-mono">
+                          {efficiencyCellText(row.efficiency[col.key], row.runCount, col.format)}
                         </td>
                       ))}
                     </tr>

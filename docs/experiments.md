@@ -133,10 +133,28 @@ runId、失败在哪一步」，`GET` 能如实显示 partial，而不是一片�
 | `meanCommercialScore` | 商业可读性分均值（同上） |
 | `meanCoherence` / `meanNarrative` / `meanCharacter` / `meanCausality` | 四个质量维度均值 |
 | `meanHook` / `meanPacing` / `meanEngagement` / `meanPayoff` | 四个商业维度均值 |
+| `efficiency` | v1.8.0 新增：这一组的效率指标，见下 |
 
 均值只从这次实验自己产出的 `quality.json` / `commercial-review.json` 读，不重跑、不推断、
 不引用别的 Run。一个样本都没跑出来的 Variant 也会出现在结果里（各项 null、计数为 0），
 否则读者会以为这次实验没有这一组。
+
+### v1.8.0 效率指标
+
+`efficiency` 有七项：`durationMs` / `llmCalls` / `inputTokens` / `outputTokens` /
+`totalTokens` / `retries` / `repairs`。每项都是 `{ mean, sampleCount }` 两个数——均值与
+「这个均值是从几个样本算出来的」必须一起读，否则 `4.2s` 是 2 条样本的平均还是 5 条的，
+读的人无从判断。
+
+数据源是每条样本自己的 `telemetry.json`（v1.8.0 起每个 Run 都有）。三条规则：
+
+- 一个样本没有遥测（1.8.0 之前跑的、文件被手改坏、这一步整体缺失），它不进任何分母，
+  也不被当成 0。所以 `sampleCount` 小于这一组的 `runCount` 是正常现象，不是数据丢了。
+- Provider 一次都没返回 usage 时，三个 token 项的 `mean` 是 `null`、`sampleCount` 是 0，
+  而 `llmCalls` 是真实次数——「调了 6 次但一次都没拿到 usage」与「一次都没调」是两件事。
+- 没有 winner、没有 rank，也没有「这组更快所以更好」这类结论。效率只是效率。
+
+字段含义见 [docs/telemetry.md](telemetry.md)。
 
 ## API
 

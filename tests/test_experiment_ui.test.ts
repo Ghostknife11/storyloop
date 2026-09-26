@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  efficiencyCellText,
   experimentListRow,
   experimentStatusLabel,
   meanText,
+  msText,
   resultRowsOf,
   runRowsOf,
   variantCardsOf,
@@ -71,12 +73,23 @@ const DETAIL: ExperimentDetailApi = {
           meanOverallScore: 80, meanCommercialScore: 70,
           meanCoherence: null, meanNarrative: null, meanCharacter: null, meanCausality: null,
           meanHook: null, meanPacing: null, meanEngagement: null, meanPayoff: null,
+          // 2 条样本里只有 1 条有遥测：时长与调用有均值，token 一个样本都没有
+          efficiency: {
+            durationMs: { mean: 42000, sampleCount: 1 },
+            llmCalls: { mean: 6, sampleCount: 1 },
+            inputTokens: { mean: null, sampleCount: 0 },
+            outputTokens: { mean: null, sampleCount: 0 },
+            totalTokens: { mean: null, sampleCount: 0 },
+            retries: { mean: 2, sampleCount: 1 },
+            repairs: { mean: 1, sampleCount: 1 },
+          },
         },
         {
           variantId: "model-b", runCount: 2, successCount: 2, failureCount: 0,
           meanOverallScore: 65, meanCommercialScore: 45,
           meanCoherence: null, meanNarrative: null, meanCharacter: null, meanCausality: null,
           meanHook: null, meanPacing: null, meanEngagement: null, meanPayoff: null,
+          // v1.8.0 之前跑出来的实验：整块 efficiency 都不存在
         },
       ],
     },
@@ -99,6 +112,31 @@ describe("均值展示", () => {
     expect(meanText(undefined)).toBe("—");
     expect(meanText(0)).toBe("0");
     expect(meanText(65)).toBe("65");
+  });
+
+  it("效率一格带样本数；没有样本时只有「—」，不显示 0/N", () => {
+    expect(efficiencyCellText({ mean: 42000, sampleCount: 1 }, 2, msText)).toBe("42.0s · 1/2");
+    expect(efficiencyCellText({ mean: 6, sampleCount: 1 }, 2, (v) => String(v))).toBe("6 · 1/2");
+    // 「没有数据」与「数字是零」是两件事：前者只有 —，后者照常显示
+    expect(efficiencyCellText({ mean: null, sampleCount: 0 }, 2, (v) => String(v))).toBe("—");
+    expect(efficiencyCellText({ mean: 0, sampleCount: 2 }, 2, (v) => String(v))).toBe("0 · 2/2");
+  });
+
+  it("毫秒换成工作习惯的秒", () => {
+    expect(msText(420)).toBe("420ms");
+    expect(msText(1200)).toBe("1.2s");
+  });
+});
+
+describe("效率聚合（v1.8.0）", () => {
+  it("有效率数据的组照搬，没有的组各项都是 null + 0", () => {
+    const rows = resultRowsOf(DETAIL);
+    expect(rows?.[0].efficiency.llmCalls).toEqual({ mean: 6, sampleCount: 1 });
+    expect(rows?.[0].efficiency.totalTokens).toEqual({ mean: null, sampleCount: 0 });
+    // 整块 efficiency 都没有的实验（v1.8.0 之前的）按「没有数据」处理
+    expect(rows?.[1].efficiency.durationMs).toEqual({ mean: null, sampleCount: 0 });
+    // summary 里根本没有这一行时同样不补 0
+    expect(rows?.[2].efficiency.repairs).toEqual({ mean: null, sampleCount: 0 });
   });
 });
 

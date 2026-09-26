@@ -515,6 +515,23 @@ export interface ExperimentRunApi {
   commercialScore?: number | null;
 }
 
+/** v1.8.0 §24 效率指标：均值 + 它自己的样本数，缺一不可读。 */
+export interface ExperimentEfficiencyMetricApi {
+  mean: number | null;
+  sampleCount: number;
+}
+
+/** v1.8.0 §23 一个 Variant 的效率聚合（每个样本自己的 telemetry.json）。 */
+export interface ExperimentEfficiencyApi {
+  durationMs: ExperimentEfficiencyMetricApi;
+  llmCalls: ExperimentEfficiencyMetricApi;
+  inputTokens: ExperimentEfficiencyMetricApi;
+  outputTokens: ExperimentEfficiencyMetricApi;
+  totalTokens: ExperimentEfficiencyMetricApi;
+  retries: ExperimentEfficiencyMetricApi;
+  repairs: ExperimentEfficiencyMetricApi;
+}
+
 /** v1.7.0 一个 Variant 的聚合数字（没有排序、没有赢家，顺序就是定义顺序）。 */
 export interface ExperimentVariantSummaryApi {
   variantId: string;
@@ -531,6 +548,9 @@ export interface ExperimentVariantSummaryApi {
   meanPacing: number | null;
   meanEngagement: number | null;
   meanPayoff: number | null;
+  /** v1.8.0 §23：效率指标。同样只对真有的样本求，一个都没有时各项是 null。
+   *  v1.8.0 之前跑出来的实验没有这一块（可缺），界面按「没有数据」处理，不当 0。 */
+  efficiency?: ExperimentEfficiencyApi;
 }
 
 export interface ExperimentResultApi {

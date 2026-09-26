@@ -141,6 +141,35 @@ export interface ExperimentVariantSummary {
   meanPacing: number | null;
   meanEngagement: number | null;
   meanPayoff: number | null;
+  /** v1.8.0 §23/§24：这一组的效率指标。同样只对真有数据的样本求。 */
+  efficiency: ExperimentEfficiency;
+}
+
+/**
+ * v1.8.0 §24 一个效率指标 = 一个均值 + 它自己的样本数。
+ *
+ * 两个数必须一起出现，因为均值本身不能说明分母：`4.2s；样本 2/4` 与 `4.2s；样本 4/4`
+ * 是不同的两件事。sampleCount 是「这一组里真的有这个值的样本数」——一次 usage 都没拿到的
+ * Run 不进 token 均值的分母，也绝不被当成 0。
+ */
+export interface ExperimentEfficiencyMetric {
+  mean: number | null;
+  sampleCount: number;
+}
+
+/** v1.8.0 §23 效率指标：每个 Run 一份 telemetry.json，读它自己的数。 */
+export interface ExperimentEfficiency {
+  /** 一次 Run 的墙上时长（毫秒），取自 telemetry.totals.durationMs。 */
+  durationMs: ExperimentEfficiencyMetric;
+  /** 一次 Run 的逻辑模型调用次数（transport 重试不拆开算）。 */
+  llmCalls: ExperimentEfficiencyMetric;
+  inputTokens: ExperimentEfficiencyMetric;
+  outputTokens: ExperimentEfficiencyMetric;
+  totalTokens: ExperimentEfficiencyMetric;
+  /** §12 重试次数 = attempt 数 - 1。 */
+  retries: ExperimentEfficiencyMetric;
+  /** 定点修订轮数。 */
+  repairs: ExperimentEfficiencyMetric;
 }
 
 /** §25 整个实验的基础聚合。 */
