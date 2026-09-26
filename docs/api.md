@@ -9,6 +9,11 @@
 > 可选字段 `telemetry`、在实验汇总的每个变体下追加一个可选块 `efficiency`。全部 additive：
 > 路由清单只增不改，既有字段名、类型、状态码含义与错误码一个都没动。
 >
+> v1.9.0 再新增一条只读路由 `GET /api/runs/<run_id>/failure-analysis`，并在 Run 详情响应上
+> 追加一个可选字段 `failureAnalysis`、在实验汇总的每个变体下追加一个可选块 `failures`。
+> 同样是 additive：路由清单只增不改，错误码一个都没新增（这条路由复用
+> `RUN_NOT_FOUND` 与既有的 `run_id` 校验）。
+>
 > 契约测试：`tests/test_contract_api.test.ts`（同时守护路由清单本身）
 
 ## 通用约定
@@ -107,6 +112,7 @@
 | POST | `/api/repair` | 对一段已有正文定点修订一次 |
 | GET | `/api/runs/<run_id>` | Run 详情 |
 | GET | `/api/runs/<run_id>/telemetry` | v1.8.0 新增：读回这次 Run 的遥测；旧 Run 没有 `telemetry.json` 时返回 `{telemetry: null}`（仍是 200） |
+| GET | `/api/runs/<run_id>/failure-analysis` | v1.9.0 新增：读回这次 Run 的失败分类；失败或旧 Run 没有 `failure-analysis.json` 时返回 `{failureAnalysis: null}`（仍是 200） |
 | GET | `/api/runs/<run_id>/attempts/<attempt_number>` | 单次尝试详情 |
 | POST | `/api/prompt/preview` | 看将要发给模型的 prompt 长什么样，不调模型 |
 | POST | `/api/experiments` | v1.7.0 新增：登记一份实验定义（只写 `definition.json`，不跑） |
@@ -212,6 +218,9 @@ v1.6.0 起再多一个 `manifest`：读 `runs/<run_id>/run-manifest.json`，原�
 v1.8.0 起再多一个 `telemetry`：读 `runs/<run_id>/telemetry.json`，原样返回；没有这个文件
 （1.8.0 之前的 Run）、JSON 坏掉或形状不认识时是 `null`，磁盘上同样不会被补写。
 字段级契约见 [telemetry.md](./telemetry.md)。
+v1.9.0 起再多一个 `failureAnalysis`：读 `runs/<run_id>/failure-analysis.json`，原样返回；
+没有这个文件（1.9.0 之前的 Run）、JSON 坏掉或形状不认识时是 `null`，磁盘上同样不会被补写。
+字段级契约见 [failure-analysis.md](./failure-analysis.md)。
 `run_id` 为 `""`、`.`、`..` 或含路径分隔符时 400；Run 不存在 404 `RUN_NOT_FOUND`。
 
 `quality` 按三级兜底取，三级都是同一版正文（入选 Attempt 最终留下的那一版）：
@@ -256,6 +265,33 @@ Run 不存在 404 `RUN_NOT_FOUND`；`run_id` 为 `""`、`.`、`..` 或含路径�
 
 遥测里**没有**正文、Prompt、用户输入、原始请求 / 响应头、Cookie 或任何环境变量原文：
 失败只降级成一个稳定 `errorCode`。这不是「响应时再脱敏」，是写盘时就没有。
+
+### `GET /api/runs/<run_id>/failure-analysis`（v1.9.0 新增）
+
+只读，无请求体，不调用模型（这一层根本没有模型参与），不写任何产物。响应体恒为：
+
+```json
+{ "failureAnalysis": { "schemaVersion": "1", "runId": "...", "...": "..." } }
+```
+
+`failureAnalysis` 是 `failure-analysis.json` 的原文（字段级契约见
+[failure-analysis.md](./failure-analysis.md)），读不到时是 `null`：
+
+- 1.9.0 之前的 Run 没有这个文件 → `{ "failureAnalysis": null }`
+- Run 成功了但分析当时不可用（写盘失败）→ 同样是 `null`
+- 文件存在但 JSON 坏掉、或形状不认识 → 同样是 `null`，**不会** 500，也不会补写磁盘
+
+Run 不存在 404 `RUN_NOT_FOUND`；`run_id` 为 `""`、`.`、`..` 或含路径分隔符时 400
+（与其它 Run 读接口同一套校验）。
+
+`status` 四值：`none`（没有检测到运行级失败）、`detected`、`partial`（部分信号可归类）、
+`unknown`（有失败迹象但归不进任何已知类别）。`primaryCategory` 取自固定 12 类清单
+（`FAILURE_CATEGORIES`），`secondaryCategories` 是同一清单下按固定优先级排序的其余类别；
+证据不足时 `primaryCategory` 是 `null`，绝不会填一个猜出来的类别。
+
+这份分析**不做因果归因**：没有 root cause 字段、没有「很可能是因为」，每条信号只带它自己的
+证据引用（哪份文件 · 哪个字段 · 哪个 Attempt · 哪一轮修订）。API 侧没有任何写入口——
+没有任何路由能通过它触发重试、修订或重新生成。
 
 ### `POST /api/validate-beats`（v1.4.0 新增）
 
@@ -391,6 +427,27 @@ Run 不存在 404 `RUN_NOT_FOUND`；`run_id` 为 `""`、`.`、`..` 或含路径�
 效率指标**只描述这一组样本自己**：不排名、不评赢家、不做显著性检验、不预测成本，
 也不因为它「省了几次调用」就推荐哪个变体——那是人看了数字之后的判断。
 
+#### `failures`（v1.9.0 新增，可选）
+
+每个变体下多一个可选的 `failures` 块——这一组样本的失败类别分布：
+
+```json
+{
+  "analyzedCount": 3,
+  "classifiedCount": 2,
+  "counts": { "GENERATION": 1, "VALIDATION": 1 }
+}
+```
+
+三个约定：只按**主要失败类别**计数（一条样本只进一个格子）；`analyzedCount` 是「这一组里
+真的有 `failure-analysis.json` 的样本数」，`classifiedCount` 是其中真的分出了类别的样本数，
+两个都是显式分母；`counts` 的键序就是 `FAILURE_CATEGORIES` 的固定优先级，没出现过的类别
+不进来。
+
+**没有 `failure-analysis.json` 的样本不进分母**——它可能是 1.9.0 之前跑的实验样本，
+「没有分析」不等于「没有失败」。1.9.0 之前跑完的实验（`results.json` 里没有 `failures` 块）
+整个键不出现，读作「没有这块」，不是「全部没有失败」，也不是 0。
+
 **`POST /api/experiments/<experiment_id>/run`** 无请求体。跑完返回的就是上面那份
 `result`（不是 `{ run, persisted }` 包装）。行为：
 
@@ -412,6 +469,8 @@ Run 不存在 404 `RUN_NOT_FOUND`；`run_id` 为 `""`、`.`、`..` 或含路径�
 - 骨架结构校验只报告，不修复：`/api/validate-beats` 不返回改写后的骨架，也不会触发重新规划
 - **遥测不是观测平台**：`/telemetry` 只回答一次 Run「怎么跑的」，没有跨 Run 的聚合视图、
   不做失败归因与根因分析、不设阈值、不出告警、也没有分布式追踪
+- **失败分析不是根因分析**：`/failure-analysis` 只把观测到的证据归进固定类别并给出引用，
+  不做因果推断、不给 Root Cause、不出修复建议，也不据此改变任何生成行为
 
 ## 相关
 
@@ -420,4 +479,5 @@ Run 不存在 404 `RUN_NOT_FOUND`；`run_id` 为 `""`、`.`、`..` 或含路径�
 - [Run 产物契约](./run-artifacts.md)
 - [受控实验契约（v1.7.0）](./experiments.md)
 - [Run Telemetry 契约（v1.8.0）](./telemetry.md)
+- [失败分析契约（v1.9.0）](./failure-analysis.md)
 - [CLI 契约](./cli.md)

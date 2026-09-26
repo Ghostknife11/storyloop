@@ -13,6 +13,77 @@ All notable changes to Storyloop.
 
 ---
 
+## [1.9.0] —— 2026-09-26
+
+「这次 Run 失败了」从此不再是终点。v1.9.0 在现有 Artifact 与 Telemetry 之上新增一层
+确定性的失败分析：把一次 Run 的失败归进固定 12 类清单里的主要 / 次要类别，配一组信号，
+再为每个判断挂上直接证据（哪份文件的哪个字段、哪个 Attempt、哪一轮修订）。
+它只分类，不归因：没有因果图、没有 Root Cause 字段、没有任何一处代码读它来改变生成行为。
+
+### Added
+
+- **Run 级 `failure-analysis.json`**：每次 Run 在 `metadata.json` 与 `telemetry.json` 旁多落一份，
+  自带 `schemaVersion`（`"1"`），camelCase。字段集固定：`status` / `primaryCategory` /
+  `secondaryCategories` / `summary` / `signals` / `evidence` / `firstFailureStage` /
+  `terminalState`
+- **固定 12 类清单（Structured Failure Categories）**：`SECURITY` / `CONFIGURATION` /
+  `STORAGE` / `PLANNING` / `GENERATION` / `VALIDATION` / `REVIEWER` / `RETRY_EXHAUSTION` /
+  `REPAIR_EXHAUSTION` / `QUALITY` / `COMMERCIAL` / `UNKNOWN`，优先级写死、不重排。
+  清单与规则集中在 `src/lib/failure-rules.ts`，类别名在 `src/types/failure-analysis.ts`
+- **Primary / Secondary 分类**：主要类别取优先级最高的那一个，其余按同一优先级进次要类别；
+  证据不足时 `status` 是 `unknown`、`primaryCategory` 是 `null`，绝不用猜的类别填空位
+- **Failure Signals**：每条信号有稳定 code、来源（metadata / telemetry / beat-validation /
+  story-validation / quality-review / commercial-review / retry / repair / storage / security）
+  与严重度；不属于清单的错误码保留原文进 `UNRECOGNIZED_FAILURE_CODE`，再按已知失败阶段降级
+- **Evidence Linking**：每条信号指向真实产物与字段（`validation.json · issues[0].code` /
+  `metadata.json · attempt_count` / `run-manifest.json · repairs[0].succeeded` /
+  `telemetry.json · failureCode` 这类）。没有证据就没有类别
+- **Retry / Repair 耗尽检测**：`RETRY_EXHAUSTION` / `REPAIR_EXHAUSTION` 由真实计数与
+  `RetryPolicy` 上限判定（`attempt_count` 对 `max_attempts`、`repair_count` 对
+  `max_repairs_per_attempt`），不靠推测
+- **只读出口**：`GET /api/runs/<run_id>/failure-analysis`（没有这份文件时
+  `{failureAnalysis: null}`，HTTP 200），Run 详情响应追加可选字段 `failureAnalysis`
+- **失败分析 UI**：Run 详情页多一块「失败分类」面板——结论、主要 / 次要 / 首个失败阶段 /
+  终态、信号表、证据表。只读：没有重试、没有重跑、没有「按建议修复」
+- **实验级失败类别分布（Experiment Failure Distribution）**：实验汇总的每个 Variant 多一个
+  `failures` 块（`analyzedCount` / `classifiedCount` / `counts`），界面在结果表下方多一张表。
+  只按主要类别数样本；没有 `failure-analysis.json` 的样本不进分母（不当「没有失败」），
+  1.9.0 之前跑的实验整段隐藏
+- **`metadata.json` 的两个转述字段**：`failure_analysis_status` 与（确有类别时的）
+  `primary_failure_category`
+- **`docs/failure-analysis.md`**：字段表、类别优先级、证据指向、四种 `status` 记法与边界
+- **八个测试文件**（`test_failure_models` / `test_failure_rules` / `test_failure_analyzer` /
+  `test_failure_artifacts` / `test_failure_api` / `test_failure_ui` /
+  `test_experiment_failure_distribution` / `test_client_bundle_boundary`）
+
+### Changed
+
+- **Run 详情现在能区分技术失败、规划 / 校验失败、质量偏低、审阅环节自身失败与耗尽状态**：
+  它们本来都只表现为一个失败阶段加一个错误码
+- **Analyzer 是纯确定性函数**：只读磁盘上已有的产物，不调用模型、不访问网络、不做任何新请求；
+  同一份产物每次得到同一份分析
+- **遥测仍是事实来源**：失败分析只对已观测到的证据做分类，不新增观测、不改遥测口径
+- **旧 Run 依然可读**：1.9.0 之前生成的 Run 没有 `failure-analysis.json`，读作 `null`、
+  面板整个隐藏、实验里的分布整段隐藏；不做迁移、不现算、不补零
+
+### Security
+
+- **`failure-analysis.json` 不落凭据**：API Key、`Authorization` 头、Cookie、原始请求 / 响应头、
+  环境变量原文都不进这份文件；URL 一律过安全判定后才出现在证据里
+- **异常只降级成稳定错误码与净化文本**：原始异常 payload 不落盘，路径走 `safeText` 净化
+- **分析器自身失败不影响 Run**：分析抛异常或写盘失败时 Run 仍按原样结束，metadata 记
+  `failure_analysis_status: "unavailable"`、不写类别，成功的 Run 不会因此变失败
+- **v1.1.0 的地址关卡、v1.6.0 的 Run Manifest、v1.7.0 的实验框架边界、v1.8.0 的遥测边界
+  全部原样保留**：这一层没有放松任何一处校验
+
+### Not in this release
+
+这一版刻意**不做**：因果归因与 Root Cause Analysis、自动 Remediation、Adaptive Retry、
+任意可扩展失败模式注册、生成策略自优化。失败分析回答「这是哪一类、在哪个阶段、依据是什么」，
+不回答「为什么会失败」，也不据此改变任何生成行为。
+
+---
+
 ## [1.8.0] —— 2026-09-26
 
 StoryLoop 不再只是保存「输入与结果」，而是能结构化记录一次 Run 的执行过程：哪些阶段运行了、

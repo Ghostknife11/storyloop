@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { FALLBACK_VERSION } from "@/lib/version";
+import { FAILURE_CATEGORIES } from "@/types/failure-analysis";
 import { repoRoot, repoVersion } from "./helpers/fixtures";
 
 /**
@@ -41,6 +42,8 @@ const DOCS = [
   "experiments.md",
   // v1.8.0：Run 级遥测的契约（telemetry.json 字段、计数语义、空值记法与边界）
   "telemetry.md",
+  // v1.9.0：失败分析的契约（类别、优先级、证据指向、状态记法与边界）
+  "failure-analysis.md",
 ] as const;
 
 /**
@@ -310,5 +313,103 @@ describe("v1.8.0 发布门禁 — Run 遥测边界", () => {
     expect(text).toContain("只观察，不控制");
     expect(text).toContain("绝不补 0");
     expect(text).toContain("不做失败归因");
+  });
+});
+
+/**
+ * v1.9.0 失败分析的边界：README 必须把「只分类、不归因、不动手」写清楚
+ * （TASK §58/§59/§60/§69/§70）。写松了就等于宣称它会找根因、会自动补救。
+ */
+const FAILURE_BOUNDARIES = [
+  "只分类，不归因",
+  "不确定就说不知道",
+  "不自动重试",
+  "不自动修订",
+] as const;
+
+/** §59 可宣传的六项能力（英文原词，README 里要真的出现）。 */
+const FAILURE_CAPABILITIES = [
+  "Structured Failure Categories",
+  "Failure Signals",
+  "Evidence Linking",
+  "Primary / Secondary Failure Classification",
+  "Retry / Repair Exhaustion Detection",
+  "Experiment Failure Distribution",
+] as const;
+
+/** §60 禁止宣传的能力：README 一个都不许出现。 */
+const FAILURE_FORBIDDEN = [
+  "Root Cause Analysis",
+  "Causal Failure Attribution",
+  "Automatic Remediation",
+  "Adaptive Retry",
+  "Causal Graph",
+  "Benchmark",
+  "Self Optimization",
+] as const;
+
+describe("v1.9.0 发布门禁 — 失败分析边界", () => {
+  it("README 写清失败分析分类什么、不推断什么", () => {
+    const readme = read("README.md");
+    // §58 定位：确定性分类层，且明说不宣称根因、不改变生成行为
+    expect(readme).toContain("确定性");
+    expect(readme).toContain("失败类别");
+    for (const boundary of FAILURE_BOUNDARIES) {
+      expect(readme, `README 应写明「${boundary}」`).toContain(boundary);
+    }
+    // §59 六项能力要真的在 README 里
+    for (const capability of FAILURE_CAPABILITIES) {
+      expect(readme, `README 应宣传「${capability}」`).toContain(capability);
+    }
+    // §60 禁止宣传的能力一个都不许出现
+    for (const forbidden of FAILURE_FORBIDDEN) {
+      expect(readme, `README 不应宣称「${forbidden}」`).not.toContain(forbidden);
+    }
+    // §69/§70：界面上也不许出现这类词（中文措辞）
+    expect(readme).not.toContain("根因");
+    expect(readme).not.toContain("真正原因");
+    // 路由、文件与两个类别表都要点到
+    expect(readme).toContain("/api/runs/<run_id>/failure-analysis");
+    expect(readme).toContain("failure-analysis.json");
+    expect(readme).toContain("RETRY_EXHAUSTION");
+    expect(readme).toContain("REPAIR_EXHAUSTION");
+  });
+
+  it("docs/failure-analysis.md 写死类别表、优先级、证据指向与状态记法", () => {
+    const text = read("docs/failure-analysis.md");
+    for (const token of [
+      "failure-analysis.json",
+      "schemaVersion",
+      "primaryCategory",
+      "secondaryCategories",
+      "firstFailureStage",
+      "terminalState",
+      "SECURITY",
+      "PLANNING",
+      "GENERATION",
+      "VALIDATION",
+      "REVIEWER",
+      "RETRY_EXHAUSTION",
+      "REPAIR_EXHAUSTION",
+      "UNKNOWN",
+      "UNRECOGNIZED_FAILURE_CODE",
+      "attempt_count",
+      "repair_count",
+      "issues[].code",
+    ]) {
+      expect(text, `docs/failure-analysis.md 应包含 ${token}`).toContain(token);
+    }
+    // 四条边界要在文档里再说一遍：文档比 README 细，不能只写在 README
+    expect(text).toContain("不推断根因");
+    expect(text).toContain("不自动动作");
+    expect(text).toContain("不迁移旧 Run");
+    expect(text).toContain("不替代遥测");
+  });
+
+  it("失败分析的文档与真实类别清单一致（多一个类别就红）", () => {
+    const text = read("docs/failure-analysis.md");
+    for (const category of FAILURE_CATEGORIES) {
+      expect(text, `docs/failure-analysis.md 应列出类别 ${category}`).toContain(category);
+    }
   });
 });

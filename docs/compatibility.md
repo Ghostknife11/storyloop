@@ -257,6 +257,39 @@ attempt 级的四类文件上，run 级文件不带前缀。另外 `--help` 出�
 没有改错误码、没有新文件。1.4.0 及以前生成的全部 Run 读出来逐字一致，唯一例外是
 「模型给了维度」的 attempt 摘要分数——而那正是 v1.3.0 文档承诺的口径。
 
+## v1.9.0 的失败分析（纯 additive）
+
+v1.9.0 新增 `failure-analysis.json`、一条只读路由 `GET /api/runs/<run_id>/failure-analysis`、
+Run 详情响应里的一个可选字段 `failureAnalysis`、实验汇总里每个变体的一个可选块 `failures`，
+以及 `metadata.json` 的两个转述字段 `failure_analysis_status` / `primary_failure_category`。
+没有删字段、没有改字段名、没有改路由与错误码——这条路由连错误码都没新增，复用
+`RUN_NOT_FOUND` 与既有的 `run_id` 校验。
+
+- **新文件只在运行级一份。** `failure-analysis.json` 与 `metadata.json` / `run-manifest.json` /
+  `telemetry.json` 并列写在 Run 根目录；`attempts/` 与 `repairs/` 下一份都没有。
+  运行级固定文件数从十一变十二。
+- **自带 `schemaVersion`，字段是 camelCase。** 与 run-manifest / telemetry 同向，
+  与 snake_case 的 metadata 契约物理隔离。
+- **只分类已观测到的证据。** 主要 / 次要失败类别取自固定 12 类清单，每条信号带自己的证据
+  引用（哪份文件 · 哪个字段 · 哪个 Attempt · 哪一轮修订）。没有证据就没有类别；
+  证据不足时 `status` 是 `unknown`、`primaryCategory` 是 `null`。
+- **确定性、无模型、无网络。** Analyzer 是纯函数：只读磁盘上已有的产物，同一份产物每次得到
+  同一份分析。它新增零次模型调用，也不改任何既有调用。
+- **分析自身失败不影响 Run。** 分析器抛异常或写盘失败时 Run 照原样结束，metadata 记
+  `failure_analysis_status: "unavailable"`、不写类别，磁盘上没有那份文件。
+  成功的 Run 不会因为「多了一份分析」而变成失败。
+- **读不到就是 `null`。** 1.9.0 之前生成的 Run 没有这个文件，路由返回
+  `{failureAnalysis: null}`（HTTP 200）、Run 详情的 `failureAnalysis` 是 `null`、
+  面板整个隐藏，磁盘上不会被补写。实验里 1.9.0 之前跑出来的那组没有 `failures` 块，
+  界面整段隐藏；有分析但没有 `failure-analysis.json` 的样本不进分母——
+  「没有分析」不等于「没有失败」。
+- **不落凭据。** API Key、`Authorization` 头、Cookie、原始请求 / 响应头、环境变量原文都不进
+  这份文件；异常只降级成稳定错误码与净化文本。
+
+它明确**不是**根因分析：不做因果推断、没有 Root Cause 字段、不出修复建议，
+也没有任何代码读它来决定重试、修订或采纳。失败分析回答「这是哪一类、在哪个阶段、
+依据是什么」，不回答「为什么会失败」。
+
 ## v1.8.0 的 Run 可观测性（纯 additive）
 
 v1.8.0 新增 `telemetry.json`、一条只读路由 `GET /api/runs/<run_id>/telemetry`、Run 详情响应里的
@@ -412,5 +445,6 @@ Co/N/C/Ca 四个维度）。低商业分是一次诚实的业务结果，不是�
 - [升级说明](./upgrade.md)
 - [API 契约](./api.md)
 - [Run Telemetry 契约（v1.8.0）](./telemetry.md)
+- [失败分析契约（v1.9.0）](./failure-analysis.md)
 - [CLI 契约](./cli.md)
 - [Run 产物契约](./run-artifacts.md)

@@ -85,8 +85,17 @@ StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts
   结局、Attempt / retries / repairs 计数、失败阶段与稳定错误码，以及 Provider 真实返回的
   usage（拿不到就是没有，不补 0）。API 是 `GET /api/runs/<run_id>/telemetry`，界面是 Run 详情页
   的「可观测性」面板。它只观察，不控制：没有代码读它来决定重试、修订或采纳
+- **Failure Analysis（失败分析，v1.9.0）**：每次 Run 在 `metadata.json` 旁多落一份
+  `failure-analysis.json`，按同一套固定 12 类清单（优先顺序写死：越靠前越优先，
+  `SECURITY` > `CONFIGURATION` > `STORAGE` > … > `UNKNOWN`）把「这次失败是哪一类」
+  整理成结构化分类：主要类别、次要类别、信号表、每条信号指向的直接证据（哪份文件的
+  哪个字段、哪个 Attempt、哪一轮修订）、首个失败阶段与终态；Retry / Repair 是否用尽
+  按真实计数与上限判定。它**只分类，不归因**：没有证据的类别绝不下，证据不足就是
+  `UNKNOWN`（不猜），也没有任何代码读它来改生成行为。API 是
+  `GET /api/runs/<run_id>/failure-analysis`，界面是 Run 详情页的「失败分析」面板，
+  实验详情页另有一组失败类别分布
 - **现代 Web UI**：六阶段进度、Attempt 计数、修订明细、Validation / Review / Commercial
-  Review / Run Provenance / 可观测性面板、实验列表与实验详情、Run ID 与产物清单
+  Review / Run Provenance / 可观测性 / 失败分析面板、实验列表与实验详情、Run ID 与产物清单
 - **OpenAI-compatible LLM**：OpenAI / DeepSeek / 硅基流动 / 任意兼容端点
 - **可编辑 Prompt 模板**：`prompts/*.txt` 直接改，重启生效
 - **稳定 CLI**：`run` / `plan` / `review` / `validate` / `repair` 五个命令，与 API 共用同一套逻辑
@@ -399,10 +408,13 @@ ExperimentDefinition（base + variants[] + repetitions）
 `planning` / …）与一句话摘要，整体状态是 `partial`。每跑完一格就重写一次 `runs.json`，
 进程中途被杀，`GET` 也能如实显示已经跑出来的部分。
 
-结果（`ExperimentResult`）只有计数与均值两类数字：`runCount` / `successCount` /
+结果（`ExperimentResult`）以计数与均值两类数字为主：`runCount` / `successCount` /
 `failureCount` 与九个均值（整体分、商业分、四个质量维度、四个商业维度）。缺分数的样本
 不参与均值，界面显示 `—`。`results.json` 的 `runs` 数组还逐条记下每个样本自己的
 `overallScore` / `commercialScore`（读自它自己的产物，v1.7.1 补上），所以样本行也有数字可看。
+v1.9.0 起每个变体再多一组**失败类别分布**（Experiment Failure Distribution）：按主要失败
+类别数样本、顺序固定，外加「有分析 / 分出类别」两个分母；没有 `failure-analysis.json` 的
+样本不进分母（不当作「没有失败」），1.9.0 之前跑的实验整段隐藏。
 **没有排序、没有赢家、没有显著性检验、没有自动调参。**
 
 | 方法 | 路径 | 说明 |
@@ -686,6 +698,65 @@ v1.8.0 为 StoryLoop 增加 Run 级可观测性，记录各阶段耗时、LLM �
 磁盘上不会被补写。失败 Run 也保存遥测：`status: failed` 配上已经发生过的阶段，
 于是一次失败的 Run「走到哪一步、调了几次模型」是读得出来的。
 
+## Run 失败分析（v1.9.0）
+
+v1.4.0 起 Storyloop 只回答「哪一步失败了」，v1.9.0 把这件事往前推了一步：
+把「这次失败是哪一类」按**同一份固定的 12 类清单**整理成结构化分类，并为每个判断
+挂上直接证据。它回答的是分类问题，不是因果问题——没有任何字段宣称自己找到了原因。
+
+每次 Run 在 `metadata.json` 与 `telemetry.json` 旁多落一份 `failure-analysis.json`
+（camelCase，自带 `schemaVersion`，与那份确定性产物放同一层目录）。
+字段级契约见 [docs/failure-analysis.md](docs/failure-analysis.md)。
+
+| 字段 | 是什么 |
+|---|---|
+| `status` | `none`（没检测到运行级失败）/ `detected` / `partial` / `unknown` |
+| `primaryCategory` | 主要失败类别；不确定时是 `null`，不猜 |
+| `secondaryCategories` | 次要类别，固定优先级排序后的完整列表 |
+| `summary` | 一句话结论：哪一类、在哪个阶段、依据是什么 |
+| `signals` | 信号表：code、来源、严重度、说明 |
+| `evidence` | 证据表：每条信号指向哪份文件的哪个字段、哪个 Attempt、哪一轮修订 |
+| `firstFailureStage` | 首个失败阶段（`planning` / `generating` / …） |
+| `terminalState` | 终态（`completed` / `failed` / …） |
+
+12 个类别按固定优先级排列，**越靠前越优先**——一次失败同时踩到多类时只归最靠前的那一类，
+其余进 `secondaryCategories`。这个顺序是写死的，不按次数、不按分数重排：
+
+`SECURITY`（安全策略阻止） > `CONFIGURATION`（配置问题） > `STORAGE`（产物存储问题） >
+`PLANNING`（剧情骨架问题） > `GENERATION`（正文生成问题） > `VALIDATION`（正文校验问题） >
+`REVIEWER`（审阅环节问题） > `RETRY_EXHAUSTION`（重试次数用尽） >
+`REPAIR_EXHAUSTION`（修订次数用尽） > `QUALITY`（质量偏低） > `COMMERCIAL`（商业可读性偏低） >
+`UNKNOWN`（未能归类）。
+
+六项能力（Failure Signals 与 Evidence Linking 是同一枚硬币的两面：信号是判断，证据是依据）：
+
+- **Structured Failure Categories**：类别是固定清单，不是自由文本；清单见
+  `src/types/failure-analysis.ts` 的 `FAILURE_CATEGORIES`。
+- **Failure Signals**：每条信号都有稳定 code、来源与严重度（`RETRY_LIMIT_REACHED`、
+  `UNRECOGNIZED_FAILURE_CODE` 这类），不写自由发挥的措辞。
+- **Evidence Linking**：没有证据就没有类别。每条信号都带 `evidence`，指向具体产物与字段
+  （`validation.json · issues[0].code` / `metadata.json · attempt_count` /
+  `run-manifest.json · repairs[0].succeeded` 这类）；找不到证据的信号不出现。
+  **不确定就说不知道**：证据不足时 `status` 是 `unknown`、`primaryCategory` 是 `null`，
+  绝不用一个猜出来的类别把空位填满。
+- **Retry / Repair Exhaustion Detection**：`RETRY_EXHAUSTION` / `REPAIR_EXHAUSTION` 只由真实
+  计数与 `RetryPolicy` 的上限判定（`attempt_count` 对 `max_attempts`、
+  `repair_count` 对 `max_repairs_per_attempt`），不靠推测。
+- **Primary / Secondary Failure Classification**（主要 / 次要类别归谁）：主要类别取优先级
+  最高的那一个，其余按同一优先级排进次要类别；`unknown` 只在「有失败迹象但归不进任何一类」时出现，
+  遇到不属于清单的错误码时保留原文、降级归到该阶段最接近的已知类别或 `UNKNOWN`。
+
+界面在 Run 详情页多一块「失败分类」面板（`src/components/failure-panel.tsx`）：
+结论 + 四个字段（主要 / 次要 / 首个失败阶段 / 终态）+ 信号表 + 证据表。
+**面板是只读的**：没有重试、没有重跑、没有「按建议修复」——它不自动重试、不自动修订、
+不改任何生成策略，也没有任何一行文字在回答「为什么会失败」。成功的 Run 只有一句话：`status: "none"` +「没有检测到运行级失败」，
+不摆空表格。
+
+实验级聚合（Experiment Failure Distribution）：实验详情页的每个变体多一行
+「有分析 / 分出类别 / 分布」。只按主要类别数样本，顺序同样是固定优先级；
+**没有 `failure-analysis.json` 的样本不进分母**——不当作「没有失败」；
+1.9.0 之前跑的实验整段隐藏，不显示空表、不补 0。
+
 ## API
 
 | 方法 | 路径 | 说明 |
@@ -702,6 +773,7 @@ v1.8.0 为 StoryLoop 增加 Run 级可观测性，记录各阶段耗时、LLM �
 | POST | `/api/prompt/preview` | `config`（+可选 `beat_plan`）→ 渲染后的最终 Prompt，不调模型 |
 | GET | `/api/runs/<run_id>` | 读回一次 Run 与它的 Attempt 摘要 |
 | GET | `/api/runs/<run_id>/telemetry` | v1.8.0 新增：读回这次 Run 的遥测；旧 Run 没有 `telemetry.json` 时是 `{telemetry: null}` |
+| GET | `/api/runs/<run_id>/failure-analysis` | v1.9.0 新增：读回这次 Run 的失败分析；失败或旧 Run 没有 `failure-analysis.json` 时是 `{failureAnalysis: null}` |
 | GET | `/api/runs/<run_id>/attempts/<n>` | 读回某一次 Attempt 的详情 |
 | POST | `/api/experiments` | 建一份实验定义（201）。**只建，不跑** |
 | GET | `/api/experiments` | 实验列表：定义摘要 + 结果状态，不带样本详情 |
@@ -835,10 +907,11 @@ mapped / NAT64 地址按内嵌的那个地址判
 - **没有高级可观测性**：v1.8.0 有了 Run 级的 `telemetry.json`（阶段耗时 / 调用次数 /
   重试修订 / 失败阶段 / 真实 usage），但仅此而已——仍然没有跨 Run 的聚合视图，没有
   Metrics / Trace / Prometheus / OpenTelemetry / Dashboard，也没有阈值、基线或告警
-- **没有失败归因与因果图**：v1.8.0 的遥测只回答「失败发生在哪个阶段、错误码是什么」；
-  修订只按类别改一次，不回答「为什么会失败」、不推断「哪个组件最可能出问题」
-- **没有自适应生成与自优化**：遥测只记录，不参与决策——没有任何代码读它来决定重试、
-  修订或采纳；同样的输入得到同样的重试次数与同样的修订类别
+- **失败分析只分类，不归因**：v1.9.0 的 `failure-analysis.json` 把失败归进固定的 12 类，
+  并给每条判断挂上直接证据，但它不回答「为什么会失败」——没有因果图、没有原因字段、
+  没有「哪个组件最可能出问题」，也不推断 Prompt 长短、模型能力或温度是否合理
+- **没有自动补救与自适应重试**：失败分析同样是只读的——没有任何代码读它来决定重试、
+  修订或采纳，也没有「按建议修复」这类动作；同样的输入得到同样的重试次数与同样的修订类别
 - **Beat 校验只管结构，且只报告**：它不评价规划质量（这一拍写得好不好、该不该这么排），
   不做跨拍因果推演，也没有自动改写、重排、补拍或重新规划——发现问题后由你决定怎么改
 - **没有工作流引擎 / DAG / Stage Registry**：阶段顺序固定，不能任意跳段
@@ -848,6 +921,19 @@ mapped / NAT64 地址按内嵌的那个地址判
 
 ## 升级说明
 
+v1.9.0 新增 **失败分析**（Failure Analysis）：每次 Run 多落一份
+`runs/<run_id>/failure-analysis.json`（固定 12 类清单下的主要 / 次要失败类别、信号、
+每条信号指向的证据、首个失败阶段与终态），多两条只读出口——Run 详情响应的
+`failureAnalysis` 字段与 `GET /api/runs/<run_id>/failure-analysis`；Run 详情页多一块
+「失败分类」面板，实验详情页多一组失败类别分布；`metadata.json` 多两个可选字段
+`failure_analysis_status` 与 `primary_failure_category`。纯 additive：从 1.8.x 升到 1.9.0
+**不需要改任何代码**，1.8.x 与更早写的产物可以直接读（没有 `failure-analysis.json` 时
+`failureAnalysis` 读作 `null`、面板整个隐藏、实验的失败分布整段隐藏，磁盘上不会被补写）。
+要紧的有三条：运行级固定文件数从十一变十二；没有任何代码读这份分析来决定重试、修订或
+采纳（它只分类，不控制，也不解释原因）；分析跑通但写盘失败时 `failure_analysis_status`
+记 `unavailable`、不写 `primary_failure_category`（成功的 Run 不会因此变失败）。
+回滚到 1.8.0 的代价为零，多出来的文件、字段与路由被旧版本忽略。
+逐版说明见 [docs/upgrade.md](./docs/upgrade.md)。
 v1.8.0 新增 **Run 级可观测性**（Run Telemetry）：每次 Run 多落一份 `runs/<run_id>/telemetry.json`
 （阶段耗时 / LLM 调用 / Retry 与 Repair 次数 / 失败阶段 / 真实可得的 token 与 cost），
 多一条只读路由 `GET /api/runs/<run_id>/telemetry`，Run 详情页多一块「可观测性」面板，
@@ -1018,7 +1104,22 @@ API Key 与 `Authorization` 头不进 `telemetry.json`、含 token 的异常原�
 旧 Run 没有遥测仍照常可读、实验子 Run 各自落遥测且 partial / failed 状态不受影响。
 全部用假模型跑，不打任何真实付费 API。
 
-全部测试合计 **79 个文件 / 1244 条**，全部只调用真实 LLM 之外的桩：
+v1.9.0 的失败分析另有八个测试文件（同样只用假组件）：
+`test_failure_models`（schema 解析、版本不符与坏文件降级、长度上限）、
+`test_failure_rules`（规则表与优先级、未知错误码保留原文、每条规则的用例）、
+`test_failure_analyzer`（确定性、主要 / 次要类别判定、Retry 与 Repair 耗尽按真实计数、
+类别优先级固定、不得出现 Prompt / 模型能力 / 温度一类的归因措辞）、
+`test_failure_artifacts`（真实管道落盘、每条证据都指到盘上真实存在的文件与字段、
+假密钥不进 `failure-analysis.json`、分析器自身失败时 Run 仍然成功且记 `unavailable`、
+与 `examples/example_run/` 逐字节一致）、
+`test_failure_api`（Run 详情附加字段与独立路由、旧 Run 读作 `null`、失败 Run 可读）、
+`test_failure_ui`（面板五种状态、只读没有按钮、没有归因措辞）、
+`test_experiment_failure_distribution`（按主要类别计数、没有分析的样本不进分母、
+1.9.0 之前的实验整段隐藏）、
+`test_client_bundle_boundary`（源码级守卫：客户端可达的任何文件不许 import node 内置模块，
+`failure-rules.ts` 不得再拖进浏览器包）。
+
+全部测试合计 **87 个文件 / 1325 条**，全部只调用真实 LLM 之外的桩：
 LLM 由注入的桩对象或 `FakeLLM` 替代（`tests/helpers/fixtures.ts`），
 `fetch` 也被桩掉。重试相关断言同样只用桩，从不触发真实模型调用。
 URL 校验的用例用注入的假解析器跑，不真的查 DNS，也不碰任何真实主机。
@@ -1039,6 +1140,7 @@ URL 校验的用例用注入的假解析器跑，不真的查 DNS，也不碰任
 | [docs/run-artifacts.md](docs/run-artifacts.md) | Run 产物布局与 metadata 字段集 |
 | [docs/api.md](docs/api.md) | HTTP API 路由、字段、错误码 |
 | [docs/telemetry.md](docs/telemetry.md) | Run Telemetry 契约（v1.8.0）：telemetry.json 字段、计数语义与边界 |
+| [docs/failure-analysis.md](docs/failure-analysis.md) | 失败分析契约（v1.9.0）：类别、优先级、证据指向、状态记法与边界 |
 | [docs/cli.md](docs/cli.md) | CLI 命令、参数、退出码 |
 | [docs/upgrade.md](docs/upgrade.md) | 从 0.9.x / 1.0.0 升级到当前版本 |
 | [docs/compatibility.md](docs/compatibility.md) | 兼容性策略与扩展方式 |

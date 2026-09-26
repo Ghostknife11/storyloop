@@ -221,6 +221,54 @@ npm install
 git checkout 1.3.0
 ```
 
+## 从 1.8.x 升级到 1.9.0
+
+**没有任何需要改代码的地方。** 1.9.0 是纯增量：没有删字段、没有改字段名、没有改既有路由与
+错误码，产物布局、CLI 与 `metadata.json` 契约和 1.8.0 逐字一致。新增的是**失败分析**：
+每次 Run 多一份 `failure-analysis.json`，一条只读路由，一个前端面板，以及实验汇总里一组
+失败类别分布。
+
+要紧的有六条：
+
+1. **Run 根目录多一个文件**：`failure-analysis.json`。运行级固定文件数从十一变成十二；
+   `attempts/` 与 `repairs/` 下一份都没多。按「运行级正好 N 个文件」硬编码的工具要改口径——
+   更稳的做法是忽略不认识的文件名，而不是数个数。字段级契约见
+   [failure-analysis.md](./failure-analysis.md)。
+2. **新增一条只读路由**：`GET /api/runs/<run_id>/failure-analysis` → `{failureAnalysis: ...}`。
+   如果下游对 `/api` 做了白名单代理，现在要把这个路径放进去。
+   它不调用模型（这一层没有模型参与）、不写任何产物，也复用既有的 `RUN_NOT_FOUND`——
+   没有新增错误码。
+3. **两个响应各多一个可选字段**：`GET /api/runs/<run_id>` 多一个 `failureAnalysis`（与上面
+   同一份内容，顺手带上）；实验汇总里每个 variant 多一个可选的 `failures` 块
+   （`analyzedCount` / `classifiedCount` / `counts`）。请把它们当可选字段处理，不要假设
+   一定存在。按字段穷举的解析器（`Object.keys` 比对、`strict` 反序列化）现在会多出几个
+   可能是 `null` 的键。`metadata.json` 另有两个可选字段：`failure_analysis_status` 与
+   （确有类别时的）`primary_failure_category`。
+4. **旧 Run 没有失败分析，读出来是 `null`，磁盘上不会被补写。** 1.9.0 之前生成的 Run：
+   路由返回 `{ "failureAnalysis": null }`（HTTP 200，不是 404），Run 详情的 `failureAnalysis`
+   是 `null`，前端面板整个隐藏。实验里 1.9.0 之前跑出来的那组没有 `failures` 块，
+   界面整段隐藏——不做迁移、不现算、不补零。
+5. **分析自身失败不会让 Run 失败。** 分析器抛异常或写盘失败时，Run 仍按原样结束，
+   `metadata.json` 里 `failure_analysis_status` 是 `"unavailable"`、不写
+   `primary_failure_category`，磁盘上没有那份文件，`failureAnalysis` 读作 `null`。
+   一个成功的 Run 不会因为「多了一份分析」而变成失败。
+6. **失败分析不改变任何生成行为。** 它只分类：固定 12 类清单下的主要 / 次要类别、信号、
+   每条信号指向的证据、首个失败阶段与终态。没有任何代码读它来决定重试、修订或接受判定，
+   也没有因果归因、Root Cause、修复建议或自动 Remediation——这些都不在这一版里。
+
+```bash
+git fetch && git checkout 1.9.0     # tag 不带 v 前缀
+npm install
+```
+
+回滚到 1.8.0 的代价为零：多出来的 `failure-analysis.json`、一个路由与三个响应字段被旧版本
+忽略，1.8.0 读 1.9.0 跑出来的 Run 与往常一样。新增的失败分析测试在回滚后会红，
+这正是它要挡住的事。
+
+```bash
+git checkout 1.8.0
+```
+
 ## 从 1.7.1 升级到 1.8.0
 
 **没有任何需要改代码的地方。** 1.8.0 是纯增量：没有删字段、没有改字段名、没有改既有路由与
