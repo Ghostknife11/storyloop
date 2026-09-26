@@ -164,7 +164,7 @@ function expectHasAll(actual: string[], required: readonly string[], label: stri
 }
 
 describe("v1.0.0 产物布局冻结 — Happy Path", () => {
-  it("运行级目录只含 attempts/ 与冻结的十个文件", async () => {
+  it("运行级目录只含 attempts/ 与冻结的十一个文件", async () => {
     const dir = withTmpDir();
     const llm = new FakeLLM([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW]);
     const result = await pipelineWith(llm, new ArtifactStore()).run(SAMPLE_CONFIG);

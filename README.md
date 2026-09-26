@@ -80,8 +80,13 @@ StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts
   执行的是 `ExperimentRunner`（复用 v1.6.0 的 GenerationPipeline，每个样本都是一次完完整整的
   普通 Run），落盘的是 `ExperimentStore` 里 `experiments/` 下的 `definition.json` / `runs.json` /
   `results.json`。它只摆数字：每个 Variant 的计数与均值，顺序永远是你声明时的顺序
+- **Run Telemetry（Run 可观测性，v1.8.0）**：每次 Run 在 `metadata.json` 旁多落一份
+  `telemetry.json`，记下这次怎么跑的——各阶段起止与耗时、每次模型调用的阶段 / 模型 / 耗时 /
+  结局、Attempt / retries / repairs 计数、失败阶段与稳定错误码，以及 Provider 真实返回的
+  usage（拿不到就是没有，不补 0）。API 是 `GET /api/runs/<run_id>/telemetry`，界面是 Run 详情页
+  的「可观测性」面板。它只观察，不控制：没有代码读它来决定重试、修订或采纳
 - **现代 Web UI**：六阶段进度、Attempt 计数、修订明细、Validation / Review / Commercial
-  Review / Run Provenance 面板、实验列表与实验详情、Run ID 与产物清单
+  Review / Run Provenance / 可观测性面板、实验列表与实验详情、Run ID 与产物清单
 - **OpenAI-compatible LLM**：OpenAI / DeepSeek / 硅基流动 / 任意兼容端点
 - **可编辑 Prompt 模板**：`prompts/*.txt` 直接改，重启生效
 - **稳定 CLI**：`run` / `plan` / `review` / `validate` / `repair` 五个命令，与 API 共用同一套逻辑
@@ -188,7 +193,9 @@ StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts
 │                      │  v1.2.0 起多一份 quality.json（Run 根与 attempts/NN/ 各一份）
 │                      │  v1.4.0 起多一份 beat-validation.json（Run 根，对 BeatPlan 唯一）
 │                      │  v1.5.0 起多一份 commercial-review.json（Run 根与 attempts/NN/ 各一份）
-└──────────────────────┘
+│                      │  v1.6.0 起多一份 run-manifest.json（Run 根，一次 Run 一份）
+│                      │  v1.8.0 起多一份 telemetry.json（Run 根，写盘前过一遍结构校验）
+└──────────────────────────────────────────┘
 ```
 
 质量结论的流向：Validator / Reviewer / RetryPolicy 各自产出**原始**结论（落盘为
@@ -288,6 +295,7 @@ runs/
     ├── quality.json     # 被选中那一次 Attempt 的统一质量快照（v1.2.0 新增）
     ├── metadata.json    # 运行级 metadata
     ├── run-manifest.json  # 这次 Run 的出身清单（v1.6.0 新增，只在运行级一份）
+    ├── telemetry.json    # 这次 Run 的执行过程：阶段耗时 / 调用次数 / 重试修订 / 失败阶段（v1.8.0 新增）
     └── attempts/
         ├── 01/
         │   ├── story.md          # 该次尝试的正文（发生过修订时为修订后的版本）
@@ -637,6 +645,42 @@ Run 类入口与两个读回接口响应里的 `quality`、前端 Quality Summar
 被认为「整篇不可用」，不尝试修订，直接整篇重生。修订拿不到非空正文时返回 200 但
 `success` 为 `false`——「没修好」是一次诚实的业务结果，不当成 502 报错。
 
+## Run Telemetry（v1.8.0）
+
+v1.8.0 为 StoryLoop 增加 Run 级可观测性，记录各阶段耗时、LLM 调用、Retry / Repair 次数、
+失败阶段以及真实可得的 token / cost 信息，但这些数据只用于观察，不会自动改变生成策略。
+
+每次 Run 多落一份 `runs/<run_id>/telemetry.json`，与 `metadata.json`（状态摘要）、
+`run-manifest.json`（出身清单）并列——三份文件回答三个不同的问题，互不替代。
+字段级契约见 [docs/telemetry.md](docs/telemetry.md)。
+
+| 能力 | 记的是什么 |
+|---|---|
+| Run Telemetry | 这次 Run 的总时长、起止时间、进程级结局 |
+| Stage Timing | 每个阶段的起止与耗时；同一个阶段跑多次就记多次，不预先求平均 |
+| LLM Call Tracking | 每次模型调用的阶段 / 模型 / 耗时 / 结局；transport 重试算在同一次调用里，不拆开 |
+| Retry / Repair Counts | Attempt 数换算出的 retries；定点修订次数挂在各 Attempt 名下 |
+| Failure Stage | 失败发生在哪个阶段，配一个稳定错误码——是位置，不是原因 |
+| Token Usage | Provider 真实返回的 usage；一次都没给就是没有，不补 0 |
+| Optional Cost Tracking | Provider 同时给了金额与币种才记，否则成本这一行整个不出现 |
+| Experiment Efficiency Metrics | 实验里每个 Variant 的耗时 / 调用 / token / 重试 / 修订均值 |
+
+三条边界是这一版的底线：
+
+- **只观察，不控制。** 遥测里没有一个字段是给重试、修订或接受判定用的。没有任何代码读遥测
+  来决定下一步怎么跑——同样的输入仍然得到同样的重试次数与修订类别。
+- **没有就是没有。** Provider 没给 usage 时 token 三项是 `null`、成本整行不出现，界面显示
+  `—` 而不是 0。「没有数字」和「数字是零」在这里永远是两件事。
+- **不落正文、不落密钥、不落原始异常。** 完整 Prompt、正文与用户输入在别的产物里；
+  API Key、`Authorization` 头、Cookie、原始请求 / 响应头、环境变量原文一个字都不进
+  `telemetry.json`；异常只降级成一个稳定错误码。
+
+界面在 Run 详情页多一块「可观测性」面板：总览（总时长 / 调用次数 / Attempt / 重试 /
+修订 / token）+ 阶段时间线 + 模型调用表 + Attempt 列表。1.8.0 之前的旧 Run 没有这个文件，
+面板整个隐藏，`GET /api/runs/<run_id>/telemetry` 返回 `{telemetry: null}`（200），
+磁盘上不会被补写。失败 Run 也保存遥测：`status: failed` 配上已经发生过的阶段，
+于是一次失败的 Run「走到哪一步、调了几次模型」是读得出来的。
+
 ## API
 
 | 方法 | 路径 | 说明 |
@@ -652,6 +696,7 @@ Run 类入口与两个读回接口响应里的 `quality`、前端 Quality Summar
 | POST | `/api/repair` | `{config, beat_plan, story, issue_type, issue_message}` → 单独定点修订 |
 | POST | `/api/prompt/preview` | `config`（+可选 `beat_plan`）→ 渲染后的最终 Prompt，不调模型 |
 | GET | `/api/runs/<run_id>` | 读回一次 Run 与它的 Attempt 摘要 |
+| GET | `/api/runs/<run_id>/telemetry` | v1.8.0 新增：读回这次 Run 的遥测；旧 Run 没有 `telemetry.json` 时是 `{telemetry: null}` |
 | GET | `/api/runs/<run_id>/attempts/<n>` | 读回某一次 Attempt 的详情 |
 | POST | `/api/experiments` | 建一份实验定义（201）。**只建，不跑** |
 | GET | `/api/experiments` | 实验列表：定义摘要 + 结果状态，不带样本详情 |
@@ -782,11 +827,13 @@ mapped / NAT64 地址按内嵌的那个地址判
   参数、不优化 Prompt；同一份定义重跑会被 409 挡住（定义与结果都不可变）
 - **实验没有断点续跑**：跑到一半被杀，磁盘上留着前几格的进度（`GET` 看得见），但再次开跑是
   从第一格重新开始，已经花过钱的样本会再跑一遍；跑的时候不要中途杀进程
-- **没有高级可观测性**：只做工程日志（等级 + `run_id` / `attempt` / `repair` 上下文 + 脱敏），
-  没有 Metrics / Trace / Prometheus / OpenTelemetry / Dashboard
-- **没有失败归因与因果图**：修订只按类别改一次，不回答「为什么会失败」、
-  不推断「哪个组件最可能出问题」
-- **没有自适应生成与自优化**：同样的输入得到同样的重试次数与同样的修订类别
+- **没有高级可观测性**：v1.8.0 有了 Run 级的 `telemetry.json`（阶段耗时 / 调用次数 /
+  重试修订 / 失败阶段 / 真实 usage），但仅此而已——仍然没有跨 Run 的聚合视图，没有
+  Metrics / Trace / Prometheus / OpenTelemetry / Dashboard，也没有阈值、基线或告警
+- **没有失败归因与因果图**：v1.8.0 的遥测只回答「失败发生在哪个阶段、错误码是什么」；
+  修订只按类别改一次，不回答「为什么会失败」、不推断「哪个组件最可能出问题」
+- **没有自适应生成与自优化**：遥测只记录，不参与决策——没有任何代码读它来决定重试、
+  修订或采纳；同样的输入得到同样的重试次数与同样的修订类别
 - **Beat 校验只管结构，且只报告**：它不评价规划质量（这一拍写得好不好、该不该这么排），
   不做跨拍因果推演，也没有自动改写、重排、补拍或重新规划——发现问题后由你决定怎么改
 - **没有工作流引擎 / DAG / Stage Registry**：阶段顺序固定，不能任意跳段
@@ -796,6 +843,15 @@ mapped / NAT64 地址按内嵌的那个地址判
 
 ## 升级说明
 
+v1.8.0 新增 **Run 级可观测性**（Run Telemetry）：每次 Run 多落一份 `runs/<run_id>/telemetry.json`
+（阶段耗时 / LLM 调用 / Retry 与 Repair 次数 / 失败阶段 / 真实可得的 token 与 cost），
+多一条只读路由 `GET /api/runs/<run_id>/telemetry`，Run 详情页多一块「可观测性」面板，
+实验汇总的每个变体多一组效率指标。纯 additive：从 1.7.x 升到 1.8.0 **不需要改任何代码**，
+1.7.x 写的产物可以直接读（`telemetry` 读作 `null`、面板整个隐藏，磁盘上不会被补写）。
+要紧的有三条：运行级固定文件数从十个变十一个；按字段穷举解析 `GET /api/runs/<id>` 与
+实验汇总的下游会多出几个可能是 `null` 的可选键；遥测只观察不控制——没有任何代码读它来
+决定重试、修订或采纳。回滚到 1.7.1 的代价为零，多出来的文件、路由与字段被旧版本忽略。
+逐版说明见 [docs/upgrade.md](./docs/upgrade.md)。
 v1.7.0 新增 **受控实验框架**（Experiment Framework）：`POST /api/experiments` 建定义、
 `POST /api/experiments/<id>/run` 跑完、`GET /api/experiments[/<id>]` 读结果，界面是
 `/experiments` 与 `/experiments/<id>`。数据落在 `runs/` 旁的 `experiments/` 下三个 JSON。
@@ -949,7 +1005,15 @@ v1.5.2 的界面修订新增 `tests/test_ui_theme_tokens.test.ts`（13 条）：
 出现 `bg-input`」「生成结果面板必须是 `grow shrink-0` 而不是 `flex-1`、正文滚动区不许写死
 高度」。拿 1.5.1 的源码跑这批断言会红 37 处。
 
-全部测试合计 **71 个文件 / 1104 条**，全部只调用真实 LLM 之外的桩：
+v1.8.0 的 Run 可观测性另有 `tests/test_telemetry.test.ts`（34 条）：阶段计时非负且
+completed / failed 各有该有的字段、3 次 Attempt 记 `retries = 2`、两次修订记 `repairs = 2`、
+六类组件的调用次数按逻辑调用计数、usage 只在 Provider 真给时落盘（没给就是 `null`，
+一次都没给时三个 token 键整个不出现）、没有可信价格信息时成本为 null 且界面不显示 0、
+API Key 与 `Authorization` 头不进 `telemetry.json`、含 token 的异常原文不被逐字落盘、
+旧 Run 没有遥测仍照常可读、实验子 Run 各自落遥测且 partial / failed 状态不受影响。
+全部用假模型跑，不打任何真实付费 API。
+
+全部测试合计 **79 个文件 / 1244 条**，全部只调用真实 LLM 之外的桩：
 LLM 由注入的桩对象或 `FakeLLM` 替代（`tests/helpers/fixtures.ts`），
 `fetch` 也被桩掉。重试相关断言同样只用桩，从不触发真实模型调用。
 URL 校验的用例用注入的假解析器跑，不真的查 DNS，也不碰任何真实主机。
@@ -969,9 +1033,11 @@ URL 校验的用例用注入的假解析器跑，不真的查 DNS，也不碰任
 | [docs/beat-plan.md](docs/beat-plan.md) | BeatPlan v1 字段级契约 |
 | [docs/run-artifacts.md](docs/run-artifacts.md) | Run 产物布局与 metadata 字段集 |
 | [docs/api.md](docs/api.md) | HTTP API 路由、字段、错误码 |
+| [docs/telemetry.md](docs/telemetry.md) | Run Telemetry 契约（v1.8.0）：telemetry.json 字段、计数语义与边界 |
 | [docs/cli.md](docs/cli.md) | CLI 命令、参数、退出码 |
 | [docs/upgrade.md](docs/upgrade.md) | 从 0.9.x / 1.0.0 升级到当前版本 |
 | [docs/compatibility.md](docs/compatibility.md) | 兼容性策略与扩展方式 |
+| [docs/experiments.md](docs/experiments.md) | 受控实验契约（v1.7.0） |
 | [examples/example_run/](examples/example_run/) | 一次完整 Run 的合成样例产物 |
 | [configs/example_story.json](configs/example_story.json) | 覆盖全部可选字段的示例配置 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本历史 |

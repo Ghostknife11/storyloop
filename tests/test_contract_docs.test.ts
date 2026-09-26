@@ -39,6 +39,8 @@ const DOCS = [
   "compatibility.md",
   // v1.7.0：受控实验框架的契约（定义 / 执行 / 聚合 / 边界）
   "experiments.md",
+  // v1.8.0：Run 级遥测的契约（telemetry.json 字段、计数语义、空值记法与边界）
+  "telemetry.md",
 ] as const;
 
 /**
@@ -235,5 +237,78 @@ describe("v1.7.0 发布门禁 — 实验框架边界", () => {
     }
     // 同样的边界要在文档里再说一遍：文档比 README 细，不能只写在 README
     expect(text).toContain("不排名");
+  });
+});
+
+/**
+ * v1.8.0 Run 遥测的边界：README 必须把「只观察、不造假、不落敏感数据」写清楚
+ * （TASK §49/§51/§62）。这些串对应 README 里 blockquote 的原话，写松了就等于
+ * 宣称它会归因、会告警、会自动改生成策略。
+ */
+const TELEMETRY_BOUNDARIES = [
+  "只观察，不控制",
+  "没有就是没有",
+  "不落正文、不落密钥、不落原始异常",
+  "不会自动改变生成策略",
+] as const;
+
+/** §51 不许宣传的能力：README 一个都不许出现（英文原词，与 §50 的清单对应）。 */
+const TELEMETRY_FORBIDDEN = [
+  "Root Cause Analysis",
+  "Automatic Optimization",
+  "Alerting",
+  "Distributed Tracing",
+  "Benchmark",
+  "Failure Attribution",
+  "Adaptive Generation",
+] as const;
+
+describe("v1.8.0 发布门禁 — Run 遥测边界", () => {
+  it("README 写清遥测记什么、不记什么", () => {
+    const readme = read("README.md");
+    for (const boundary of TELEMETRY_BOUNDARIES) {
+      expect(readme, `README 应写明「${boundary}」`).toContain(boundary);
+    }
+    // §50 可宣传的八项能力要真的在 README 里
+    for (const capability of [
+      "Run Telemetry",
+      "Stage Timing",
+      "LLM Call Tracking",
+      "Retry / Repair Counts",
+      "Failure Stage",
+      "Token Usage",
+      "Optional Cost Tracking",
+      "Experiment Efficiency Metrics",
+    ]) {
+      expect(readme, `README 应宣传「${capability}」`).toContain(capability);
+    }
+    // §51 禁止宣传的能力一个都不许出现
+    for (const forbidden of TELEMETRY_FORBIDDEN) {
+      expect(readme, `README 不应宣称「${forbidden}」`).not.toContain(forbidden);
+    }
+    // 路由与文件都要点到
+    expect(readme).toContain("/api/runs/<run_id>/telemetry");
+    expect(readme).toContain("telemetry.json");
+  });
+
+  it("docs/telemetry.md 写死字段表、计数语义与空值记法", () => {
+    const text = read("docs/telemetry.md");
+    for (const token of [
+      "telemetry.json",
+      "TELEMETRY_SCHEMA_VERSION",
+      "durationMs",
+      "failureStage",
+      "usageSampleCount",
+      "llmCalls",
+      "attempts",
+      "repairs",
+      "artifact_promotion",
+    ]) {
+      expect(text, `docs/telemetry.md 应包含 ${token}`).toContain(token);
+    }
+    // 三条边界要在文档里再说一遍：文档比 README 细，不能只写在 README
+    expect(text).toContain("只观察，不控制");
+    expect(text).toContain("绝不补 0");
+    expect(text).toContain("不做失败归因");
   });
 });

@@ -5,6 +5,10 @@
 >
 > v1.6.0 只在两个 Run 类响应上各追加一个可选字段 `manifest`，路由、错误码与既有字段逐字未动。
 >
+> v1.8.0 新增一条只读路由 `GET /api/runs/<run_id>/telemetry`，并在 Run 详情响应上追加一个
+> 可选字段 `telemetry`、在实验汇总的每个变体下追加一个可选块 `efficiency`。全部 additive：
+> 路由清单只增不改，既有字段名、类型、状态码含义与错误码一个都没动。
+>
 > 契约测试：`tests/test_contract_api.test.ts`（同时守护路由清单本身）
 
 ## 通用约定
@@ -102,6 +106,7 @@
 | POST | `/api/validate` | 对一段已有正文单独跑硬性规则（不调模型） |
 | POST | `/api/repair` | 对一段已有正文定点修订一次 |
 | GET | `/api/runs/<run_id>` | Run 详情 |
+| GET | `/api/runs/<run_id>/telemetry` | v1.8.0 新增：读回这次 Run 的遥测；旧 Run 没有 `telemetry.json` 时返回 `{telemetry: null}`（仍是 200） |
 | GET | `/api/runs/<run_id>/attempts/<attempt_number>` | 单次尝试详情 |
 | POST | `/api/prompt/preview` | 看将要发给模型的 prompt 长什么样，不调模型 |
 | POST | `/api/experiments` | v1.7.0 新增：登记一份实验定义（只写 `definition.json`，不跑） |
@@ -204,6 +209,9 @@ promote 之后才出现在运行根目录，失败路径从不 promote）。v1.5
 `not_started`，等于否认磁盘上 `attempts/NN/commercial-review.json` 的存在。
 v1.6.0 起再多一个 `manifest`：读 `runs/<run_id>/run-manifest.json`，原样返回；没有这个文件
 （v1.6.0 之前的 Run）或形状不认识时是 `null`，磁盘上不会被补写。
+v1.8.0 起再多一个 `telemetry`：读 `runs/<run_id>/telemetry.json`，原样返回；没有这个文件
+（1.8.0 之前的 Run）、JSON 坏掉或形状不认识时是 `null`，磁盘上同样不会被补写。
+字段级契约见 [telemetry.md](./telemetry.md)。
 `run_id` 为 `""`、`.`、`..` 或含路径分隔符时 400；Run 不存在 404 `RUN_NOT_FOUND`。
 
 `quality` 按三级兜底取，三级都是同一版正文（入选 Attempt 最终留下的那一版）：
@@ -228,6 +236,26 @@ v1.2.0 直接读 attempt 目录，于是旧 Run 装配出的分数描述的是�
 Run 不存在与 Attempt 不存在共用 `RUN_NOT_FOUND` 这个 code，只能靠 message 区分；
 `attempt_number` 不是 1~99 的整数时 400。
 `quality` 先读 `attempts/<NN>/quality.json`，缺失或被改坏时按上面第 3 级同一套规则装配。
+
+### `GET /api/runs/<run_id>/telemetry`（v1.8.0 新增）
+
+只读，无请求体，不调用模型，不写任何产物。响应体恒为：
+
+```json
+{ "telemetry": { "schemaVersion": "1", "runId": "...", "...": "..." } }
+```
+
+`telemetry` 是 `telemetry.json` 的原文（字段级契约见 [telemetry.md](./telemetry.md)），
+读不到时是 `null`：
+
+- 1.8.0 之前的 Run 没有这个文件 → `{ "telemetry": null }`
+- 文件存在但 JSON 坏掉、或形状不认识 → 同样是 `null`，**不会** 500，也不会补写磁盘
+
+Run 不存在 404 `RUN_NOT_FOUND`；`run_id` 为 `""`、`.`、`..` 或含路径分隔符时 400
+（与其它 Run 读接口同一套校验）。
+
+遥测里**没有**正文、Prompt、用户输入、原始请求 / 响应头、Cookie 或任何环境变量原文：
+失败只降级成一个稳定 `errorCode`。这不是「响应时再脱敏」，是写盘时就没有。
 
 ### `POST /api/validate-beats`（v1.4.0 新增）
 
@@ -332,11 +360,36 @@ Run 不存在与 Attempt 不存在共用 `RUN_NOT_FOUND` 这个 code，只能靠
   （v1.7.1 之前这两项从不落盘，界面上每一行都显示「—」）
 - `summary`：`runCount` / `successCount` / `failureCount` 三个计数，加 `variants`
   一个数组——按定义顺序排列，每项 `variantId` / `runCount` / `successCount` /
-  `failureCount` / `meanOverallScore` / `meanCommercialScore` 与八个维度均值
+  `failureCount` / `meanOverallScore` / `meanCommercialScore`、八个维度均值
   （`meanCoherence` / `meanNarrative` / `meanCharacter` / `meanCausality` /
-  `meanHook` / `meanPacing` / `meanEngagement` / `meanPayoff`）。
+  `meanHook` / `meanPacing` / `meanEngagement` / `meanPayoff`），以及 v1.8.0 新增的
+  `efficiency` 一组效率指标（见下）。
   均值只对有分数的样本求，一个都没有时是 `null` 而不是 `0`——
   「没有数字」和「数字是零」是两件事。**没有 winner、没有 rank、没有排名字段。**
+
+#### `efficiency`（v1.8.0 新增）
+
+每个变体下多一个 `efficiency` 对象，七项指标，每项都是 `{mean, sampleCount}`：
+
+```json
+{
+  "durationMs":  { "mean": 42000, "sampleCount": 2 },
+  "llmCalls":    { "mean": 6,    "sampleCount": 2 },
+  "inputTokens": { "mean": null, "sampleCount": 0 },
+  "outputTokens":{ "mean": null, "sampleCount": 0 },
+  "totalTokens": { "mean": null, "sampleCount": 0 },
+  "retries":     { "mean": 0,    "sampleCount": 2 },
+  "repairs":     { "mean": 1,    "sampleCount": 2 }
+}
+```
+
+两个数必须一起出现：均值本身不能说明分母，`4.2s；样本 2/4` 与 `4.2s；样本 4/4`
+是两件事。`sampleCount` 是「这一组里真的有这个值的样本数」——一次 usage 都没拿到的 Run
+不进 token 均值的分母，也绝不被当成 0。没有效率数据（1.8.0 之前的实验、或这条 Run 自己的
+`telemetry.json` 读不到）时各项是 `{mean: null, sampleCount: 0}`。
+
+效率指标**只描述这一组样本自己**：不排名、不评赢家、不做显著性检验、不预测成本，
+也不因为它「省了几次调用」就推荐哪个变体——那是人看了数字之后的判断。
 
 **`POST /api/experiments/<experiment_id>/run`** 无请求体。跑完返回的就是上面那份
 `result`（不是 `{ run, persisted }` 包装）。行为：
@@ -357,6 +410,8 @@ Run 不存在与 Attempt 不存在共用 `RUN_NOT_FOUND` 这个 code，只能靠
   leaderboard、不做自动调参与自动超参搜索（详见 [experiments.md](./experiments.md)）
 - 没有 middleware 改响应、没有全局 error handler：每个路由自己负责把 service 的结果转成响应
 - 骨架结构校验只报告，不修复：`/api/validate-beats` 不返回改写后的骨架，也不会触发重新规划
+- **遥测不是观测平台**：`/telemetry` 只回答一次 Run「怎么跑的」，没有跨 Run 的聚合视图、
+  不做失败归因与根因分析、不设阈值、不出告警、也没有分布式追踪
 
 ## 相关
 
@@ -364,4 +419,5 @@ Run 不存在与 Attempt 不存在共用 `RUN_NOT_FOUND` 这个 code，只能靠
 - [BeatPlan v1 契约](./beat-plan.md)
 - [Run 产物契约](./run-artifacts.md)
 - [受控实验契约（v1.7.0）](./experiments.md)
+- [Run Telemetry 契约（v1.8.0）](./telemetry.md)
 - [CLI 契约](./cli.md)

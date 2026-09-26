@@ -13,6 +13,77 @@ All notable changes to Storyloop.
 
 ---
 
+## [1.8.0] —— 2026-09-26
+
+StoryLoop 不再只是保存「输入与结果」，而是能结构化记录一次 Run 的执行过程：哪些阶段运行了、
+各自耗时多少、调用了多少次模型、发生了多少 Retry / Repair、失败发生在哪里，以及真实可得的
+token / cost。系统开始看得见自己怎么运行，但还不会解释为什么失败，更不会根据这些数据自动改变行为。
+
+### Added
+
+- **Run 级 `telemetry.json`**：每次 Run 在 `metadata.json` 旁多落一份，与状态摘要、出身清单
+  三者互不替代。自带 `schemaVersion`（`"1"`），与 run-manifest 的版本号相互独立
+- **阶段计时**：每个阶段一次执行一条记录（`stage` / `status` / `startedAt` / `completedAt` /
+  `durationMs` / 可选 `errorCode` / 可选 `attemptNumber`）。同一个阶段在一次 Run 里跑多次就记
+  多次，不预先求平均；耗时取自单调时钟，不为负。`artifact_promotion` 是遥测独有的一步
+- **结构化 LLM 调用遥测**：一次逻辑调用一条（`id` / `stage` / `model` / 起止 / `durationMs` /
+  `status` / 真实 usage / 可选 cost / 可选 errorCode）。Transport Retry 算在同一次调用里，
+  不拆成多条——否则「调用次数」会虚高
+- **Attempt / retry / repair 计数器**：`attempts` 数组带每次尝试的各步骤调用数与修订次数，
+  `repairs` 数组带每次修订的类别、结局、耗时与期间调用数；`totals.retries` 按
+  `attempts - 1` 计，一次都没跑成是 0 而不是 -1
+- **失败阶段记录**：`failureStage` + 稳定 `failureCode`。是位置与编码，不是原因
+- **Provider usage 捕获**：只在 Provider 真实返回时记录；拿不到整项是 `null`，客户端一个数都不估
+- **可选成本捕获**：只有 Provider 同时给出金额与币种才记 `{amount, currency}`；这个仓库没有
+  版本化价格表，价格只可能来自 Provider 自己
+- **失败 Run 也保存遥测**：跑到一半失败时已发生的阶段照常落盘，`status: "failed"`
+- **Run 可观测性 UI**：Run 详情页多一块面板——总览（总时长 / 调用次数 / Attempt / 重试 /
+  修订 / token，成本只在真实可得时出现）、阶段时间线、模型调用表、Attempt 列表。
+  取不到的值一律显示 `—`，绝不显示成 0
+- **只读路由 `GET /api/runs/<run_id>/telemetry`**：`{telemetry: ...}`；旧 Run 没有这个文件时
+  返回 `{telemetry: null}`（HTTP 200）
+- **Run 详情响应追加可选字段 `telemetry`**：与上面同一份内容，读接口顺手带上
+- **实验效率指标**：实验汇总的每个 Variant 多一个 `efficiency` 对象，七项指标各是
+  `{mean, sampleCount}`——`durationMs` / `llmCalls` / token 三项 / `retries` / `repairs`。
+  只对真有值的样本求均值，一个都没有时是 `{mean: null, sampleCount: 0}`
+- **`metadata.json` 的两个转述字段**：`duration_ms` 与 `llm_call_count`，不用再翻一个文件时的
+  快捷方式。新增字段，`metadata.json` 契约本身 additive
+- **`tests/test_telemetry.test.ts`**（34 条）：计时、计数 semantics、六类组件的调用计数、
+  usage 可得性、成本不伪造、密钥不进产物、异常脱敏、旧 Run 兼容、实验子 Run 遥测
+
+### Changed
+
+- **LLM 调用经由共享采集路径插桩**：`LLMClient` 构造时可接一个 `LLMTelemetrySink`，
+  Planner / Generator / BeatValidator / BasicReviewer / CommercialReviewer / StoryRepairer
+  共用同一个客户端，于是调用数从同一个 wrapper 出来，不另起一套统计
+- **`buildPipeline` 一个采集器两处接线**：同一个 `TelemetryCollector` 既给 Pipeline 也给它构造的
+  共享客户端。注入进来的客户端是调用方自己的，不动它
+- **Run 详情可暴露时长、调用数、usage 与失败阶段**；旧 Run 没有遥测时这些位置是 `null`，
+  面板整个隐藏，磁盘上不会被补写
+- **`docs/telemetry.md`**、`docs/api.md`、`docs/upgrade.md`、README 同步这一层契约
+
+### Security
+
+- **遥测序列化排除凭据与环境变量原文**：API Key、`Authorization` 头、`Cookie`、任何原始请求 /
+  响应头、`process.env` 都不进 `telemetry.json`
+- **错误遥测用稳定码而非原始异常**：异常只降级成 11 个固定错误码之一（`LLM_TIMEOUT` /
+  `LLM_REQUEST_FAILED` / `LLM_EMPTY_RESPONSE` / `VALIDATION_COMPONENT_FAILED` /
+  `REVIEW_COMPONENT_FAILED` / `BEAT_VALIDATION_COMPONENT_FAILED` /
+  `COMMERCIAL_REVIEW_COMPONENT_FAILED` / `GENERATION_FAILED` / `BEAT_PLAN_REJECTED` /
+  `ARTIFACT_WRITE_FAILED` / `RUN_FAILED`），文案写死在采集器里，不可能把路径或 query token
+  带进产物
+- **遥测里不落正文**：完整 Prompt、正文、用户输入都不进 `telemetry.json`；`llmCalls[].provider`
+  恒为 `null`（run-manifest 连 baseUrl 原文都不存，这里同样不抄部署信息）
+- **v1.1.0 的地址关卡、v1.6.0 的 Run Manifest、v1.7.0 的实验框架边界原样保留**：这一层没有
+  放松任何一处校验
+
+### Not in this release
+
+这一版刻意**不做**：失败归因与根因分析、自动优化、告警、分布式追踪、基准平台、自适应生成。
+遥测只回答「发生了什么」，不回答「为什么」，也不据此改变任何生成行为。
+
+---
+
 ## [1.7.1] —— 2026-09-26
 
 1.7.1 是对 1.7.0 的一次审查修订：把刚发布的实验框架读一遍，修掉三个真问题。

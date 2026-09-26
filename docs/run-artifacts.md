@@ -21,6 +21,12 @@
 > 自带 `schemaVersion`，用 camelCase——与 v1.0.0 冻结的 snake_case metadata 契约物理隔离，
 > 改它不需要动任何既有字段的语义。
 >
+> v1.8.0 在这一约束下新增了 `telemetry.json`（只在 Run 根目录一份）与两个 API 字段
+> `telemetry`（`GET /api/runs/<run_id>/telemetry` 与 Run 详情各一个），实验汇总里每个变体
+> 另多一个 `efficiency`。它是这次 Run 的**执行过程**——阶段耗时、模型调用次数、Retry /
+> Repair 计数、失败阶段、真实可得的 usage / cost。同样自带 `schemaVersion`、用 camelCase。
+> 字段表、计数语义与「拿不到就是 null」的记法见 [telemetry.md](./telemetry.md)。
+>
 > 实现：`src/core/pipeline.ts` + `src/storage/artifact-store.ts`
 > 契约测试：`tests/test_contract_artifacts.test.ts`（存在性与必填字段）、
 > `tests/test_contract_docs_sync.test.ts`（本文件的字段表 ↔ 真实产物逐字段一致）
@@ -41,6 +47,7 @@ runs/
     ├── quality.json                   # 入选 Attempt 的统一质量快照（v1.2.0 新增）
     ├── metadata.json                  # 运行级 metadata
     ├── run-manifest.json               # 这次 Run 的出身清单（v1.6.0 新增；只在 Run 根目录一份）
+    ├── telemetry.json                 # 这次 Run 的执行过程（v1.8.0 新增；只在 Run 根目录一份）
     └── attempts/
         └── 01/                        # 第 1 次尝试，两位数字
             ├── story.md               # 该次尝试的最终正文（有修订时为修订后）
@@ -62,10 +69,12 @@ runs/
 固定规则：
 
 - attempt 与 repair 目录名都是两位数字 `01`、`02`…（上限 99）
-- 运行级目录里除了 `attempts/` 只有那十个文件，没有别的
-- `run-manifest.json`（v1.6.0 新增）**只在 Run 根目录一份**：`attempts/` 与 `repairs/` 下都没有它。
-  清单里登记的产物路径可以指向这两层，但它自己不出现在自己登记的条目里（记不了自己的摘要），
-  也不登记任何 `metadata.json`——那三层文件由 metadata 契约负责，清单只管「跑了什么」
+- 运行级目录里除了 `attempts/` 只有那十一个文件，没有别的
+- `run-manifest.json`（v1.6.0 新增）与 `telemetry.json`（v1.8.0 新增）都**只在 Run 根目录
+  一份**：`attempts/` 与 `repairs/` 下都没有它们。清单里登记的产物路径可以指向这两层，
+  但它自己不出现在自己登记的条目里（记不了自己的摘要），也不登记任何 `metadata.json`——
+  那三层文件由 metadata 契约负责，清单只管「跑了什么」；遥测则反过来只管「怎么跑的」，
+  不登记任何正文或提示词内容
 - `beat-validation.json`（v1.4.0 新增）是**运行级独有**的一份：BeatPlan 在第一个 Attempt
   之前校验一次，`attempts/` 与 `repairs/` 下都没有它。骨架结构带 `error` 级 issue 时 Run
   在这里就结束了，此时运行级目录只有 `config.json` / `beats.json` /
@@ -309,6 +318,9 @@ v1.5.0 之前产生的 Run 没有 `commercial-review.json`：读接口返回 `nu
 - `runs/` 与 `outputs/` 在 `.gitignore` 里，不进仓库；仓库里只有 `examples/example_run/` 这个合成样例
 - `run-manifest.json` 里的模型条目只含模型名 / provider / baseUrl 分类，没有 baseUrl 原文、
   没有 key、没有 Authorization 头；登记不到的产物不写占位行
+- `telemetry.json`（v1.8.0 新增）里没有 API Key、没有 Authorization / Cookie / 原始请求头、
+  没有 `process.env` 原文、没有正文与 Prompt；异常只降级成一个稳定 `errorCode`，
+  异常原文一个字都不落盘（明细见 [telemetry.md](./telemetry.md)）
 
 ## 不做什么
 
@@ -316,6 +328,8 @@ v1.5.0 之前产生的 Run 没有 `commercial-review.json`：读接口返回 `nu
 - 不做失败归因统计与因果图（`FailureAttribution` / `CausalGraph` 同理）
 - `run-manifest.json` 不做基准对比、不统计成功率、不做自适应调参（`BenchmarkRunner` /
   `AdaptiveGeneration` / `SelfOptimization` 一类能力保留给后续版本）
+- `telemetry.json`（v1.8.0 新增）不做跨 Run 聚合、不设阈值、不出告警，也不据此改变任何生成
+  行为：它只回答「这次怎么跑的」，不回答「为什么失败」
 - `quality.json` 只是把已有结论汇到一起：不额外打分、不设 PASS/FAIL 阈值、不做多维评分
 - 不写 `.tmp` 之外的中间文件（原子写入产生的临时文件见上面的「固定规则」）
 
@@ -324,4 +338,5 @@ v1.5.0 之前产生的 Run 没有 `commercial-review.json`：读接口返回 `nu
 - [StoryConfig v1 契约](./story-config.md)
 - [BeatPlan v1 契约](./beat-plan.md)
 - [API 契约](./api.md)
+- [Run Telemetry 契约（v1.8.0）](./telemetry.md)
 - [升级说明](./upgrade.md)

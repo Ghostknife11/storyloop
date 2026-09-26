@@ -257,6 +257,35 @@ attempt 级的四类文件上，run 级文件不带前缀。另外 `--help` 出�
 没有改错误码、没有新文件。1.4.0 及以前生成的全部 Run 读出来逐字一致，唯一例外是
 「模型给了维度」的 attempt 摘要分数——而那正是 v1.3.0 文档承诺的口径。
 
+## v1.8.0 的 Run 可观测性（纯 additive）
+
+v1.8.0 新增 `telemetry.json`、一条只读路由 `GET /api/runs/<run_id>/telemetry`、Run 详情响应里的
+一个可选字段 `telemetry`、实验汇总里每个变体的一个可选块 `efficiency`，以及 `metadata.json`
+的两个转述字段 `duration_ms` / `llm_call_count`。没有删字段、没有改字段名、没有改路由与错误码，
+三层 metadata 契约、`quality.json` 装配口径、CLI 与既有响应字段逐字未动。
+
+- **新文件只在运行级一份。** `telemetry.json` 与 `metadata.json` / `run-manifest.json`
+  并列写在 Run 根目录；`attempts/` 与 `repairs/` 下一份都没有。运行级固定文件数从十个变十一个。
+- **自带 `schemaVersion`，字段是 camelCase。** 与 snake_case 的 metadata 契约物理隔离，
+  与 camelCase 的 run-manifest 同向——两份新文件都不需要解释「为什么改了一个既有字段的含义」。
+- **只记过程，不记内容。** 阶段起止与耗时、每次模型调用的模型 / 耗时 / 结局、Attempt /
+  retries / repairs 计数、失败阶段与稳定错误码。正文、Prompt、用户输入一个字都不进；
+  `llmCalls[].provider` 恒为 `null`（run-manifest 连 baseUrl 原文都不存，这里同样不抄部署信息）。
+- **拿不到就是没有。** Provider 没给 usage 时 token 三项是 `null`，一次都没给时这三个键整个
+  不出现；成本只在金额与币种同时真实可得时才记。没有可信价格信息时成本是 `null`——
+  「没有数字」和「数字是零」在遥测里永远是两件事，界面对应位置显示 `—`。
+- **失败 Run 也保存遥测。** 跑到一半失败时已发生的阶段照常落盘，`status: "failed"`。
+  写遥测这一步自身失败只记一行 warning，故事、校验、审阅、质量一个结论都不受影响。
+- **读不到就是 `null`。** 1.8.0 之前生成的 Run 没有这个文件，路由返回
+  `{telemetry: null}`（HTTP 200）、Run 详情的 `telemetry` 是 `null`、面板整个隐藏，
+  磁盘上不会被补写——与 `quality.json`、`commercial-review.json`、`run-manifest.json`
+  同一套规则。实验里 1.8.0 之前跑出来的那格，`efficiency` 各项是
+  `{mean: null, sampleCount: 0}`。
+
+它明确**不是**观测平台：不做跨 Run 聚合、不设阈值、不出告警、不做失败归因与根因分析、
+不跑基准、不做自适应调参。遥测只回答「这次怎么跑的」，不回答「为什么失败」，
+也没有任何代码读它来决定重试、修订或采纳。
+
 ## v1.6.0 的 Run 出身清单（纯 additive）
 
 v1.6.0 新增 `run-manifest.json` 与两个响应字段 `manifest`，没有删任何字段、没有改字段名、
@@ -382,5 +411,6 @@ Co/N/C/Ca 四个维度）。低商业分是一次诚实的业务结果，不是�
 
 - [升级说明](./upgrade.md)
 - [API 契约](./api.md)
+- [Run Telemetry 契约（v1.8.0）](./telemetry.md)
 - [CLI 契约](./cli.md)
 - [Run 产物契约](./run-artifacts.md)
