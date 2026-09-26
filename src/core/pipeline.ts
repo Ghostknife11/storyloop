@@ -479,15 +479,17 @@ export class GenerationPipeline {
    * §30：顺手把两个摘要字段补进 metadata。补不上去也不影响分析本身。
    */
   private writeFailureAnalysis(rid: string, extraCodes: string[] = []): void {
-    let analysis: FailureAnalysisResult;
+    // 分析跑通、且真的落盘了，才算「有这份分析」。写盘失败同样按 unavailable 记——
+    // metadata 说 detected 而盘上根本没有那份文件，比没有这个字段更糟。
+    let analysis: FailureAnalysisResult | null = null;
     try {
-      analysis = analyzeStoredRun(rid, this.artifactStore, extraCodes);
-      this.artifactStore.putFailureAnalysis(rid, analysis);
+      const produced = analyzeStoredRun(rid, this.artifactStore, extraCodes);
+      this.artifactStore.putFailureAnalysis(rid, produced);
+      analysis = produced;
     } catch (e) {
       logger
         .child({ run_id: rid })
         .warning(`failure analysis unavailable: ${safeText(errorDetail(e))}`);
-      return;
     }
     try {
       const meta = this.artifactStore.readRunMetadata(rid);
