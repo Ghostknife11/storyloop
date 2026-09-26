@@ -113,6 +113,8 @@ const ROUTES: ReadonlyArray<readonly [string, string]> = [
   ["api/runs/[run_id]/attempts/[attempt_number]", "GET"],
   // v1.8.0：读回这一次 Run 的执行遥测（旧 Run 也照常 200，body.telemetry 是 null）
   ["api/runs/[run_id]/telemetry", "GET"],
+  // v1.9.0：读回这一次 Run 的失败分类（旧 Run 也照常 200，body.failureAnalysis 是 null）
+  ["api/runs/[run_id]/failure-analysis", "GET"],
   ["api/validate", "POST"],
   // v1.4.0：手动校验剧情骨架的结构
   ["api/validate-beats", "POST"],
@@ -486,6 +488,8 @@ describe("v1.0.0 API 冻结 — Run 入口", () => {
       "commercial_review",
       "commercial_review_status",
       "enable_repair",
+      // v1.9.0 §31：失败分类与 POST 响应同源，同样是纯追加字段
+      "failureAnalysis",
       // v1.6.0：出身清单与 POST 响应同源，都是纯追加字段
       "manifest",
       "max_attempts",

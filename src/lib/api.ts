@@ -7,6 +7,7 @@ import type { BeatValidationResult } from "@/types/beat-validation";
 import type { CommercialReviewResult } from "@/types/commercial-review";
 import type { RunManifest } from "@/types/run-manifest";
 import type { RunTelemetry } from "@/types/telemetry";
+import type { FailureAnalysisResult } from "@/types/failure-analysis";
 
 /** §34/§38 单个 Attempt 摘要：只带结论，不带完整正文。 */
 export interface AttemptSummaryApi {
@@ -259,6 +260,9 @@ export interface RunDetailApi {
   /** v1.8.0 §25 这次 Run 的遥测。旧 Run 没有 telemetry.json 时是 null，
    *  Observability 面板据此显示「Telemetry unavailable for this run」。 */
   telemetry: RunTelemetry | null;
+  /** v1.9.0 §31 这次 Run 的失败分类。v1.9.0 之前的 Run 没有 failure-analysis.json，
+   *  这里是 null，面板据此显示「这个 Run 没有失败分析」——不做迁移也不现算。 */
+  failureAnalysis: FailureAnalysisResult | null;
   attempts: AttemptSummaryApi[];
 }
 
@@ -332,6 +336,20 @@ export async function fetchRunTelemetry(runId: string): Promise<RunTelemetry | n
     "读取 Telemetry 失败",
   )) as { telemetry?: RunTelemetry | null };
   return data.telemetry ?? null;
+}
+
+/**
+ * v1.9.0 §31 GET /api/runs/<run_id>/failure-analysis：读回这次 Run 的失败分类。
+ * §35 旧 Run 没有 failure-analysis.json 时接口仍返回 200，body.failureAnalysis 是 null。
+ * 详情接口（fetchRun）已经带了同一份数据，单独取只用于只想看失败分析的场合。
+ */
+export async function fetchRunFailureAnalysis(runId: string): Promise<FailureAnalysisResult | null> {
+  const data = (await requestJson(
+    `/api/runs/${encodeURIComponent(runId)}/failure-analysis`,
+    undefined,
+    "读取失败分析失败",
+  )) as { failureAnalysis?: FailureAnalysisResult | null };
+  return data.failureAnalysis ?? null;
 }
 
 /** §30 Prompt Preview（config 必填，beat_plan 可选）。 */

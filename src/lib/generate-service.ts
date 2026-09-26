@@ -50,6 +50,7 @@ import type {
   CommercialReviewResult,
   CommercialReviewStatus,
 } from "@/types/commercial-review";
+import type { FailureAnalysisResult } from "@/types/failure-analysis";
 
 export { ConfigValidationError, UnsupportedConfigVersionError } from "@/types/story-config";
 export { LLMError } from "@/lib/llm";
@@ -695,6 +696,10 @@ export interface RunDetail {
   /** v1.8.0 §25：这次 Run 的遥测（equally additive）。没有 telemetry.json 的旧 Run 是 null，
    *  UI 据此显示「Telemetry unavailable for this run」，不补零、不猜数。 */
   telemetry: RunTelemetry | null;
+  /** v1.9.0 §31：这次 Run 的失败分析（equally additive）。v1.9.0 之前生成的 Run 没有
+   *  failure-analysis.json，这里是 null——面板据此走「旧 Run 没有这份分析」的分支，
+   * 既不做迁移，也不临时现编一份。 */
+  failureAnalysis: FailureAnalysisResult | null;
   attempts: AttemptSummary[];
 }
 
@@ -929,6 +934,9 @@ export async function getRun(
       manifest: store.readRunManifest(runId),
       // v1.8.0 §25：旧 Run 没有 telemetry.json（或被手改坏）时是 null
       telemetry: store.readRunTelemetry(runId),
+      // v1.9.0 §31：v1.9.0 之前的 Run 没有 failure-analysis.json（或被手改坏）时同样是 null，
+      // 读接口不补写、不现算——分析结论必须和磁盘上那份逐字对得上
+      failureAnalysis: store.readFailureAnalysis(runId),
       attempts,
     },
   };
@@ -963,6 +971,37 @@ export async function getRunTelemetry(
   }
   // readRunTelemetry 已经三层降级：文件缺失 / JSON 坏 / 形状不对都归一成 null。
   return { status: 200, json: { telemetry: store.readRunTelemetry(runId) } };
+}
+
+export type RunFailureAnalysisLookupResult =
+  | { status: 200; json: { failureAnalysis: FailureAnalysisResult | null } }
+  | { status: 400; json: RunError }
+  | { status: 404; json: RunError };
+
+/**
+ * v1.9.0 §31 GET /api/runs/{run_id}/failure-analysis：把这次 Run 的失败分类原样读回。
+ * §35 旧 Run 没有 failure-analysis.json，此时**仍然 200**，body 是
+ * `{"failureAnalysis": null}`——缺的是一份分析，不是这个 Run 本身。
+ */
+export async function getRunFailureAnalysis(
+  runIdRaw: unknown,
+  store: ArtifactStore = new ArtifactStore(appSettings().runsDir),
+): Promise<RunFailureAnalysisLookupResult> {
+  const runId = runIdOf(runIdRaw);
+  if (runId === null) {
+    return { status: 400, json: errorBody("CONFIG_INVALID", "run_id 非法：必须是单个目录名") };
+  }
+  let exists: boolean;
+  try {
+    exists = store.runExists(runId);
+  } catch {
+    return { status: 400, json: errorBody("CONFIG_INVALID", `run_id 非法：${runId}`) };
+  }
+  if (!exists) {
+    return { status: 404, json: errorBody("RUN_NOT_FOUND", `run_id 不存在：${runId}`) };
+  }
+  // readFailureAnalysis 已经三层降级：文件缺失 / JSON 坏 / 形状不对都归一成 null。
+  return { status: 200, json: { failureAnalysis: store.readFailureAnalysis(runId) } };
 }
 
 /**
