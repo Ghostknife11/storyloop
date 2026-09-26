@@ -27,8 +27,9 @@ All notable changes to Storyloop.
   `REVIEW_COMPONENT_FAILED` / `COMMERCIAL_REVIEW_COMPONENT_FAILED` / `GENERATION_FAILED`，
   异常原文一个字都不落盘
 - **产物晋升失败时失败阶段指得对了**：`promoteAttempt` 抛错时 `failureStage` 与
-   `current_stage` 现在都写 `artifact_promotion`，错误码是 `STORAGE`。修之前它指到上一个
-  早就跑完的步骤，和遥测里 `artifact_promotion: failed` 两句话对不上
+  `current_stage` 现在都写 `artifact_promotion`——遥测这一段记 `failed` + 稳定错误码
+  `ARTIFACT_WRITE_FAILED`，失败分析把它归进 `STORAGE` 类（码与类别是两件事）。
+  修之前它指到上一个早就跑完的步骤，和遥测里 `artifact_promotion: failed` 两句话对不上
 - **Run 级 `durationMs` 与每条阶段同一个口径**：单调时钟差值取整到毫秒，不再是带小数的数
 - **读产物读不动时不再整套 500**：文件在但读不了（被换成同名目录、没有读权限、链接成环）
   v1.9.1 起按「没有这份产物」处理——`null`，与文件不存在 / JSON 坏同一个行为。
