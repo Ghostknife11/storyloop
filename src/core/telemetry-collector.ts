@@ -359,7 +359,8 @@ export class TelemetryCollector implements LLMTelemetrySink {
     }
     const completedAt = isoNow();
     this.closed = true;
-    const durationMs = Math.max(0, hrtimeMs() - this.startedMono);
+    // 与每条阶段的 durationMs 同一个口径：单调时钟差值取整到毫秒
+    const durationMs = Math.round(Math.max(0, hrtimeMs() - this.startedMono));
     return {
       schemaVersion: "1",
       runId: this.runId,

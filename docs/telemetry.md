@@ -52,7 +52,10 @@ rereviewing           reviewing_commercial   artifact_promotion
 
 `completed` / `failed` 是 Run 状态，不是阶段名。`artifact_promotion`（把入选 Attempt 的产物
 复制到运行根）是遥测独有的一步——它是真实发生的一步，值得单独计时，但它不是 RunStatus，
-所以不进 `metadata.json` 的 `current_stage`。
+所以 `metadata.json` 的 `status` 不写它。`current_stage` 例外：它就是给人看的阶段标签
+（`repairing` 那一步已经写过「Attempt N — Repairing」），v1.9.1 起晋升这一步也照样推进它，
+否则晋升失败时失败阶段只能指到上一个早就跑完的步骤，和遥测里 `artifact_promotion` 记的
+`failed` 对不上。
 
 同一个阶段在一次 Run 里可能跑多次（`validating` 在每个 Attempt 都出现），所以 `stages`
 记的是**发生次数**，不是「这个阶段的平均值」。求和、找最慢这类聚合是读的一侧的事；
@@ -73,6 +76,12 @@ rereviewing           reviewing_commercial   artifact_promotion
 `skipped` 表示「这一步这一版没接 / 没跑到」（例如没注入 `BeatValidator` 就没有
 `validating_beat_plan`），与 `failed` 是两件事。
 
+一个步骤内部某个**非阻断**的环节崩了（骨架校验组件、正文校验组件、审阅组件、商业审阅
+组件自己抛异常），Run 照常往下跑：这一段记 `failed` + 稳定码，Run 级 `status` 仍是
+`completed`，`failureCode` 这个键也不出现。v1.9.1 起不再把这种情况静悄悄地记成
+`completed`——那样 `failedStages` 永远是 0，读者看不出这一步里有一下没成。
+Run 自己失败时，`failureCode` / `failureStage` 整个文件只有一个值。
+
 ## LLMCallTelemetry
 
 一条 = 调用方眼中的**一次**逻辑调用。Transport Retry（超时、429、临时 5xx 最多重试两次）
@@ -83,7 +92,7 @@ rereviewing           reviewing_commercial   artifact_promotion
 | `id` | string | 本次 Run 内唯一；落盘时缺失会补成 `call-001` 这样的序号 |
 | `stage` | string | 这次调用发生在哪个阶段 |
 | `model` | string \| null | 本次真正生效的模型；没记到是 `null` |
-| `provider` | string \| null | **恒为 `null`。** 这个仓库不在任何地方记录 Provider 名（run-manifest 连 `baseUrl` 原文都不存），可观测不等于把部署信息抄进产物 |
+| `provider` | string \| null | **写盘的文件里这个键不出现。** 这个仓库不在任何地方记录 Provider 名（run-manifest 连 `baseUrl` 原文都不存），可观测不等于把部署信息抄进产物；读回时 `null` 与缺失同一个意思（和下面三条 token 键同一条规则：写盘丢掉，读回来就用「键在不在」判断） |
 | `startedAt` / `completedAt` | string | 起止墙上时间 |
 | `durationMs` | number \| null | 耗时，单调时钟，`>= 0` |
 | `status` | string | `completed` / `failed` |

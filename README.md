@@ -204,6 +204,7 @@ StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts
 │                      │  v1.5.0 起多一份 commercial-review.json（Run 根与 attempts/NN/ 各一份）
 │                      │  v1.6.0 起多一份 run-manifest.json（Run 根，一次 Run 一份）
 │                      │  v1.8.0 起多一份 telemetry.json（Run 根，写盘前过一遍结构校验）
+│                      │  v1.9.0 起多一份 failure-analysis.json（Run 根，失败分类：类别 / 信号 / 证据）
 └──────────────────────────────────────────┘
 ```
 
@@ -921,6 +922,15 @@ mapped / NAT64 地址按内嵌的那个地址判
 
 ## 升级说明
 
+v1.9.1 是 1.9.0 / 1.8.0 的补丁，**不需要改任何代码**：没有新文件、新字段、新路由、新错误码，
+产物字段集与 1.9.0 逐字一致。它修十处实现问题——崩过的步骤在遥测里不再冒充 `completed`、
+产物晋升失败时失败阶段指得对了、Run 级 `durationMs` 取整到毫秒、读不动产物时不再整套 500、
+遥测拿不到时 metadata 不再写两个 `null`、跑成了的 Run 不再被判成失败分类、修订耗尽多一道采纳
+闸门且文案说清「Run 级合计」与「每次 Attempt 上限」两个口径、证据不再指向盘上不存在的文件、
+修订证据带上 `attemptId` / `repairId`——另外把一批文档与实现不一致的地方改回来。
+要紧的有一条：按「键一定存在」解析 `metadata.duration_ms` / `llm_call_count` 的下游要改成按
+「键在不在」判断（与三个 token 键同一条规则）。回归测试在 `tests/test_patch_1_9_1.test.ts`。
+回滚到 1.9.0 的代价为零，没有删任何字段。逐版说明见 [docs/upgrade.md](./docs/upgrade.md)。
 v1.9.0 新增 **失败分析**（Failure Analysis）：每次 Run 多落一份
 `runs/<run_id>/failure-analysis.json`（固定 12 类清单下的主要 / 次要失败类别、信号、
 每条信号指向的证据、首个失败阶段与终态），多两条只读出口——Run 详情响应的

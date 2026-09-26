@@ -19,7 +19,6 @@ import { categoryOfCode, categoryPriority } from "@/lib/failure-rules";
 import { CATEGORY_LABELS } from "@/types/failure-analysis";
 import type { StageName } from "@/types/telemetry";
 import type {
-  FailureAnalysisAttempt,
   FailureAnalysisInput,
   FailureAnalysisResult,
   FailureCategory,
@@ -224,14 +223,17 @@ export class FailureAnalyzer {
     for (const code of ["LLM_TIMEOUT", "LLM_REQUEST_FAILED", "LLM_EMPTY_RESPONSE", "GENERATION_FAILED"]) {
       if (!input.errorCodes.includes(code)) continue;
       const message = GENERATION_MESSAGES[code];
+      // v1.9.1：没有 telemetry.json 就不指这个盘上不存在的文件，只留码与说明
       push(code, "telemetry", "error", message, "GENERATION", [
-        {
-          sourceArtifact: input.telemetry ? "telemetry.json" : null,
-          sourceField: input.telemetry?.failureCode ? "failureCode" : null,
-          stage: input.telemetry?.failureStage ?? null,
-          code,
-          note: message,
-        },
+        input.telemetry
+          ? {
+              sourceArtifact: "telemetry.json",
+              ...(input.telemetry.failureCode ? { sourceField: "failureCode" } : {}),
+              stage: input.telemetry.failureStage ?? null,
+              code,
+              note: message,
+            }
+          : { code, note: `${message}（这次 Run 没有 telemetry.json 可指。）` },
       ]);
     }
 
@@ -306,22 +308,27 @@ export class FailureAnalyzer {
 
     // §39 修订耗尽：上限、次数、目标问题是否还在
     if (this.repairExhausted(input)) {
+      // v1.9.1：Run 级合计与每次 Attempt 的上限是两个口径，消息里分开说。
+      // 写成「3 轮修订达到上限 2」会让读者把两个数当成同一件事
+      const last = lastRepairOf(input);
       push(
         "REPAIR_LIMIT_REACHED",
         "repair",
         "error",
-        `修订次数已用尽：${textOf(input.repairCount)} 轮修订达到上限 ${textOf(input.maxRepairsPerAttempt)}，问题仍然存在。`,
+        `修订次数已用尽：本次 Run 共 ${textOf(input.repairCount)} 轮修订，每次 Attempt 上限 ${textOf(input.maxRepairsPerAttempt)} 轮，目标问题仍然存在。`,
         "REPAIR_EXHAUSTION",
         [
           {
             sourceArtifact: "metadata.json",
             sourceField: "repair_count",
             value: input.repairCount,
-            note: `repair_count = ${textOf(input.repairCount)}，max_repairs_per_attempt = ${textOf(input.maxRepairsPerAttempt)}。`,
+            note: `repair_count = ${textOf(input.repairCount)}（Run 级合计），max_repairs_per_attempt = ${textOf(input.maxRepairsPerAttempt)}（每次 Attempt 上限）。`,
           },
           {
             sourceArtifact: "run-manifest.json",
             sourceField: "repairs[].succeeded",
+            ...(last?.attemptId != null ? { attemptId: last.attemptId } : {}),
+            ...(last?.repairId != null ? { repairId: last.repairId } : {}),
             note: "修订记录里能看到每一轮的成败。",
           },
         ],
@@ -446,14 +453,17 @@ export class FailureAnalyzer {
           ? `出现未登记的失败码 ${code}；按已知阶段 ${stage} 归入${CATEGORY_LABELS[degraded]}。`
           : `出现未登记的失败码 ${code}；阶段未知，证据不足以归类。`,
         degraded,
+        // v1.9.1：证据指的文件必须真在盘上。没有 telemetry.json 时只留码与说明
         [
-          {
-            sourceArtifact: input.telemetry ? "telemetry.json" : null,
-            sourceField: "failureCode",
-            stage,
-            code,
-            note: "原始错误码原样保留，未做改写。",
-          },
+          input.telemetry
+            ? {
+                sourceArtifact: "telemetry.json",
+                sourceField: "failureCode",
+                stage,
+                code,
+                note: "原始错误码原样保留，未做改写。",
+              }
+            : { code, note: "原始错误码原样保留，未做改写；这次 Run 没有 telemetry.json 可指。" },
         ],
       );
     }
@@ -478,9 +488,14 @@ export class FailureAnalyzer {
    * §39：达到真实修订上限、目标问题仍然存在，才算修订耗尽。
    * 关掉了 Repair（enable_repair = false）时永远不是修订耗尽——
    * 那时一次修订都没发生过。
+   * v1.9.1：补上与重试耗尽同一条的采纳闸门——最终被采纳的 Run
+   * 不存在「修到最后也没修好」，修订轮数到过上限只说明它试过。
    */
   private repairExhausted(input: FailureAnalysisInput): boolean {
     if (input.enableRepair !== true) return false;
+    const anyAccepted = input.attempts.some((a) => a.accepted === true);
+    if (anyAccepted) return false;
+    if (input.qualityStatus === "accepted") return false;
     if (typeof input.maxRepairsPerAttempt !== "number" || input.maxRepairsPerAttempt < 1) return false;
     if (typeof input.repairCount !== "number" || input.repairCount < 1) return false;
     if (input.repairCount < input.maxRepairsPerAttempt) return false;
@@ -500,13 +515,8 @@ export class FailureAnalyzer {
       return true;
     }
     // 最后一轮修订本身没跑成，也算问题还在
-    const lastRepair = input.attempts
-      .flatMap((a: FailureAnalysisAttempt) => a.repairs)
-      .reduce<{ repairNumber: number; success: boolean } | null>(
-        (latest, r) => (latest === null || r.repairNumber >= latest.repairNumber ? r : latest),
-        null,
-      );
-    return lastRepair !== null && lastRepair.success === false;
+    const last = lastRepairOf(input);
+    return last !== null && last.success === false;
   }
 
   /** 有没有「失败过的证据」：遥测说失败、状态不是 completed、或带着错误码。 */
@@ -607,6 +617,33 @@ const KNOWN_INTERNAL_CODES = new Set<string>([
 function textOf(value: number | string | boolean | null | undefined): string {
   if (value === null || value === undefined) return "未知";
   return String(value);
+}
+
+/**
+ * v1.9.1 真正最后发生的那一轮修订。
+ *
+ * attempts 按发生顺序排列，每个 Attempt 里的 repairs 也按发生顺序排列，
+ * 所以「最后一次 Attempt 的最后一轮」就是时间上的最后一轮。
+ * 之前按 repairNumber 取最大：那是「这一次 Attempt 里的第几轮」，
+ * 跨 Attempt 一比就会取到第一次尝试的第二轮，而不是真正最后那一轮——
+ * 于是「目标问题还在」这件事看的是一轮早就过去的修订。
+ */
+function lastRepairOf(
+  input: FailureAnalysisInput,
+): { repairNumber: number; success: boolean; attemptId: string | null; repairId: string | null } | null {
+  for (let i = input.attempts.length - 1; i >= 0; i -= 1) {
+    const attempt = input.attempts[i];
+    const repairs = attempt.repairs ?? [];
+    if (repairs.length === 0) continue;
+    const last = repairs[repairs.length - 1];
+    return {
+      repairNumber: last.repairNumber,
+      success: last.success,
+      attemptId: attempt.attemptId ?? null,
+      repairId: last.repairId ?? null,
+    };
+  }
+  return null;
 }
 
 /** 四个维度里分数最低的那一个；一个都没有时返回 null（不补 0）。 */

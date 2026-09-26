@@ -175,15 +175,28 @@ export interface FailureAnalysisInput {
   artifactPresence: FailureArtifactPresence;
 }
 
+/** §39 一轮修订在分析里的最小事实集。 */
+export interface FailureAnalysisRepair {
+  repairNumber: number;
+  issueType: string;
+  success: boolean;
+  /** v1.9.1 additive：Manifest 里的 repairId（形如 `"01"`），用来把证据指回具体那一轮。
+   *  没有清单（1.9.0 之前的 Run）时这个键不出现。只做指路，不参与任何判定。 */
+  repairId?: string | null;
+}
+
 /** §3/§38 一次 Attempt 在分析里的最小事实集。 */
 export interface FailureAnalysisAttempt {
   attemptNumber: number;
+  /** v1.9.1 additive：Manifest 里的 attemptId（形如 `"01"`），用来把证据指回具体那一次尝试。
+   *  没有清单时这个键不出现。只做指路，不参与任何判定。 */
+  attemptId?: string | null;
   accepted: boolean | null;
   retryReason: string | null;
   validationPassed: boolean | null;
   repairCount: number;
   /** 这一 Attempt 里每轮修订的成败与针对的问题类型（§39）。 */
-  repairs: { repairNumber: number; issueType: string; success: boolean }[];
+  repairs: FailureAnalysisRepair[];
 }
 
 /** §42 产物存在性：true / false / null（null = 这次 Run 不该有这个文件，或读不到）。 */

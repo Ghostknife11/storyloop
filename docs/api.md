@@ -116,7 +116,7 @@
 | GET | `/api/runs/<run_id>/attempts/<attempt_number>` | 单次尝试详情 |
 | POST | `/api/prompt/preview` | 看将要发给模型的 prompt 长什么样，不调模型 |
 | POST | `/api/experiments` | v1.7.0 新增：登记一份实验定义（只写 `definition.json`，不跑） |
-| GET | `/api/experiments` | v1.7.0 新增：实验列表，按 `created_at` 倒序 |
+| GET | `/api/experiments` | v1.7.0 新增：实验列表，按 `createdAt` 倒序 |
 | GET | `/api/experiments/<experiment_id>` | v1.7.0 新增：实验详情 + `runs` + `result`（没跑过时两者为 `null`） |
 | POST | `/api/experiments/<experiment_id>/run` | v1.7.0 新增：按定义批量跑，逐格写 `runs.json`，收尾写 `results.json`；已在运行时返回 409 |
 
@@ -148,10 +148,6 @@
 | `commercial_review_status` | string | v1.5.0 新增，取值同 `validation_status` 四值 |
 | `commercial_review_error` | string | 可选，仅在商业审阅自身失败时出现 |
 | `manifest` | RunManifest \| null | v1.6.0 新增：这次 Run 的出身清单；写清单这一步自身失败、或旧 Run 没有 `run-manifest.json` 时是 `null` |
-
-这三个字段是纯追加，`validation` / `review` / `quality` 三个字段逐字未动。商业分数不单独占一个
-响应字段：`commercial_review.score` 就是它，与 `metadata.json` 的 `commercial_score`、
-`commercial-review.json` 的 `score` 同一个口径（四个维度等权均分，保留一位小数）。
 | `quality` | QualityResult \| null | v1.2.0 新增：统一质量快照，见下 |
 | `artifacts` | object | 见下 |
 | `quality_status` | string | `accepted` / `exhausted` |
@@ -159,6 +155,10 @@
 | `selected_attempt` | number | 入选的是第几次 |
 | `repair_count` | number | 修订总轮数 |
 | `attempts` | AttemptSummary[] | 每次尝试的摘要 |
+
+这三个字段是纯追加，`validation` / `review` / `quality` 三个字段逐字未动。商业分数不单独占一个
+响应字段：`commercial_review.score` 就是它，与 `metadata.json` 的 `commercial_score`、
+`commercial-review.json` 的 `score` 同一个口径（四个维度等权均分，保留一位小数）。
 
 `artifacts` 恒含 `config` / `beat_plan` / `story` / `metadata` 四个键（值是文件名），
 校验、审阅或质量装配各自成功时追加 `validation` / `review` / `quality`，
@@ -441,8 +441,8 @@ Run 不存在 404 `RUN_NOT_FOUND`；`run_id` 为 `""`、`.`、`..` 或含路径�
 
 三个约定：只按**主要失败类别**计数（一条样本只进一个格子）；`analyzedCount` 是「这一组里
 真的有 `failure-analysis.json` 的样本数」，`classifiedCount` 是其中真的分出了类别的样本数，
-两个都是显式分母；`counts` 的键序就是 `FAILURE_CATEGORIES` 的固定优先级，没出现过的类别
-不进来。
+两个都是显式分母；`counts` 里没出现过的类别**整个键不出现**（不是 0），键序本身没有含义——
+它是按样本顺序「第一次见到这个类别」排的，读的时候请按类别名索引，别按位置。
 
 **没有 `failure-analysis.json` 的样本不进分母**——它可能是 1.9.0 之前跑的实验样本，
 「没有分析」不等于「没有失败」。1.9.0 之前跑完的实验（`results.json` 里没有 `failures` 块）

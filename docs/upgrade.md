@@ -221,6 +221,40 @@ npm install
 git checkout 1.3.0
 ```
 
+## 从 1.9.0 升级到 1.9.1
+
+**没有任何需要改代码的地方。** 1.9.1 是补丁：没有新文件、没有新字段、没有新路由、没有新错误码，
+`metadata.json` / `run-manifest.json` / `telemetry.json` / `failure-analysis.json` 的字段集与
+1.9.0 逐字一致。它修的是 1.8.0 与 1.9.0 发布后逐行读代码查出来的十处实现问题，外加一批文档与
+实现不一致的地方。四条看得见的行为变化，全都是「修好之后才说对」：
+
+1. **崩过的步骤在遥测里不再冒充 completed。** 骨架校验 / 正文校验 / 审阅 / 商业审阅组件自身抛
+   异常（Run 照常继续的那一类）现在记 `failed` + 稳定码，`totals.failedStages` 不再恒为 0。
+   Run 级 `status` 与错误码不变。把 `stages[].status` 当成「这步一定成功」的监控会看到新值。
+2. **产物晋升失败时失败阶段指得对了。** `failureStage` 与 `metadata.current_stage` 都写
+   `artifact_promotion`，不再指到上一个早就跑完的步骤。晋升这一步也照常推进
+   `current_stage`（它本来就是给人看的阶段标签），`metadata.status` 的取值集合没变。
+3. **跑成了的 Run 不再被判成失败。** 唯一一次 Attempt 的审阅 / 骨架校验组件崩过、Run 照常收尾
+   的情况，失败分析现在是 `status: "none"`（不再是 `detected` 加一个类别）。旧 Run 不受影响。
+4. **遥测拿不到时，metadata 不再写两个 `null`。** `duration_ms` / `llm_call_count` 两个转述键
+   整个不出现——这正是 1.8.0 文档承诺的行为，1.9.1 才做到。
+
+按「键一定存在」解析这两个字段的下游要改成按「键在不在」判断（与三个 token 键同一条规则）。
+`failure-analysis.json` 的 `evidence[]` 另有两个可选键 `attemptId` / `repairId`（1.9.0 的结构里
+就有，分析器一个都没填过）；旧的 Run 没有这两个键，它们照旧不出现。
+
+```bash
+git fetch && git checkout 1.9.1     # tag 不带 v 前缀
+npm install
+```
+
+回滚到 1.9.0 的代价为零：没有删任何字段，1.9.0 读 1.9.1 跑出来的 Run 与往常一样（差别只在上面
+四条结论的取值）。新增的回归测试在回滚后会红，这正是它要挡住的事。
+
+```bash
+git checkout 1.9.0
+```
+
 ## 从 1.8.x 升级到 1.9.0
 
 **没有任何需要改代码的地方。** 1.9.0 是纯增量：没有删字段、没有改字段名、没有改既有路由与

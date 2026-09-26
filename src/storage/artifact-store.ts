@@ -370,7 +370,10 @@ export class ArtifactStore {
     }
   }
 
-  /** v1.6.0 读回产物原文算 SHA-256；文件不在或读不动时给 null。 */
+  /**
+   * v1.6.0 读回产物原文算 SHA-256；文件不在或读不动时给 null。
+   * 外面这层 try 是给越界路径兜底的：readText 只兜「读不动」，不兜「路径不该来问」。
+   */
   readArtifactText(runId: string, artifactPath: string): string | null {
     try {
       return this.readText(runId, artifactPath);
@@ -556,7 +559,14 @@ export class ArtifactStore {
     const dir = this.runDir(runId);
     const path = this.resolveInRun(dir, filename);
     if (!existsSync(path)) return null;
-    return readFileSync(path, "utf8");
+    try {
+      return readFileSync(path, "utf8");
+    } catch {
+      // v1.9.1：文件在、但读不动（被换成同名目录、没有权限、链接成环）时按
+      // 「没有这份产物」处理——与「文件不存在」和「JSON 坏」同一个口径。
+      // 读的一侧不该因为盘上出现一个怪东西，就把整套接口变成 500。
+      return null;
+    }
   }
 
   /** 路径拼接后必须仍落在该 Run 目录内（§50）。 */

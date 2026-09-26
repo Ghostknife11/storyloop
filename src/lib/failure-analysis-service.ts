@@ -55,18 +55,22 @@ function presenceOf(runId: string, store: ArtifactStore): FailureArtifactPresenc
  */
 function attemptsOf(manifest: RunManifest | null, runId: string, store: ArtifactStore): FailureAnalysisAttempt[] {
   if (manifest && manifest.attempts.length > 0) {
-    const repairsByAttempt = new Map<string, { repairNumber: number; issueType: string; success: boolean }[]>();
+    const repairsByAttempt = new Map<string, { repairNumber: number; issueType: string; success: boolean; repairId: string }[]>();
     for (const repair of manifest.repairs) {
       const list = repairsByAttempt.get(repair.attemptId) ?? [];
       list.push({
         repairNumber: repair.index,
         issueType: repair.category ?? "general",
         success: repair.succeeded,
+        // v1.9.1：把 Manifest 里的原样 id 带上，证据才指得回具体那一轮
+        repairId: repair.repairId,
       });
       repairsByAttempt.set(repair.attemptId, list);
     }
     return manifest.attempts.map((attempt) => ({
       attemptNumber: attempt.index,
+      // v1.9.1：同上，attemptId 只用于指路
+      attemptId: attempt.attemptId,
       accepted: attempt.status === "accepted" ? true : false,
       retryReason: strOf(attempt.retryReason),
       validationPassed: null,
@@ -87,6 +91,12 @@ function attemptsOf(manifest: RunManifest | null, runId: string, store: Artifact
 /**
  * §40 状态型事实 → 错误码。这里只做「哪一步自身失败了」的直译，
  * 不解释为什么失败；真正的原因码由 Pipeline 在异常链那一侧给出。
+ *
+ * v1.9.1：四个「组件自身失败」只在**这次 Run 自己失败了**时才译成错误码。
+ * 跑成了的 Run 一样会留下 review_status = failed 这种事（审阅崩了、重试之后照常收尾），
+ * 把它译成错误码会让一次成功的 Run 在失败分析里变成 detected——摘要还会写
+ * 「未能完成」，而 Run 明明完成了。这种事实在 metadata 的对应状态字段与
+ * telemetry 的 failed 阶段里都记着，不需要失败分析再替它升级成 Run 级失败。
  */
 function codesOfState(input: {
   status: string | null;
@@ -100,6 +110,7 @@ function codesOfState(input: {
   if (input.telemetryFailureCode) codes.push(input.telemetryFailureCode);
   // 旧 Run 没有遥测又确实失败了：留一个明说的「未归类」码，不猜
   if (input.status === "failed" && input.telemetryFailureCode === null) codes.push("RUN_FAILED");
+  if (input.status !== "failed") return [...new Set(codes)];
   if (input.beatValidationStatus === "failed") codes.push("BEAT_VALIDATION_COMPONENT_FAILED");
   if (input.validationStatus === "failed") codes.push("VALIDATION_COMPONENT_FAILED");
   if (input.reviewStatus === "failed") codes.push("REVIEW_COMPONENT_FAILED");

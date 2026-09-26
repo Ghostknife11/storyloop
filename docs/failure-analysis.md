@@ -4,8 +4,9 @@ v1.9.0 冻结的契约：每次 Run 收尾时，在 `metadata.json` 旁多落一
 `runs/<run_id>/failure-analysis.json`，把「这个 Run 失败了」结构化成三件事——
 **它属于哪一类失败、第一次失败发生在哪个阶段、有哪些直接证据支持这个判断**。
 
-本文档写死字段、类别、判定顺序与边界。字段级对照表同时被
-`tests/test_contract_docs_sync.test.ts` 双向钉住（文档多写、漏写、改名都会红）。
+本文档写死字段、类别、判定顺序与边界。字段与类别以
+`src/types/failure-analysis.ts` 为准；`tests/test_contract_docs.test.ts` 会逐个检查
+上面这些名字与四条边界都写在文档里（文档少写就红），文档多写则要靠改类型时同步改这里。
 
 ## 它是什么，不是什么
 
@@ -82,8 +83,9 @@ Primary / Secondary 的判定（§21/§22）：
   `quality-review` / `commercial-review` / `retry` / `repair` / `storage` / `security`。
 - `severity`：`info` 背景、`warning` 薄弱项、`error` 硬失败。
 
-`FailureEvidence`：`{ sourceArtifact?, sourceField?, stage?, attempt?, repair?, code?, value?, note? }`。
-每条证据都指回这份 Run 自己目录里的一个文件、一个字段，读者打开就能对上（§48）：
+`FailureEvidence`：`{ sourceArtifact?, sourceField?, stage?, attemptId?, repairId?, code?, value?, note? }`。
+每条证据都指回这份 Run 自己目录里的一个文件、一个字段，读者打开就能对上（§48）；
+指不到的（只有异常链上的稳定码）就只留 `code` 与 `note`，不编一个文件名：
 
 | 证据指向 | 说明 |
 |---|---|
@@ -91,8 +93,8 @@ Primary / Secondary 的判定（§21/§22）：
 | `beat-validation.json` + `issues[].code` | 骨架结构校验的具体 issue code |
 | `metadata.json` + `attempt_count` / `quality_status` | 重试耗尽的两个事实（真数出来的 Attempt 数、最终采纳结论） |
 | `metadata.json` + `repair_count` | 修订耗尽时的真实修订轮数 |
-| `run-manifest.json` + `repairs[].succeeded` | 每一轮修订的成败 |
-| `telemetry.json` + `failureCode` / `failureStage` | 失败阶段与稳定错误码 |
+| `run-manifest.json` + `repairs[].succeeded` | 每一轮修订的成败；同时带 `attemptId` / `repairId`（v1.9.1 起填），能指到具体那一轮 |
+| `telemetry.json` + `failureCode` / `failureStage` | 失败阶段与稳定错误码；**没有 telemetry.json 时这两个字段根本不出现在证据里** |
 | 仅有 `code` 与 `note` | 来自异常链的码，没有可指的文件 |
 
 产物存在性只能作辅助观察，**不单独决定失败类别**（§42）：没有 `commercial-review.json`
@@ -103,9 +105,11 @@ Primary / Secondary 的判定（§21/§22）：
 - **Retry Exhaustion（§38）**：`attempt_count >= max_attempts`、且没有任何一次 Attempt 被采纳、
   且最终采纳结论不是 `accepted`。`retries > 0` 本身不算耗尽。
 - **Repair Exhaustion（§39）**：`enable_repair` 为真、`max_repairs_per_attempt >= 1`、
-  `repair_count >= max_repairs_per_attempt`，且目标问题仍然存在（最终校验未通过，或
-  最终质量分低于阈值，或最后一轮修订本身没跑成）。关掉 Repair 时永远不是修订耗尽——
-  那时一次修订都没发生过。
+  `repair_count >= max_repairs_per_attempt`、没有任何一次 Attempt 被采纳、最终结论也不是
+  `accepted`，且目标问题仍然存在（最终校验未通过，或最终质量分低于阈值，或尝试过修订的
+  最后一个 Attempt 的最后一轮修订本身没跑成）。关掉 Repair 时永远不是修订耗尽——
+  那时一次修订都没发生过。`repair_count` 是 Run 级合计、`max_repairs_per_attempt` 是每次
+  Attempt 的上限，两个口径不同，判定是「合并后的修订数到了每次的上限」，不是逐 Attempt 比。
 
 两条判定都只用真实计数与上限，不做趋势判断、不预测「再试一次会不会过」。
 

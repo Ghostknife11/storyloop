@@ -13,6 +13,67 @@ All notable changes to Storyloop.
 
 ---
 
+## [1.9.1] —— 2026-09-26
+
+1.9.1 是 1.8.0 / 1.9.0 的补丁：把这两版发布后逐行读代码查出来的十处真问题修掉，
+外加一批文档与实现不一致的地方。没有新能力、没有新语义、没有任何契约字段改名——
+每一条修复都有回归测试钉住，修完之后 1.9.0 与 1.8.0 已冻结的产物字段逐字未动。
+
+### Fixed
+
+- **遥测不再把崩过的步骤记成 completed**：骨架校验 / 正文校验 / 审阅 / 商业审阅组件自身抛异常时
+  （Run 照常继续的那一类），这一段现在记 `failed` + 一个稳定码，`failedStages` 不再恒为 0。
+  码分别是 `BEAT_VALIDATION_COMPONENT_FAILED` / `VALIDATION_COMPONENT_FAILED` /
+  `REVIEW_COMPONENT_FAILED` / `COMMERCIAL_REVIEW_COMPONENT_FAILED` / `GENERATION_FAILED`，
+  异常原文一个字都不落盘
+- **产物晋升失败时失败阶段指得对了**：`promoteAttempt` 抛错时 `failureStage` 与
+   `current_stage` 现在都写 `artifact_promotion`，错误码是 `STORAGE`。修之前它指到上一个
+  早就跑完的步骤，和遥测里 `artifact_promotion: failed` 两句话对不上
+- **Run 级 `durationMs` 与每条阶段同一个口径**：单调时钟差值取整到毫秒，不再是带小数的数
+- **读产物读不动时不再整套 500**：文件在但读不了（被换成同名目录、没有读权限、链接成环）
+  v1.9.1 起按「没有这份产物」处理——`null`，与文件不存在 / JSON 坏同一个行为。
+  写盘那侧的失败照旧抛 `ArtifactWriteError`，读的一侧不再把它放大
+- **遥测拿不到时 metadata 不再写两个 null**：`duration_ms` / `llm_call_count` 两个转述键
+  整个不出现，而不是写 `null` 冒充「有遥测但零毫秒」（1.8.0 文档就是这么承诺的）
+- **跑成了的 Run 不再被判成 detected**：唯一一次 Attempt 的审阅或骨架校验组件崩过、Run 照常
+  收尾的情况，失败分析现在是 `status: "none"`、信号与证据空数组、摘要
+  `No run-level failure detected.`。修之前它会说「Run 在运行中未能完成」并给出类别
+- **修订耗尽多了一道采纳闸门**：最终结论是 `accepted`（或某次 Attempt 被采纳过）时不算
+  `REPAIR_EXHAUSTION`——问题最后是被修好了的，修订数到过上限只说明它试过
+- **「最后一轮修订」取的是对的那一轮**：按「最后一次尝试过修订的那个 Attempt 的最后一轮」取，
+  修之前按最大修订轮次号全局取，跨 Attempt 时会取到另一次 Attempt 的修订上
+- **修订耗尽的文案说清两个口径**：「本次 Run 共 N 轮修订，每次 Attempt 上限 M 轮」，
+  证据里也分别标注「Run 级合计」与「每次 Attempt 上限」。修之前拿 Run 级合计直接和
+  每次的上限比，读起来像同一回事
+- **证据不再指向盘上不存在的文件**：这次 Run 没有 `telemetry.json` 时，生成类与未知错误码
+  的证据只留 `code` 与 `note`，`sourceArtifact` / `sourceField` 整个键不出现
+- **证据带上了 attemptId 与 repairId**：修订证据现在填 `run-manifest.json` 里那一轮的
+  `attemptId` / `repairId`（1.9.0 的结构里就有这两个字段，分析器一个都没填过，面板那一列
+  永远是「—」）；旧 Run 的清单没有这两个键时它们照旧不出现
+
+### Changed
+
+- `FailureEvidence` 的可选字段由 `attempt` / `repair` 正名为 `attemptId` / `repairId`，
+  与 `run-manifest.json` 里那一轮的键名一致；`FailureAnalysisRepair` 多一个可选 `repairId`，
+  `FailureAnalysisAttempt` 多一个可选 `attemptId`
+- `docs/api.md`、`docs/experiments.md`、`docs/telemetry.md`、`docs/run-artifacts.md`、
+  `docs/failure-analysis.md`、`README.md`、`CHANGELOG.md` 与示例 Run 的 README 同步修正：
+  修掉字段名写错（`created_at` → `createdAt`、`run_count` → `runCount`）、断掉的表格、
+  与实现相反的声明（`counts` 键序、`provider` 恒为 null、artifact_promotion 不进
+  `current_stage`、「被 test_contract_docs_sync 双向钉住」）与过期的版本号标题
+- 新增一个测试文件 `tests/test_patch_1_9_1.test.ts`（22 个用例），上面十条修复逐条钉住
+
+### Security
+
+- 遥测与失败分析的安全边界逐字未动：异常仍然只收敛成稳定错误码，`safe-text.ts` 净化照旧，
+  API Key 不进产物、不进响应，读路径的兜底也不会把本机绝对路径带出接口
+
+### Not in this release
+
+仍然是补丁：不新增类别、不新增接口、不做归因、不做 Remediation。1.9.0 的「不做什么」全部继续有效。
+
+---
+
 ## [1.9.0] —— 2026-09-26
 
 「这次 Run 失败了」从此不再是终点。v1.9.0 在现有 Artifact 与 Telemetry 之上新增一层
@@ -233,8 +294,9 @@ v1.7.0 回答「如果只改模型、只改 prompt、只改 temperature，会发
 - **`ExperimentRunner`**（`src/core/experiment-runner.ts`）：逐格调用 `buildPipeline`，
   每格结束就把进度写回 `runs.json`（含 `run_id` / `status` / `failure`），全部跑完才写
   `results.json`。**单格失败不中断**——失败格带原因留在 `runs.json`，剩下的格子继续跑
-- **基础聚合**（`summarizeExperiment`）：每变体一行的次数（`run_count` / `success_count` /
-  `failure_count`）与均值（`mean_overall_score` / `mean_commercial_score` / `mean_dimensions`），
+- **基础聚合**（`summarizeExperiment`）：每变体一行的次数（`runCount` / `successCount` /
+  `failureCount`）与均值（`meanOverallScore` / `meanCommercialScore`，以及 1.7.1 补上的
+  质量四维 `meanCoherence` / `meanNarrative` / `meanCharacter` / `meanCausality`），
   按定义顺序排列。没有任何成功样本时均值是 `null` 而不是 `0`——**没有 winner、没有 rank、
   没有 p 值**
 - **四个路由**：`POST` / `GET /api/experiments`、`GET /api/experiments/<id>`、

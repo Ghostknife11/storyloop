@@ -165,6 +165,18 @@ export function telemetryCodeOf(e: unknown): TelemetryErrorCode {
   return "RUN_FAILED";
 }
 
+/**
+ * v1.9.1 阶段收尾用的稳定码：异常链上认得出就用它的码，认不出就用这一步自己的码。
+ *
+ * 「这一步自己」指非阻断失败：模型跳超时归 LLM_TIMEOUT，校验组件自己抛了个普通异常
+ * 归 VALIDATION_COMPONENT_FAILED——都不是 RUN_FAILED，那是一个 Run 兜底码，
+ * 安在单独一个阶段上会让人以为整次 Run 都说不清是什么毛病。
+ */
+function stageFailureCode(e: unknown, fallback: TelemetryErrorCode): TelemetryErrorCode {
+  const code = telemetryCodeOf(e);
+  return code === "RUN_FAILED" ? fallback : code;
+}
+
 /** §18 EMPTY_CONTENT 时没有可审阅的正文，跳过 Review；其它失败仍继续（§18 推荐）。 */
 function skipReviewFor(validation: ValidationResult | null): boolean {
   if (!validation) return false;
@@ -581,8 +593,13 @@ export class GenerationPipeline {
       // v1.5.0 TASK §39：commercial-review.json 同样跟着晋升，于是根目录那份商业结论
       // 描述的正是 selected attempt 的 story.md，不会张冠李戴。
       // v1.8.0：产物晋升是真实发生的一步，值得单独计时。它不是 RunStatus，
-      // 所以只以遥测阶段的形式存在，不进 metadata 的 current_stage。
+      // 所以 metadata 的 current_stage 不写它。
+      // v1.9.1：但 current_stage 照样跟着推——它就是给人看的阶段标签（repairing
+      // 那一步已经写过「Attempt N — Repairing」）。否则 promote 失败时，
+      // 失败阶段只能指到上一个早就跑完的步骤，遥测里 artifact_promotion 记着
+      // failed，failureStage 说的却是别的地方，两句话对不上。
       this.telemetry.enter("artifact_promotion");
+      ctx.current_stage = "artifact_promotion";
       this.artifactStore.promoteAttempt(rid, selected.attempt.attempt_number);
 
       this.enter(ctx, "completed");
@@ -783,8 +800,11 @@ export class GenerationPipeline {
       beatValidation = await this.beatValidator.validate(config, plan);
     } catch (e) {
       // §12：校验器自身崩溃 ≠ BeatPlan 有问题。保留骨架，继续生成。
+      // v1.9.1：这一步的非阻断失败也要在遥测里说实话——进入下一步之前先把开着的
+      // 阶段按 failed 收尾，不然后面的 enter 会把它记成 completed。
       beatValidation = null;
       beatValidationError = safeText(errorDetail(e));
+      this.telemetry.failOpen(stageFailureCode(e, "BEAT_VALIDATION_COMPONENT_FAILED"));
       logger.child({ run_id: rid }).error("beat validation failed", e);
     }
 
@@ -847,8 +867,11 @@ export class GenerationPipeline {
       // §70：重试继续用同一个 StoryConfig / BeatPlan / 温度，不自动调参。
       story = await this.generator.generate(config, plan, runtime?.temperature ?? 0.8);
     } catch (e) {
+      // §22 生成失败：没有正文可校验，也没有正文可修订——直接交给重试决策。
+      // v1.9.1：这一步以失败收尾；重试成功也不抹掉它发生过（遥测记的是事实）。
       generationError = safeText(errorDetail(e));
       generationFailure = e;
+      this.telemetry.failOpen(stageFailureCode(e, "GENERATION_FAILED"));
       // §28/§9：原始异常只进服务端日志
       logger.child({ run_id: rid, attempt_number: attemptNumber }).error("generation failed", e);
     }
@@ -1035,9 +1058,11 @@ export class GenerationPipeline {
       validationStatus = "completed";
     } catch (e) {
       // §12：Validator 自身异常 ≠ Story Failed。
+      // v1.9.1：同样先把 validating 这一段按失败收尾，读者才看得出是这一步没得出结论
       validation = null;
       validationStatus = "failed";
       validationError = safeText(errorDetail(e));
+      this.telemetry.failOpen(stageFailureCode(e, "VALIDATION_COMPONENT_FAILED"));
       logger.child({ run_id: rid, attempt_number: attemptNumber }).error("validation failed", e);
     }
 
@@ -1066,9 +1091,11 @@ export class GenerationPipeline {
         reviewStatus = "completed";
       } catch (e) {
         // §12：Reviewer 自身异常 ≠ Story Retry Trigger。
+        // v1.9.1：reviewing 这一段按失败收尾，不冒充 completed
         review = null;
         reviewStatus = "failed";
         reviewError = safeText(errorDetail(e));
+        this.telemetry.failOpen(stageFailureCode(e, "REVIEW_COMPONENT_FAILED"));
         logger.child({ run_id: rid, attempt_number: attemptNumber }).error("review failed", e);
       }
     }
@@ -1127,8 +1154,11 @@ export class GenerationPipeline {
       // 温度取 CommercialReviewer 自己的默认值，不跟着正文的创作温度走。
       commercialReview = await this.commercialReviewer.review(config, story);
     } catch (e) {
+      // §24：这一路失败只让 commercial_review_status 变成 failed。
+      // v1.9.1：reviewing_commercial 这一段同样按失败收尾
       commercialReview = null;
       commercialReviewError = safeText(errorDetail(e));
+      this.telemetry.failOpen(stageFailureCode(e, "COMMERCIAL_REVIEW_COMPONENT_FAILED"));
       logger.child({ run_id: rid, attempt_number: attemptNumber }).error("commercial review failed", e);
     }
 
@@ -1371,9 +1401,10 @@ export class GenerationPipeline {
       meta.quality_issue_count = patch.quality.issues.length;
     }
     // v1.8.0 §33：两个摘要数是遥测的转述，主数据源是 telemetry.json。
-    // 遥测没拿到（只在采集器本身坏掉的极端情况下）就不写这两个键，绝不补 0。
-    if (patch.duration_ms !== undefined) meta.duration_ms = patch.duration_ms;
-    if (patch.llm_call_count !== undefined) meta.llm_call_count = patch.llm_call_count;
+    // 遥测没拿到（只在采集器本身坏掉的极端情况下）就不写这两个键，绝不补 0；
+    // v1.9.1：调用方传 null 也按「没拿到」处理，于是注释里这句话对调用方也成立。
+    if (patch.duration_ms != null) meta.duration_ms = patch.duration_ms;
+    if (patch.llm_call_count != null) meta.llm_call_count = patch.llm_call_count;
     if (ctx.status === "completed" || ctx.status === "failed") {
       meta.finished_at = new Date().toISOString();
     }

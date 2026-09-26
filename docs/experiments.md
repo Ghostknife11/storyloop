@@ -134,6 +134,7 @@ runId、失败在哪一步」，`GET` 能如实显示 partial，而不是一片�
 | `meanCoherence` / `meanNarrative` / `meanCharacter` / `meanCausality` | 四个质量维度均值 |
 | `meanHook` / `meanPacing` / `meanEngagement` / `meanPayoff` | 四个商业维度均值 |
 | `efficiency` | v1.8.0 新增：这一组的效率指标，见下 |
+| `failures` | v1.9.0 新增，可选：这一组样本的失败类别分布，见下 |
 
 均值只从这次实验自己产出的 `quality.json` / `commercial-review.json` 读，不重跑、不推断、
 不引用别的 Run。一个样本都没跑出来的 Variant 也会出现在结果里（各项 null、计数为 0），
@@ -155,6 +156,16 @@ runId、失败在哪一步」，`GET` 能如实显示 partial，而不是一片�
 - 没有 winner、没有 rank，也没有「这组更快所以更好」这类结论。效率只是效率。
 
 字段含义见 [docs/telemetry.md](telemetry.md)。
+
+### v1.9.0 失败类别分布
+
+`failures` 有三项（`ExperimentFailureDistribution`）：`analyzedCount`（这一组里有
+`failure-analysis.json` 的样本数）、`classifiedCount`（其中分出了主要类别的样本数）、
+`counts`（主要类别 → 样本数，没出现过的类别整个键不出现）。数据源是每条样本自己的
+`failure-analysis.json`（v1.9.0 起每个 Run 都有），没有这个文件的样本不计入——
+1.9.0 之前跑完的实验，`results.json` 里整个 `failures` 块都不出现。
+
+只汇总、不排名、不比较，也说不出「哪一组失败更少」：类别计数与 Variant 优劣无关。
 
 ## API
 
