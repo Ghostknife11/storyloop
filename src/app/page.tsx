@@ -21,7 +21,9 @@ import { QualityPanel } from "@/components/quality-panel";
 import { CommercialPanel } from "@/components/commercial-panel";
 import { ManifestPanel } from "@/components/manifest-panel";
 import { TelemetryPanel } from "@/components/telemetry-panel";
+import { FailurePanel } from "@/components/failure-panel";
 import type { RunTelemetry } from "@/types/telemetry";
+import type { FailureAnalysisResult } from "@/types/failure-analysis";
 import {
   ManualRepair,
   RepairPanel,
@@ -29,7 +31,7 @@ import {
   repairStageLabels,
 } from "@/components/repair-panel";
 import {
-  fetchRunAttempt, fetchRunTelemetry, generateFromPlan, planStory, previewPrompt, reviewStory, validateStory,
+  fetchRunAttempt, fetchRunFailureAnalysis, fetchRunTelemetry, generateFromPlan, planStory, previewPrompt, reviewStory, validateStory,
   reviewStoryCommercial,
   validateStoryBeats,
   RunApiError, type RepairDetailApi, type RunApiResult,
@@ -192,6 +194,11 @@ export default function GeneratePage() {
    *  此时不显示面板，改为一句「Telemetry unavailable for this run」（§29）。 */
   const [telemetry, setTelemetry] = useState<RunTelemetry | null>(null);
   const [telemetryStage, setTelemetryStage] = useState<"idle" | "loading" | "loaded">("idle");
+  /** v1.9.0 §31：这次 Run 的失败分类。读完后仍是 null 分两种情况——1.9.0 之前的旧 Run
+   *  没有 failure-analysis.json，或者这次分析自己没跑成（metadata 里记 unavailable），
+   *  此时不显示面板，改为一句「这个 Run 没有失败分析」。 */
+  const [failureAnalysis, setFailureAnalysis] = useState<FailureAnalysisResult | null>(null);
+  const [failureStage, setFailureStage] = useState<"idle" | "loading" | "loaded">("idle");
   const [runTitle, setRunTitle] = useState("");
   const [runStage, setRunStage] = useState<RunStage>("idle");
   const [runFailed, setRunFailed] = useState(false);
@@ -303,6 +310,9 @@ export default function GeneratePage() {
     setPhase("idle");
     setTelemetry(null);
     setTelemetryStage("idle");
+    // v1.9.0：新的一次 Run 开始前，上一次的失败分类同样作废
+    setFailureAnalysis(null);
+    setFailureStage("idle");
     setReReviewing(false);
     setReviewOverride(null);
     setReCommercialReviewing(false);
@@ -498,6 +508,19 @@ export default function GeneratePage() {
           setTelemetry(null);
           setTelemetryStage("loaded");
         });
+      // v1.9.0 §31：失败分类同样单独读一次（与遥测同一套理由：POST 响应契约不变）。
+      // 分析在 Run 收尾时已经落盘，所以这次请求一定能读到 1.9.0 起的 Run。
+      setFailureStage("loading");
+      void fetchRunFailureAnalysis(data.run_id)
+        .then((a) => {
+          setFailureAnalysis(a);
+          setFailureStage("loaded");
+        })
+        .catch(() => {
+          // 读不到失败分类不影响任何结论：只当这次没有这份分析
+          setFailureAnalysis(null);
+          setFailureStage("loaded");
+        });
     } catch (e) {
       clearStepperTimers();
       const msg = e instanceof Error ? e.message : "未知错误";
@@ -522,6 +545,17 @@ export default function GeneratePage() {
           .catch(() => {
             setTelemetry(null);
             setTelemetryStage("loaded");
+          });
+        // v1.9.0 §27：失败的 Run 也有失败分析——它正是最需要分类的那一次
+        setFailureStage("loading");
+        void fetchRunFailureAnalysis(failedId)
+          .then((a) => {
+            setFailureAnalysis(a);
+            setFailureStage("loaded");
+          })
+          .catch(() => {
+            setFailureAnalysis(null);
+            setFailureStage("loaded");
           });
       }
     } finally {
@@ -1176,6 +1210,11 @@ export default function GeneratePage() {
                 <div className="mt-3">
                   <TelemetryPanel telemetry={telemetry} />
                 </div>
+                {/* v1.9.0 §27：失败的 Run 同样有失败分类——类别、阶段与证据。
+                    读不到时不占位（§30）。 */}
+                <div className="mt-3">
+                  <FailurePanel analysis={failureAnalysis} />
+                </div>
               </div>
             )}
 
@@ -1286,6 +1325,16 @@ export default function GeneratePage() {
                       </div>
                     ) : (
                       <TelemetryPanel telemetry={telemetry} />
+                    )}
+                    {/* v1.9.0 §26：失败分类面板（主要类别 / 次要类别 / 阶段 / 信号 / 证据）。
+                        §30 读完了却一份分析都没有（1.9.0 之前的 Run，或分析器自己没跑成）时
+                        给一句说明，不摆空表格、不猜类别。 */}
+                    {failureStage === "loaded" && failureAnalysis === null ? (
+                      <div className="mb-4 rounded-2xl border border-border bg-muted/40 p-3 text-[11px] text-muted-foreground">
+                        这个 Run 没有失败分析 —— v1.9.0 之前的产物没有 failure-analysis.json。
+                      </div>
+                    ) : (
+                      <FailurePanel analysis={failureAnalysis} />
                     )}
                     {/* §37 Before / After Story：只有这次 Attempt 真的修过才给两个 Tab */}
                     {hasBeforeStory && (
