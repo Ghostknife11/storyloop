@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { StoryConfig } from "@/types/story-config";
-import type { BeatPlan } from "@/types/beat-plan";
-import type { RepairIssueType, RepairRequest, RepairResult } from "@/types/repair";
-import { LLMClient } from "@/lib/llm";
+import type { StoryConfig } from "@/domain/story-config";
+import type { BeatPlan } from "@/domain/beat-plan";
+import type { RepairIssueType, RepairRequest, RepairResult } from "@/domain/repair";
+import type { LLMClient } from "@/ports/llm-client";
 
 /** 模块加载时锁定项目根，避免测试 chdir 后模板路径漂移。 */
 const PROJECT_ROOT = process.cwd();

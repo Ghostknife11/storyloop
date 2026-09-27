@@ -1,4 +1,4 @@
-import { validateReviewResult, type ReviewResult } from "@/types/review-result";
+import { validateReviewResult, type ReviewResult } from "@/domain/review-result";
 
 export class ReviewParseError extends Error {
   constructor(message: string) {

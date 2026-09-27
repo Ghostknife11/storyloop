@@ -6,13 +6,13 @@
  * 返回 null 表示不值得修，直接进入 Full Retry（§22）。
  */
 
-import type { ValidationResult } from "@/types/validation-result";
-import type { ReviewResult } from "@/types/review-result";
+import type { ValidationResult } from "@/domain/validation-result";
+import type { ReviewResult } from "@/domain/review-result";
 import {
   validateRepairIssueType,
   type RepairIssueType,
   type RepairTarget,
-} from "@/types/repair";
+} from "@/domain/repair";
 
 /** §22/§7 不可修复的 Validation 问题码：拿到这些说明正文整个不可用，只能整篇重生。 */
 const NO_REPAIR_CODES = ["EMPTY_CONTENT", "INVALID_OUTPUT"] as const;

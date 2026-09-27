@@ -2,17 +2,18 @@ import { mkdtempSync, existsSync, readFileSync, readdirSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GenerationPipeline, PipelineError } from "@/core/pipeline";
-import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "@/core/retry-policy";
-import { ArtifactStore } from "@/storage/artifact-store";
-import { BeatPlanner } from "@/lib/beat-planner";
-import { StoryGenerator } from "@/lib/story-generator";
-import { StoryRepairer } from "@/lib/story-repairer";
-import { StoryValidator } from "@/lib/story-validator";
-import { BasicReviewer } from "@/lib/basic-reviewer";
-import { LLMClient, MAX_TRANSPORT_RETRIES } from "@/lib/llm";
-import { parseStoryConfig } from "@/lib/config-io";
-import { ConfigValidationError } from "@/types/story-config";
+import { GenerationPipeline, PipelineError } from "@/engine/pipeline";
+import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "@/engine/retry-policy";
+import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
+import { failureAnalyzerFor } from "@/analysis/failure-analysis-service";
+import { BeatPlanner } from "@/engine/beat-planner";
+import { StoryGenerator } from "@/engine/story-generator";
+import { StoryRepairer } from "@/engine/story-repairer";
+import { StoryValidator } from "@/engine/story-validator";
+import { BasicReviewer } from "@/engine/basic-reviewer";
+import { LLMClient, MAX_TRANSPORT_RETRIES } from "@/infrastructure/llm/openai-compatible-llm-client";
+import { parseStoryConfig } from "@/infrastructure/config/config-io";
+import { ConfigValidationError } from "@/domain/story-config";
 import {
   SAMPLE_BEAT_PLAN,
   SAMPLE_CONFIG,
@@ -169,7 +170,7 @@ function fullPipeline(store: ArtifactStore, llm: LLMClient) {
     new StoryValidator(),
     new BasicReviewer(llm),
     store,
-  );
+  ).withFailureAnalyzer(failureAnalyzerFor(store));
 }
 
 describe("§49 Happy Path：Attempt 1 直接 accepted，产物完整", () => {

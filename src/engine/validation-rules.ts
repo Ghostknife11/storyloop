@@ -2,10 +2,12 @@
  * §9/§10/§11/§13/§14/§15 v0.6.0 硬性规则：每条规则只回答一个是/否问题，返回 null 表示未命中。
  * §3：优先确定性规则，只有结尾检查使用轻量启发式；禁止把这里做成第二个 Reviewer。
  * §5：本文件只产出 warning / error 两种 severity。
+ *
+ * v2.0.0 迁移：本文件现在位于 src/engine/（原 src/interface/），职责与行为保持不变。
  */
 
-import type { StoryConfig } from "@/types/story-config";
-import type { ValidationIssue, ValidationIssueCode, ValidationSeverity } from "@/types/validation-result";
+import type { StoryConfig } from "@/domain/story-config";
+import type { ValidationIssue, ValidationIssueCode, ValidationSeverity } from "@/domain/validation-result";
 
 /** §9 统一输入：只需要 StoryConfig 与 Story 本身。 */
 export interface ValidationInput {

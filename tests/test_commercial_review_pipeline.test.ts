@@ -1,17 +1,17 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { GenerationPipeline, PipelineError } from "@/core/pipeline";
-import { ArtifactStore } from "@/storage/artifact-store";
-import { BeatPlanner } from "@/lib/beat-planner";
-import { StoryGenerator } from "@/lib/story-generator";
-import { StoryValidator } from "@/lib/story-validator";
-import { BasicReviewer } from "@/lib/basic-reviewer";
-import { StoryRepairer } from "@/lib/story-repairer";
-import { RepairStrategy } from "@/core/repair-strategy";
-import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "@/core/retry-policy";
-import { CommercialReviewer } from "@/lib/commercial-reviewer";
-import type { CommercialReviewResult } from "@/types/commercial-review";
+import { GenerationPipeline, PipelineError } from "@/engine/pipeline";
+import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
+import { BeatPlanner } from "@/engine/beat-planner";
+import { StoryGenerator } from "@/engine/story-generator";
+import { StoryValidator } from "@/engine/story-validator";
+import { BasicReviewer } from "@/engine/basic-reviewer";
+import { StoryRepairer } from "@/engine/story-repairer";
+import { RepairStrategy } from "@/engine/repair-strategy";
+import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "@/engine/retry-policy";
+import { CommercialReviewer } from "@/engine/commercial-reviewer";
+import type { CommercialReviewResult } from "@/domain/commercial-review";
 import {
   SAMPLE_BEAT_PLAN,
   SAMPLE_CONFIG,

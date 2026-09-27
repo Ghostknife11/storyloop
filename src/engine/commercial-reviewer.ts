@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { StoryConfig } from "@/types/story-config";
+import type { StoryConfig } from "@/domain/story-config";
 import {
   COMMERCIAL_DIMENSION_DEFINITIONS,
   type CommercialReviewResult,
-} from "@/types/commercial-review";
-import { parseCommercialReviewResult } from "@/lib/commercial-review-parser";
-import { LLMClient } from "@/lib/llm";
+} from "@/domain/commercial-review";
+import { parseCommercialReviewResult } from "@/engine/commercial-review-parser";
+import type { LLMClient } from "@/ports/llm-client";
 
 /** 模块加载时锁定项目根，避免测试 chdir 后模板路径漂移。 */
 const PROJECT_ROOT = process.cwd();

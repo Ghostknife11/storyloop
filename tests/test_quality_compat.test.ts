@@ -2,12 +2,12 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { QualityAssembler } from "@/core/quality-assembler";
-import { validateReviewResult } from "@/types/review-result";
-import type { ReviewResult } from "@/types/review-result";
-import { getRun, getRunAttempt } from "@/lib/generate-service";
-import { ArtifactStore } from "@/storage/artifact-store";
-import { qualityResultOf } from "@/types/quality";
+import { QualityAssembler } from "@/engine/quality-assembler";
+import { validateReviewResult } from "@/domain/review-result";
+import type { ReviewResult } from "@/domain/review-result";
+import { getRun, getRunAttempt } from "@/application/generate-service";
+import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
+import { qualityResultOf } from "@/domain/quality";
 import { repoRoot } from "./helpers/fixtures";
 
 /**

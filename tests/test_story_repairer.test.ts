@@ -2,11 +2,11 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { REPAIR_TEMPERATURE, StoryRepairer } from "@/lib/story-repairer";
-import { repairRequestOf, type RepairRequest } from "@/types/repair";
-import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
-import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
-import type { LLMClient } from "@/lib/llm";
+import { REPAIR_TEMPERATURE, StoryRepairer } from "@/engine/story-repairer";
+import { repairRequestOf, type RepairRequest } from "@/domain/repair";
+import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
+import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
+import type { LLMClient } from "@/infrastructure/llm/openai-compatible-llm-client";
 
 /**
  * §44 StoryRepairer：LLM 必须 Mock（绝不打真实付费 API）。

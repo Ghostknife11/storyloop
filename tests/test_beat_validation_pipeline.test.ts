@@ -1,19 +1,19 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { GenerationPipeline, PipelineError, type GenerationResult } from "@/core/pipeline";
-import { QualityAssembler } from "@/core/quality-assembler";
-import { ArtifactStore } from "@/storage/artifact-store";
-import { BeatPlanner } from "@/lib/beat-planner";
-import { StoryGenerator } from "@/lib/story-generator";
-import { StoryValidator } from "@/lib/story-validator";
-import { BasicReviewer } from "@/lib/basic-reviewer";
-import { StoryRepairer } from "@/lib/story-repairer";
-import { RepairStrategy } from "@/core/repair-strategy";
-import { BeatValidator } from "@/lib/beat-validator";
-import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "@/core/retry-policy";
-import type { BeatValidationResult } from "@/types/beat-validation";
-import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
+import { GenerationPipeline, PipelineError, type GenerationResult } from "@/engine/pipeline";
+import { QualityAssembler } from "@/engine/quality-assembler";
+import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
+import { BeatPlanner } from "@/engine/beat-planner";
+import { StoryGenerator } from "@/engine/story-generator";
+import { StoryValidator } from "@/engine/story-validator";
+import { BasicReviewer } from "@/engine/basic-reviewer";
+import { StoryRepairer } from "@/engine/story-repairer";
+import { RepairStrategy } from "@/engine/repair-strategy";
+import { BeatValidator } from "@/engine/beat-validator";
+import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "@/engine/retry-policy";
+import type { BeatValidationResult } from "@/domain/beat-validation";
+import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
 import {
   SAMPLE_BEAT_PLAN,
   SAMPLE_BEAT_VALIDATION,

@@ -2,19 +2,21 @@
  * §8/§9 StoryValidator：把硬性规则聚合成一个 ValidationResult。
  * §2 判断的是「是否基本可接受」，不是「写得怎么样」——后者属于 BasicReviewer。
  * §3 只做确定性检查；§58 只能返回 ValidationResult，禁止返回 fixed_story / revised_story / patched_story。
+ *
+ * v2.0.0 迁移：本文件现在位于 src/engine/（原 src/interface/），职责与行为保持不变。
  */
 
-import type { StoryConfig } from "@/types/story-config";
+import type { StoryConfig } from "@/domain/story-config";
 import {
   validationPassed,
   type ValidationIssue,
   type ValidationResult,
-} from "@/types/validation-result";
+} from "@/domain/validation-result";
 import {
   STORY_VALIDATION_RULES,
   type ValidationInput,
   type ValidationRule,
-} from "@/lib/validation-rules";
+} from "@/engine/validation-rules";
 
 /** §25 Validator 自身异常：与「Validation Failed」是两件事，由 Pipeline 分开记录。 */
 export class ValidatorError extends Error {

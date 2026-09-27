@@ -1,4 +1,4 @@
-import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
+import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
 
 export class BeatParseError extends Error {
   constructor(message: string) {

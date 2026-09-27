@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { StoryValidator } from "@/lib/story-validator";
+import { StoryValidator } from "@/engine/story-validator";
 import {
   countStoryLength,
   minimumLengthFloor,
   STORY_VALIDATION_RULES,
-} from "@/lib/validation-rules";
-import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
+} from "@/engine/validation-rules";
+import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
 
 /**
  * §34~§37 StoryValidator 硬性规则。

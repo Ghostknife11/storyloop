@@ -2,17 +2,17 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { QualityAssembler } from "@/core/quality-assembler";
-import { DEFAULT_RETRY_POLICY, decideRetry } from "@/core/retry-policy";
-import { parseReviewResult } from "@/lib/review-parser";
+import { QualityAssembler } from "@/engine/quality-assembler";
+import { DEFAULT_RETRY_POLICY, decideRetry } from "@/engine/retry-policy";
+import { parseReviewResult } from "@/engine/review-parser";
 import {
   reviewOverallScore,
   validateQualityDimensions,
   validateReviewResult,
   ReviewValidationError,
   type ReviewResult,
-} from "@/types/review-result";
-import { qualityResultOf, type QualityResult } from "@/types/quality";
+} from "@/domain/review-result";
+import { qualityResultOf, type QualityResult } from "@/domain/quality";
 import {
   DIMENSION_DEFINITIONS,
   DIMENSION_LABELS,
@@ -20,7 +20,7 @@ import {
   aggregateDimensionScore,
   isQualityDimensionKey,
   type QualityDimensions,
-} from "@/types/quality-dimensions";
+} from "@/domain/quality-dimensions";
 import { repoRoot } from "./helpers/fixtures";
 
 /**

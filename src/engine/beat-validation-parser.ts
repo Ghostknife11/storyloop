@@ -1,4 +1,4 @@
-import { validateBeatValidationResult, type BeatValidationResult } from "@/types/beat-validation";
+import { validateBeatValidationResult, type BeatValidationResult } from "@/domain/beat-validation";
 
 export class BeatValidationParseError extends Error {
   constructor(message: string) {

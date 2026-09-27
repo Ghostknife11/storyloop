@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { RepairStrategy, classifyProblem } from "@/core/repair-strategy";
-import type { ReviewResult } from "@/types/review-result";
-import type { ValidationResult } from "@/types/validation-result";
-import type { ValidationIssueCode } from "@/types/validation-result";
-import type { RepairIssueType } from "@/types/repair";
+import { RepairStrategy, classifyProblem } from "@/engine/repair-strategy";
+import type { ReviewResult } from "@/domain/review-result";
+import type { ValidationResult } from "@/domain/validation-result";
+import type { ValidationIssueCode } from "@/domain/validation-result";
+import type { RepairIssueType } from "@/domain/repair";
 
 /**
  * §43/§7/§8/§12~§14 RepairStrategy：固定规则映射，没有学习、没有 LLM 分类器。

@@ -16,9 +16,9 @@
  *   dimensions        ← review.dimensions 原样搬运（v1.3.0）；没有就是整键不出现
  */
 
-import type { QualityIssue, QualityResult, QualitySuggestion } from "@/types/quality";
-import type { ValidationResult } from "@/types/validation-result";
-import { reviewOverallScore, type ReviewResult } from "@/types/review-result";
+import type { QualityIssue, QualityResult, QualitySuggestion } from "@/domain/quality";
+import type { ValidationResult } from "@/domain/validation-result";
+import { reviewOverallScore, type ReviewResult } from "@/domain/review-result";
 
 /** §18 输入：三个已经存在的结论，缺哪一路就传 null。 */
 export interface QualityAssemblyInput {

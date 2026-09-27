@@ -7,14 +7,14 @@ import {
   beatValidationPassed,
   validateBeatValidationResult,
   type BeatValidationIssue,
-} from "@/types/beat-validation";
-import { BeatValidationParseError, parseBeatValidationResult } from "@/lib/beat-validation-parser";
+} from "@/domain/beat-validation";
+import { BeatValidationParseError, parseBeatValidationResult } from "@/engine/beat-validation-parser";
 import {
   BEAT_VALIDATION_TEMPERATURE,
   BeatValidator,
   checkBeatPlanDeterministic,
-} from "@/lib/beat-validator";
-import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
+} from "@/engine/beat-validator";
+import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
 import {
   SAMPLE_BEAT_PLAN,
   SAMPLE_BEAT_VALIDATION,
@@ -36,7 +36,7 @@ function planOf(beats: BeatPlan["beats"]): BeatPlan {
 /**
  * 直接搭一个 BeatPlan 对象、绕过 validateBeatPlan。
  * 规则层防的正是这种形状：空骨架 / 编号重复 / 编号不连续根本过不了 BeatPlan schema
- * （src/types/beat-plan.ts 会先抛 BeatPlanValidationError），所以走 schema 进来的
+ * （src/domain/beat-plan.ts 会先抛 BeatPlanValidationError），所以走 schema 进来的
  * BeatPlan 永远碰不到这几条规则。规则层是第二道防线，这里必须能单独验到。
  */
 function rawPlan(beats: BeatPlan["beats"]): BeatPlan {

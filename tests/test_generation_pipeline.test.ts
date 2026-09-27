@@ -2,14 +2,15 @@ import { mkdtempSync, existsSync, readFileSync, readdirSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { GenerationPipeline, PipelineError } from "@/core/pipeline";
-import { DEFAULT_RETRY_POLICY } from "@/core/retry-policy";
-import { ArtifactStore } from "@/storage/artifact-store";
-import { StoryValidator } from "@/lib/story-validator";
-import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
-import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
-import type { ReviewResult } from "@/types/review-result";
-import type { ValidationResult } from "@/types/validation-result";
+import { GenerationPipeline, PipelineError } from "@/engine/pipeline";
+import { DEFAULT_RETRY_POLICY } from "@/engine/retry-policy";
+import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
+import { failureAnalyzerFor } from "@/analysis/failure-analysis-service";
+import { StoryValidator } from "@/engine/story-validator";
+import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
+import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
+import type { ReviewResult } from "@/domain/review-result";
+import type { ValidationResult } from "@/domain/validation-result";
 import { repoVersion } from "./helpers/fixtures";
 
 /**
@@ -122,13 +123,14 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
   it("Planner → Generator → Save Story → Validator → Save Validation → Reviewer → Save Review → Complete", async () => {
     const dir = withTmpDir();
     const order: string[] = [];
+    const store = new ArtifactStore();
     const pipeline = new GenerationPipeline(
       { plan: async () => { order.push("plan"); return plan; } } as never,
       { generate: async () => { order.push("generate"); return STORY; } } as never,
       { validate: async () => { order.push("validate"); return passed; } } as never,
       { review: async () => { order.push("review"); return review; } } as never,
-      new ArtifactStore(),
-    );
+      store,
+    ).withFailureAnalyzer(failureAnalyzerFor(store));
 
     const result = await pipeline.run(config);
     expect(order).toEqual(["plan", "generate", "validate", "review"]);

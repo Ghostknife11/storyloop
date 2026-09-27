@@ -1,70 +1,62 @@
-import type { StoryConfig } from "@/types/story-config";
-import type { BeatPlan } from "@/types/beat-plan";
+import type { StoryConfig } from "@/domain/story-config";
+import type { BeatPlan } from "@/domain/beat-plan";
 import type {
   BeatValidationResult,
   BeatValidationStatus,
-} from "@/types/beat-validation";
-import { reviewOverallScore, type ReviewResult, type ReviewStatus } from "@/types/review-result";
-import type { ValidationResult, ValidationStatus } from "@/types/validation-result";
-import type { RunContext, RunStatus } from "@/core/run-context";
-import { createRunContext, transitionStage, failRun } from "@/core/run-context";
-import { BeatPlanner } from "@/lib/beat-planner";
-import { StoryGenerator } from "@/lib/story-generator";
-import { StoryValidator } from "@/lib/story-validator";
-import { BasicReviewer } from "@/lib/basic-reviewer";
-import { CommercialReviewer } from "@/lib/commercial-reviewer";
+} from "@/domain/beat-validation";
+import { reviewOverallScore, type ReviewResult, type ReviewStatus } from "@/domain/review-result";
+import type { ValidationResult, ValidationStatus } from "@/domain/validation-result";
+import type { RunContext, RunStatus } from "@/domain/run-context";
+import { createRunContext, transitionStage, failRun } from "@/domain/run-context";
+import { BeatPlanner } from "@/engine/beat-planner";
+import { StoryGenerator } from "@/engine/story-generator";
+import { StoryValidator } from "@/engine/story-validator";
+import { BasicReviewer } from "@/engine/basic-reviewer";
+import { CommercialReviewer } from "@/engine/commercial-reviewer";
 import {
   commercialOverallScore,
   type CommercialReviewResult,
   type CommercialReviewStatus,
-} from "@/types/commercial-review";
-import { BeatValidator } from "@/lib/beat-validator";
-import { StoryRepairer } from "@/lib/story-repairer";
-import { ArtifactStore } from "@/storage/artifact-store";
-import type { GenerateRuntime } from "@/lib/generate-service";
+} from "@/domain/commercial-review";
+import { BeatValidator } from "@/engine/beat-validator";
+import { StoryRepairer } from "@/engine/story-repairer";
+import { ArtifactStore } from "@/ports/artifact-store";
+import type { GenerateRuntime } from "@/domain/run-config";
 import {
   DEFAULT_RETRY_POLICY,
   decideRetry,
   validateRetryPolicy,
   type RetryDecision,
   type RetryPolicy,
-} from "@/core/retry-policy";
-import type { GenerationAttempt } from "@/core/generation-attempt";
-import { RepairStrategy } from "@/core/repair-strategy";
-import type { RepairRecord } from "@/types/repair";
-import { repairRequestOf } from "@/types/repair";
-import { QualityAssembler } from "@/core/quality-assembler";
-import type { QualityResult } from "@/types/quality";
-import { logger } from "@/lib/logger";
-import { safeText } from "@/lib/safe-text";
-import { llmSettings } from "@/lib/app-config";
-import { LLMTimeoutError } from "@/lib/llm";
-import { isStageName } from "@/types/telemetry";
-import { TelemetryCollector, type TelemetryErrorCode } from "@/core/telemetry-collector";
-import type { RunTelemetry } from "@/types/telemetry";
-import { projectVersion as readProjectVersion } from "@/lib/version";
-import type { RunManifest, ExperimentProvenance } from "@/types/run-manifest";
-import { buildRunManifest, type ManifestAttemptInput } from "@/lib/tracking/manifest-builder";
-import { analyzeStoredRun, failureAnalysisMetadataPatch } from "@/lib/failure-analysis-service";
-import type { FailureAnalysisResult } from "@/types/failure-analysis";
-import { errorCodesOf } from "@/lib/failure-rules";
+} from "@/engine/retry-policy";
+import type { GenerationAttempt } from "@/engine/generation-attempt";
+import { RepairStrategy } from "@/engine/repair-strategy";
+import type { RepairRecord } from "@/domain/repair";
+import { repairRequestOf } from "@/domain/repair";
+import { QualityAssembler } from "@/engine/quality-assembler";
+import type { QualityResult } from "@/domain/quality";
+import { logger } from "@/infrastructure/logging/logger";
+import { safeText } from "@/domain/safe-text";
+import { llmSettings } from "@/infrastructure/config/app-config";
+import { LLMTimeoutError } from "@/domain/llm-errors";
+import { isStageName } from "@/domain/telemetry";
+import { TelemetryCollector, type TelemetryErrorCode } from "@/infrastructure/telemetry/telemetry-collector";
+import type { RunTelemetry } from "@/domain/telemetry";
+import { projectVersion as readProjectVersion } from "@/infrastructure/config/version";
+import type { RunManifest, ExperimentProvenance } from "@/domain/run-manifest";
+import { buildRunManifest, type ManifestAttemptInput } from "@/infrastructure/tracking/manifest-builder";
+import type { FailureAnalyzer } from "@/ports/failure-analyzer";
+import { NO_FAILURE_ANALYZER } from "@/ports/failure-analyzer";
+import type { FailureAnalysisResult } from "@/domain/failure-analysis";
+import { generateRunId } from "@/infrastructure/id/run-id";
+import { PipelineError } from "@/domain/errors";
 
-/**
- * §28 PipelineError：不吞异常，带 run_id / stage / message。
- * 技术日志记原始异常，用户 API 只拿这里的 message。
- * cause 保留被包裹的原始异常，供错误码映射区分 LLM 失败与其它生成失败（§11）。
- */
-export class PipelineError extends Error {
-  constructor(
-    message: string,
-    public runId: string,
-    public stage: string,
-    public readonly cause?: unknown,
-  ) {
-    super(message);
-    this.name = "PipelineError";
-  }
-}
+// v2.0.0：PipelineError 移入 Domain 层错误契约（domain/errors.ts）。
+// 它不再由引擎模块持有——否则错误模型这个最稳定的公开契约会被绑在
+// 一个具体引擎上，并把 failure-rules / api-error / generate-service
+// 三处拖成穿过 pipeline.ts 的循环依赖（v1.9.1 已存在）。
+// 这里 re-export 只是为了让既有的 `from "@/engine/pipeline"` 导入继续可用。
+export { PipelineError };
 
 /** §16 quality_status：accepted = 某个 Attempt 满足 RetryPolicy；exhausted = 用尽 Attempt 仍未满足。 */
 export type QualityStatus = "accepted" | "exhausted";
@@ -388,6 +380,13 @@ function commercialStatusPatch(check: CommercialCheck): Partial<MetaPatch> {
  * §65 只暴露 run() 与 runWithPlan()，不做 Stage Registry / DAG / Plugin。
  */
 export class GenerationPipeline {
+  /**
+   * v1.9.0/§29 失败分析器：Engine 只负责「收尾时把证据交给它」，
+   * 读盘与归类都在 Analysis 里。未注入时按 NO_FAILURE_ANALYZER 处理
+   * （不分析、不写盘、metadata 如实记 unavailable）；装配由组合根负责。
+   */
+  private failureAnalyzer: FailureAnalyzer = NO_FAILURE_ANALYZER;
+
   constructor(
     private planner: BeatPlanner,
     private generator: StoryGenerator,
@@ -416,6 +415,18 @@ export class GenerationPipeline {
     private telemetry: TelemetryCollector = new TelemetryCollector(),
   ) {}
 
+  /**
+   * 注入失败分析器（§29/§72）。
+   *
+   * 做成方法而不是又一个位置参数：可选协作者已经有十来个，再往后排一串
+   * `undefined` 的尾巴，读的人根本看不出谁是谁。组合根（buildPipeline）
+   * 在装配完 Pipeline 后立刻注入；没注入就是不分析。
+   */
+  withFailureAnalyzer(analyzer: FailureAnalyzer): this {
+    this.failureAnalyzer = analyzer;
+    return this;
+  }
+
   /** §6 Automatic：StoryConfig → Plan → 若干 Attempt → 选中的那一个。 */
   async run(
     config: StoryConfig,
@@ -424,7 +435,7 @@ export class GenerationPipeline {
     /** v1.7.0：这次 Run 是某个受控实验的样本时带上实验出身；普通 Run 不传。 */
     experiment?: ExperimentProvenance,
   ): Promise<GenerationResult> {
-    return this.runStages(createRunContext(this.projectVersion), config, undefined, runtime, retryPolicy, experiment);
+    return this.runStages(createRunContext(this.projectVersion, generateRunId()), config, undefined, runtime, retryPolicy, experiment);
   }
 
   /** §29 Manual：用户编辑后的 BeatPlan 直接进入生成，仍形成一个 Run。 */
@@ -436,7 +447,7 @@ export class GenerationPipeline {
     /** v1.7.0 同 run()：实验样本的出身由调用方（实验执行器）传入。 */
     experiment?: ExperimentProvenance,
   ): Promise<GenerationResult> {
-    return this.runStages(createRunContext(this.projectVersion), config, beatPlan, runtime, retryPolicy, experiment);
+    return this.runStages(createRunContext(this.projectVersion, generateRunId()), config, beatPlan, runtime, retryPolicy, experiment);
   }
 
   /**
@@ -495,9 +506,12 @@ export class GenerationPipeline {
     // metadata 说 detected 而盘上根本没有那份文件，比没有这个字段更糟。
     let analysis: FailureAnalysisResult | null = null;
     try {
-      const produced = analyzeStoredRun(rid, this.artifactStore, extraCodes);
-      this.artifactStore.putFailureAnalysis(rid, produced);
-      analysis = produced;
+      const produced = this.failureAnalyzer.analyzeRun(rid, extraCodes);
+      // 分析器判「证据不足给不出结论」时什么都不写，也不给一个假类别占位
+      if (produced !== null) {
+        this.artifactStore.putFailureAnalysis(rid, produced);
+        analysis = produced;
+      }
     } catch (e) {
       logger
         .child({ run_id: rid })
@@ -508,7 +522,7 @@ export class GenerationPipeline {
       if (meta) {
         this.artifactStore.putMetadata(rid, {
           ...meta,
-          ...failureAnalysisMetadataPatch(analysis),
+          ...this.failureAnalyzer.metadataPatchOf(analysis),
         });
       }
     } catch (e) {
@@ -707,7 +721,7 @@ export class GenerationPipeline {
       this.writeManifest(ctx, rid, runtime, policy, records, null, experiment);
       // v1.9.0：失败的 Run 也要有失败分析——它正是最需要分类的那一次（§27）。
       // 异常链上的真实错误码一并交给分析器（§40），遥测那边只记最内层一个。
-      this.writeFailureAnalysis(rid, errorCodesOf(e));
+      this.writeFailureAnalysis(rid, this.failureAnalyzer.codesOf(e));
       throw new PipelineError(
         ["Run", rid, "failed at", ctx.current_stage ?? "unknown", ":", detail].join(" "),
         rid,

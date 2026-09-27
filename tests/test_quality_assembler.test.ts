@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { QualityAssembler, REVIEW_PROBLEM_CATEGORY } from "@/core/quality-assembler";
-import type { ValidationResult } from "@/types/validation-result";
-import type { ReviewResult } from "@/types/review-result";
+import { QualityAssembler, REVIEW_PROBLEM_CATEGORY } from "@/engine/quality-assembler";
+import type { ValidationResult } from "@/domain/validation-result";
+import type { ReviewResult } from "@/domain/review-result";
 
 /**
  * v1.2.0 §47 QualityAssembler 测试：以 spec 的 Case A~D 为基线，

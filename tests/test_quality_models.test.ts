@@ -4,8 +4,8 @@ import {
   type QualityIssue,
   type QualityResult,
   type QualitySuggestion,
-} from "@/types/quality";
-import type { ReviewResult } from "@/types/review-result";
+} from "@/domain/quality";
+import type { ReviewResult } from "@/domain/review-result";
 
 /**
  * v1.2.0 §46 质量模型测试：QualityResult 的宽容磁盘归一化。

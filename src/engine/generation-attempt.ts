@@ -7,11 +7,11 @@
  * Repair 不新增 Attempt，所以记录挂在 Attempt 上，而不是多一个 attempt_number。
  */
 
-import type { ValidationResult } from "@/types/validation-result";
-import { reviewOverallScore, type ReviewResult } from "@/types/review-result";
-import type { RepairRecord, RepairSummary } from "@/types/repair";
-import { repairSummary, validateRepairRecord } from "@/types/repair";
-import { RETRY_REASONS, type RetryReason } from "@/core/retry-policy";
+import type { ValidationResult } from "@/domain/validation-result";
+import { reviewOverallScore, type ReviewResult } from "@/domain/review-result";
+import type { RepairRecord, RepairSummary } from "@/domain/repair";
+import { repairSummary, validateRepairRecord } from "@/domain/repair";
+import { RETRY_REASONS, type RetryReason } from "@/engine/retry-policy";
 
 export interface GenerationAttempt {
   attempt_number: number;

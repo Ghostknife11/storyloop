@@ -2,10 +2,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { StoryGenerator } from "@/lib/story-generator";
-import { LLMError } from "@/lib/llm";
-import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
-import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
+import { StoryGenerator } from "@/engine/story-generator";
+import { LLMError } from "@/infrastructure/llm/openai-compatible-llm-client";
+import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
+import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
 
 /** §14/§15/§16 StoryGenerator：StoryConfig + BeatPlan → Story Prompt → LLM → 正文。 */
 

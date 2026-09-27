@@ -2,11 +2,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { BeatPlanner } from "@/lib/beat-planner";
-import { BeatParseError } from "@/lib/beat-parser";
-import { LLMError } from "@/lib/llm";
-import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
-import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
+import { BeatPlanner } from "@/engine/beat-planner";
+import { BeatParseError } from "@/engine/beat-parser";
+import { LLMError } from "@/infrastructure/llm/openai-compatible-llm-client";
+import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
+import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
 
 /** §9 BeatPlanner：只做规划，不写正文、不评质量、不自动修复。 */
 

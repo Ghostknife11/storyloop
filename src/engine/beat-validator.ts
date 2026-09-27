@@ -1,14 +1,14 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { StoryConfig } from "@/types/story-config";
-import type { BeatPlan } from "@/types/beat-plan";
+import type { StoryConfig } from "@/domain/story-config";
+import type { BeatPlan } from "@/domain/beat-plan";
 import {
   beatValidationPassed,
   type BeatValidationIssue,
   type BeatValidationResult,
-} from "@/types/beat-validation";
-import { parseBeatValidationResult } from "@/lib/beat-validation-parser";
-import { LLMClient } from "@/lib/llm";
+} from "@/domain/beat-validation";
+import { parseBeatValidationResult } from "@/engine/beat-validation-parser";
+import type { LLMClient } from "@/ports/llm-client";
 
 /** 模块加载时锁定项目根，避免测试 chdir 后模板路径漂移。 */
 const PROJECT_ROOT = process.cwd();

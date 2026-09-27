@@ -10,8 +10,8 @@ import {
   validateRepairRecord,
   type RepairRecord,
   type RepairRequest,
-} from "@/types/repair";
-import type { ValidationResult } from "@/types/validation-result";
+} from "@/domain/repair";
+import type { ValidationResult } from "@/domain/validation-result";
 
 /**
  * §3~§6/§43 Repair 数据模型：Fixture 结构校验，绝不打真实付费 API。

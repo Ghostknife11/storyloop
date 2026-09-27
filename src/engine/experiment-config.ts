@@ -14,11 +14,11 @@
  * `clientFor()` 仍会跑 v1.1.0 的公网地址断言，等于每一条样本都过一次关卡。
  */
 
-import type { RetryPolicy } from "@/core/retry-policy";
-import { DEFAULT_RETRY_POLICY } from "@/core/retry-policy";
-import type { BeatPlan } from "@/types/beat-plan";
-import type { StoryConfig } from "@/types/story-config";
-import type { ExperimentDefinition, ExperimentVariant } from "@/types/experiment";
+import type { RetryPolicy } from "@/engine/retry-policy";
+import { DEFAULT_RETRY_POLICY } from "@/engine/retry-policy";
+import type { BeatPlan } from "@/domain/beat-plan";
+import type { StoryConfig } from "@/domain/story-config";
+import type { ExperimentDefinition, ExperimentVariant } from "@/domain/experiment";
 
 /** 一条样本实际生效的配置：Base 合并一个 Variant 之后的结果。 */
 export interface EffectiveRunConfig {

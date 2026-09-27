@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { BeatParseError, parseBeatPlan } from "@/lib/beat-parser";
-import { validateBeatPlan } from "@/types/beat-plan";
+import { BeatParseError, parseBeatPlan } from "@/engine/beat-parser";
+import { validateBeatPlan } from "@/domain/beat-plan";
 
 /** §12 BeatPlan Parser：清理 → JSON parse → schema 校验。禁止智能修复。 */
 

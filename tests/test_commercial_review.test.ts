@@ -10,9 +10,9 @@ import {
   validateCommercialDimensions,
   validateCommercialReviewResult,
   type CommercialDimensions,
-} from "@/types/commercial-review";
-import { parseCommercialReviewResult } from "@/lib/commercial-review-parser";
-import { CommercialReviewer, COMMERCIAL_REVIEW_TEMPERATURE } from "@/lib/commercial-reviewer";
+} from "@/domain/commercial-review";
+import { parseCommercialReviewResult } from "@/engine/commercial-review-parser";
+import { CommercialReviewer, COMMERCIAL_REVIEW_TEMPERATURE } from "@/engine/commercial-reviewer";
 import { SAMPLE_COMMERCIAL_REVIEW, SAMPLE_CONFIG, SAMPLE_STORY, FakeLLM } from "./helpers/fixtures";
 
 /**

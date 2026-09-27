@@ -1,8 +1,8 @@
 import {
   validateCommercialReviewResult,
   type CommercialReviewResult,
-} from "@/types/commercial-review";
-import { stripFence } from "@/lib/review-parser";
+} from "@/domain/commercial-review";
+import { stripFence } from "@/engine/review-parser";
 
 export class CommercialReviewParseError extends Error {
   constructor(message: string) {

@@ -2,10 +2,10 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { BasicReviewer, REVIEW_TEMPERATURE } from "@/lib/basic-reviewer";
-import { ReviewParseError } from "@/lib/review-parser";
-import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
-import type { LLMClient } from "@/lib/llm";
+import { BasicReviewer, REVIEW_TEMPERATURE } from "@/engine/basic-reviewer";
+import { ReviewParseError } from "@/engine/review-parser";
+import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
+import type { LLMClient } from "@/infrastructure/llm/openai-compatible-llm-client";
 
 /**
  * §42 BasicReviewer：StoryConfig + Story → Review Prompt → Mock LLM → ReviewResult。

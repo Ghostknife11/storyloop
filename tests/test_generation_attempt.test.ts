@@ -7,9 +7,9 @@ import {
   validateGenerationAttempt,
   validateRetryReason,
   type GenerationAttempt,
-} from "@/core/generation-attempt";
-import type { ReviewResult } from "@/types/review-result";
-import type { ValidationResult } from "@/types/validation-result";
+} from "@/engine/generation-attempt";
+import type { ReviewResult } from "@/domain/review-result";
+import type { ValidationResult } from "@/domain/validation-result";
 
 /**
  * §5/§6/§43 GenerationAttempt：Fixture 结构校验，同样绝不打真实付费 API。

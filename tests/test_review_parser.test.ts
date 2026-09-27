@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseReviewResult, ReviewParseError } from "@/lib/review-parser";
+import { parseReviewResult, ReviewParseError } from "@/engine/review-parser";
 
 /**
  * §41 Review Parser：raw LLM output → 轻量清理 → JSON parse → schema 校验 → ReviewResult。
