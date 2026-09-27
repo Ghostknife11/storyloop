@@ -367,7 +367,11 @@ describe("v1.1.1 CLI 入口的 baseUrl 信任级", () => {
     const source = read(join(process.cwd(), "scripts", "generate-cli.ts"), "utf8");
     // 注入客户端前若把关卡打开了，v1.1.0 的 CLI 回归就会出现：plan 拦、run 不拦
     expect((source.match(/clientFromEnv\(/g) ?? []).length).toBe(1);
-    expect((source.match(/cliClient\(args\)/g) ?? []).length).toBeGreaterThanOrEqual(5);
+    // 五个子命令（run/plan/review/validate/repair）都从同一个出口取客户端，
+    // 谁也不许自己 new 一个：v2.0.0 起这个出口是 cliApp → 组合根
+    expect((source.match(/cliApp\(args\)/g) ?? []).length).toBeGreaterThanOrEqual(5);
+    // 客户端不进请求体：地址只作为受信配置注入（§26/§71）
+    expect(source).not.toMatch(/bodyRuntime[^\n]*baseUrl/);
   });
 });
 

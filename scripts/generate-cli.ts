@@ -8,7 +8,7 @@
  *   storygen validate  —— 对已有正文单独跑硬性规则（与 Pipeline 使用同一个 StoryValidator）
  *   storygen repair    —— 对已有正文定点修订一次（与 Pipeline 使用同一个 StoryRepairer）
  *
- * §31 CLI 不重复业务逻辑：所有命令都走 src/lib/generate-service.ts 里的同一个
+ * §31 CLI 不重复业务逻辑：所有命令都走 src/application/generate-service.ts 里的同一个
  * Pipeline / Service，Retry 与 Repair 策略也只有那一份实现。
  * §32 API 与 CLI 行为一致：同一套 StoryConfig 校验、同一套 RetryPolicy 范围。
  *
@@ -32,20 +32,19 @@
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
-import { parseStoryConfig } from "@/lib/config-io";
-import { parseBeatPlan } from "@/lib/beat-parser";
-import { clientFromEnv } from "@/lib/llm";
-import {
-  planStory, startRun, startRunFromPlan, reviewStory, validateStory, repairStory, type RunOk,
-} from "@/lib/generate-service";
-import { ArtifactStore } from "@/storage/artifact-store";
-import { REPAIR_ISSUE_TYPES, validateRepairRecord, type RepairRecord } from "@/types/repair";
-import { errorMessageOf } from "@/lib/api-error";
-import { projectVersion } from "@/lib/version";
-import type { ReviewResult } from "@/types/review-result";
-import type { ValidationResult } from "@/types/validation-result";
-import type { BeatPlan } from "@/types/beat-plan";
-import type { RepairResult } from "@/types/repair";
+import { parseStoryConfig } from "@/infrastructure/config/config-io";
+import { parseBeatPlan } from "@/engine/beat-parser";
+import { clientFromEnv } from "@/infrastructure/llm/openai-compatible-llm-client";
+import { createStoryLoop, type StoryLoopApplication } from "@/composition";
+import type { RunOk } from "@/application/generate-service";
+import { REPAIR_ISSUE_TYPES, validateRepairRecord, type RepairRecord } from "@/domain/repair";
+import { errorMessageOf } from "@/application/error-model";
+import { projectVersion } from "@/infrastructure/config/version";
+import { providerConfigured } from "@/infrastructure/health/health-probe";
+import type { ReviewResult } from "@/domain/review-result";
+import type { ValidationResult } from "@/domain/validation-result";
+import type { BeatPlan } from "@/domain/beat-plan";
+import type { RepairResult } from "@/domain/repair";
 import 'dotenv/config';
 
 /** §30 退出码：只留三个，语义固定。 */
@@ -320,8 +319,8 @@ function validationText(validation: ValidationResult | null): string {
  * Attempt 明细：Validation → Review → Repair → Revalidation → Review after repair。
  * 初始校验 / 审阅结论与修订记录都从这次 Run 自己的产物读回，不另建统计、不编数据。
  */
-function reportAttemptDetail(runId: string, attemptNumber: number, beforeScore: number | null, io: CliIo) {
-  const store = new ArtifactStore();
+function reportAttemptDetail(app: StoryLoopApplication, runId: string, attemptNumber: number, beforeScore: number | null, io: CliIo) {
+  const store = app.deps.artifactStore;
   const meta = store.readAttemptMetadata(runId, attemptNumber);
   const repairs: RepairRecord[] = [];
   const raw = meta?.repairs;
@@ -351,7 +350,7 @@ function reportAttemptDetail(runId: string, attemptNumber: number, beforeScore: 
   }
 }
 
-function reportRun(result: RunOk, started: number, io: CliIo) {
+function reportRun(app: StoryLoopApplication, result: RunOk, started: number, io: CliIo) {
   io.out(`Run ID: ${result.run_id}`);
   io.out(`Status: ${result.status}`);
   io.out(`Beats: ${result.beat_plan.beats.length}`);
@@ -360,7 +359,7 @@ function reportRun(result: RunOk, started: number, io: CliIo) {
     const score = a.review_score === null
       ? null
       : Number.isInteger(a.review_score) ? String(a.review_score) : a.review_score.toFixed(1);
-    reportAttemptDetail(result.run_id, a.attempt_number, a.review_score, io);
+    reportAttemptDetail(app, result.run_id, a.attempt_number, a.review_score, io);
     if (a.retry_reason === "generation_error") {
       io.out(`Attempt ${a.attempt_number} → failed`);
     } else if (a.accepted) {
@@ -458,6 +457,15 @@ function cliClient(args: ParsedArgs) {
 }
 
 /**
+ * §31/§38：CLI 不 import 用例实现、不自己 new 引擎部件。每个子命令从组合根拿一份
+ * 装好的应用，只做「解析参数 → 调用门面 → 按退出码收尾」这三件事；
+ * 重试、修复、落盘的规则与 API 走的是同一份实现（§16/§30）。
+ */
+function cliApp(args: ParsedArgs): StoryLoopApplication {
+  return createStoryLoop({ llm: cliClient(args) });
+}
+
+/**
  * v1.4.1：审阅（0.3）/ 修订（0.5）用的是各自固定的温度，与生成温度相互独立，
  * 请求体里带的 temperature 服务端不读。命令行上收了却不吭声会让人以为生效了，
  * 所以这里明确打一行说明已忽略，而不是默默丢掉的。
@@ -549,7 +557,7 @@ async function commandValidate(args: ParsedArgs, io: CliIo): Promise<number> {
   if (story === null) return EXIT_USAGE;
 
   io.out("[cli] 校验正文……");
-  const { status, json } = await validateStory({
+  const { status, json } = await cliApp(args).service.validate({
     config,
     story,
     ...(flag(args.flags, "--run-id") ? { run_id: flag(args.flags, "--run-id") } : {}),
@@ -575,9 +583,8 @@ async function commandReview(args: ParsedArgs, io: CliIo): Promise<number> {
 
   io.out("[cli] 审阅正文……");
   noteIgnoredTemperature(args, "审阅", io);
-  const { status, json } = await reviewStory(
+  const { status, json } = await cliApp(args).service.review(
     { config, story, ...bodyRuntime(args) },
-    { llm: cliClient(args) },
   );
   if (status !== 200) {
     io.err(`失败：${errorMessageOf(json)}`);
@@ -611,17 +618,14 @@ async function commandRepair(args: ParsedArgs, io: CliIo): Promise<number> {
 
   io.out(`[cli] 定点修订（${issueType}）……`);
   noteIgnoredTemperature(args, "定点修订", io);
-  const { status, json } = await repairStory(
-    {
-      config,
-      beat_plan: plan,
-      story,
-      issue_type: issueType,
-      issue_message: issueMessage,
-      ...bodyRuntime(args),
-    },
-    { llm: cliClient(args) },
-  );
+  const { status, json } = await cliApp(args).service.repair({
+    config,
+    beat_plan: plan,
+    story,
+    issue_type: issueType,
+    issue_message: issueMessage,
+    ...bodyRuntime(args),
+  });
   if (status !== 200) {
     io.err(`失败：${errorMessageOf(json)}`);
     return EXIT_RUNTIME;
@@ -650,7 +654,7 @@ async function commandPlan(args: ParsedArgs, io: CliIo): Promise<number> {
   io.out("[cli] 规划剧情骨架……");
   // §26：--model / --temperature 与其它子命令一样要透传进请求体，
   // 否则命令行上给了温度，规划却照旧用 0.7（UI 那条路一直是带的）。
-  const { status, json } = await planStory({ ...config, ...bodyRuntime(args) }, cliClient(args));
+  const { status, json } = await cliApp(args).service.plan({ ...config, ...bodyRuntime(args) });
   if (status !== 200) {
     io.err(`失败：${errorMessageOf(json)}`);
     return EXIT_RUNTIME;
@@ -704,26 +708,25 @@ async function commandRun(args: ParsedArgs, io: CliIo): Promise<number> {
 
   const started = Date.now();
   const { status, json } = beatPlan
-    ? await startRunFromPlan(
-        {
-          config,
-          beat_plan: beatPlan,
-          ...bodyRuntime(args),
-          ...(policy.policy ? { retry_policy: policy.policy } : {}),
-        },
-        { llm: cliClient(args) },
-      )
-    : await startRun(
-        { config, ...bodyRuntime(args), ...(policy.policy ? { retry_policy: policy.policy } : {}) },
-        { llm: cliClient(args) },
-      );
+    ? await cliApp(args).service.generateFromPlan({
+        config,
+        beat_plan: beatPlan,
+        ...bodyRuntime(args),
+        ...(policy.policy ? { retry_policy: policy.policy } : {}),
+      })
+    : await cliApp(args).service.generate({
+        config,
+        ...bodyRuntime(args),
+        ...(policy.policy ? { retry_policy: policy.policy } : {}),
+      });
 
   if (status !== 200) {
     // PipelineError 已带 run_id 与失败阶段（§28）
     io.err(`失败：${errorMessageOf(json)}`);
     return EXIT_RUNTIME;
   }
-  reportRun(json as RunOk, started, io);
+  const app = cliApp(args);
+  reportRun(app, json as RunOk, started, io);
   return EXIT_OK;
 }
 
@@ -760,7 +763,8 @@ export async function runCli(argv: string[], io: CliIo = consoleIo): Promise<num
   }
 
   // §32：API Key 只来自服务端环境。validate 不调模型，是唯一例外。
-  if (args.command !== "validate" && !process.env.LLM_API_KEY) {
+  // §33：这里也不自己读 process.env，问同一个探针（健康检查用的就是它）。
+  if (args.command !== "validate" && !providerConfigured()) {
     io.err("失败：未配置 LLM_API_KEY（.env）。CLI 与 UI 使用同一服务端配置。");
     return EXIT_USAGE;
   }
