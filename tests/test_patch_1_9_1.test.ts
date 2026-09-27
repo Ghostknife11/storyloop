@@ -10,7 +10,7 @@ import { getRunFailureAnalysis } from "@/application/generate-service";
 import { FailureAnalyzer } from "@/analysis/failure-analyzer";
 import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
-import type { BeatValidationResult } from "@/domain/beat-validation";
+import type { BeatValidationV2Result } from "@/domain/beat-validation-v2";
 import type { QualityReviewV2Result } from "@/domain/quality-review-v2";
 import type { ValidationResult } from "@/domain/validation-result";
 import type { CommercialReviewResult } from "@/domain/commercial-review";
@@ -73,9 +73,9 @@ const TOO_SHORT: ValidationResult = {
   issues: [{ code: "TOO_SHORT", severity: "error", message: "正文长度明显短于目标字数。" }],
 };
 
-const BEAT_OK: BeatValidationResult = {
+const BEAT_OK: BeatValidationV2Result = {
   passed: true,
-  issues: [],
+  diagnostics: [],
   summary: "骨架结构完整。",
 };
 
@@ -113,7 +113,7 @@ interface Components {
   generator: { generate: () => Promise<string> };
   validator: { validate: () => Promise<ValidationResult> };
   reviewer: { review: () => Promise<QualityReviewV2Result> };
-  beatValidator?: { validate: () => Promise<BeatValidationResult> };
+  beatValidator?: { validate: () => Promise<BeatValidationV2Result> };
   commercialReviewer?: { review: () => Promise<CommercialReviewResult> };
   repairer?: { repair: (r: RepairRequest) => Promise<RepairResult> };
   store?: ArtifactStore;

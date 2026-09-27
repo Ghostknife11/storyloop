@@ -46,7 +46,7 @@ import { BeatPlanValidationError } from "@/domain/beat-plan";
 import type { BeatPlan } from "@/domain/beat-plan";
 import {
   SAMPLE_BEAT_PLAN,
-  SAMPLE_BEAT_VALIDATION,
+  SAMPLE_BEAT_VALIDATION_V2,
   SAMPLE_COMMERCIAL_REVIEW,
   SAMPLE_CONFIG,
   SAMPLE_QUALITY_REVIEW_V2,
@@ -58,7 +58,7 @@ import {
   repoVersion,
   withTmpDir,
 } from "./helpers/fixtures";
-import type { BeatValidationResult } from "@/domain/beat-validation";
+import type { BeatValidationV2Result } from "@/domain/beat-validation-v2";
 
 /**
  * v1.0.0 合同测试：公开 API 表面冻结（TASK §12/§13/§14/§51）。
@@ -144,7 +144,7 @@ async function jsonOf(res: Response): Promise<Record<string, unknown>> {
 }
 
 /** 走完整 Pipeline 的假件：四个阶段都只用到 generate()。 */
-function runDeps(llm: FakeLLM, beatValidation?: BeatValidationResult) {
+function runDeps(llm: FakeLLM, beatValidation?: BeatValidationV2Result) {
   // 降到这些阶段真正需要的形状，接口其余部分（baseUrl/apiKey/...）与用例无关
   const client = llm as never;
   return {
@@ -158,7 +158,7 @@ function runDeps(llm: FakeLLM, beatValidation?: BeatValidationResult) {
     // v1.4.0：BeatValidator 单独用一条假 LLM——它排在主回复序列中间，
     // 不拆开会让每条用例里的 plan / story / review 位置全部错位
     beatValidator: new BeatValidator(
-      new FakeLLM([JSON.stringify(beatValidation ?? SAMPLE_BEAT_VALIDATION)]) as never,
+      new FakeLLM([JSON.stringify(beatValidation ?? SAMPLE_BEAT_VALIDATION_V2)]) as never,
     ),
     // v1.5.0：商业审阅同样是独立的一次调用。FakeLLM 对单条回复会一直重复返回，
     // 于是这里不必在每条用例的主回复序列里给它排一个位置。

@@ -48,6 +48,7 @@ import type { RunTelemetry } from "@/domain/telemetry";
 import type { QualityStatus } from "@/engine/pipeline";
 import { projectVersion as readProjectVersion } from "@/infrastructure/config/version";
 import type { BeatValidationResult } from "@/domain/beat-validation";
+import { legacyBeatValidationOf } from "@/domain/beat-validation-v2";
 import type {
   CommercialReviewResult,
   CommercialReviewStatus,
@@ -608,8 +609,11 @@ export async function validateStoryBeats(body: unknown, deps: RunDeps = {}): Pro
       await clientFor(runtime, deps.llm),
       join(PROJECT_ROOT, "prompts", "beat_validator.txt"),
     );
-    const beatValidation = await validator.validate(config, plan);
-    return { status: 200, json: beatValidation };
+    // v2.1.0：BeatValidator 输出 BeatValidationV2Result（统一 diagnostics），
+    // /api/validate-beats 的响应仍是 v1.4.0 的 BeatValidationResult 形状——
+    // 在边界处摊平回去，旧客户端读到的字段一个不少（TASK §14）。
+    const checked = await validator.validate(config, plan);
+    return { status: 200, json: legacyBeatValidationOf(checked) };
   } catch (e) {
     const err = toApiError(e);
     logger.error(`beat validation failed (${err.code})`, e);

@@ -45,9 +45,10 @@ import type { RunTelemetry } from "@/domain/telemetry";
 const PLAN_REPLY = JSON.stringify(SAMPLE_BEAT_PLAN);
 const GOOD_REVIEW_REPLY = REVIEW_REPLY;
 const COMMERCIAL_REPLY = JSON.stringify(SAMPLE_COMMERCIAL_REVIEW);
+// v2.1.0：Beat 校验结论换成统一 diagnostics（passed 由 severity 推导）
 const BEAT_VALIDATION_REPLY = JSON.stringify({
   passed: true,
-  issues: [],
+  diagnostics: [],
   summary: "骨架结构完整：开场、冲突升级、高潮、收束都有，顺序与状态一致。",
 });
 const LOW_REVIEW_REPLY = JSON.stringify(

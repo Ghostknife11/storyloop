@@ -11,7 +11,7 @@ import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
 import type { QualityReviewV2Result } from "@/domain/quality-review-v2";
 import type { ValidationResult } from "@/domain/validation-result";
-import { apiErrorOf, commercialReviewerOf, qualityReviewV2Of, SAMPLE_BEAT_VALIDATION } from "./helpers/fixtures";
+import { apiErrorOf, commercialReviewerOf, qualityReviewV2Of, SAMPLE_BEAT_VALIDATION_V2 } from "./helpers/fixtures";
 
 /**
  * §37~§39/§51 Retry API：请求体带 retry_policy、响应带 Attempt 摘要、
@@ -97,7 +97,7 @@ async function runWith(
     validator: scriptedValidator(validations) as never,
     reviewer: scriptedReviewer(reviews) as never,
     repairer: { repair: async () => ({ repaired_story: "", issue_type: "general", success: false, notes: "修订失败：测试用的假 Repairer" }) } as never,
-    beatValidator: { validate: async () => SAMPLE_BEAT_VALIDATION } as never,
+    beatValidator: { validate: async () => SAMPLE_BEAT_VALIDATION_V2 } as never,
     commercialReviewer: commercialReviewerOf(),
   } as never);
 }

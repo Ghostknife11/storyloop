@@ -1,4 +1,7 @@
-import { validateBeatValidationResult, type BeatValidationResult } from "@/domain/beat-validation";
+import {
+  validateBeatValidationV2Result,
+  type BeatValidationV2Result,
+} from "@/domain/beat-validation-v2";
 
 export class BeatValidationParseError extends Error {
   constructor(message: string) {
@@ -16,11 +19,16 @@ function stripFence(raw: string): string {
 }
 
 /**
- * §15 BeatValidation Parser：raw LLM output → 清理 → JSON parse → schema 校验 → BeatValidationResult。
- * 与 review-parser / beat-parser 同一套写法：非法就是非法，抛 BeatValidationParseError，
- * 由调用方决定怎么处理（§15 禁止构建 LLM JSON Repair Agent）。
+ * v2.1.0 Beat Validator v2 Parser：raw LLM output → 清理 → JSON parse → schema 校验
+ * → BeatValidationV2Result（TASK §14/§37）。
+ *
+ * 与 v1.x 同一条规矩：非法就是非法，抛 BeatValidationParseError，
+ * 不构建 LLM JSON Repair Agent，业务层也不自动重试。
+ *
+ * v2 起命中项写成统一 diagnostics（category = 十一个稳定 Code 之一），
+ * 不再接受模型自报的 passed——布尔结论由诊断重新推导。
  */
-export function parseBeatValidationResult(raw: string): BeatValidationResult {
+export function parseBeatValidationV2Result(raw: string): BeatValidationV2Result {
   const text = stripFence(raw);
   let json: unknown;
   try {
@@ -30,5 +38,11 @@ export function parseBeatValidationResult(raw: string): BeatValidationResult {
       `BeatValidator 输出不是合法 JSON：${e instanceof Error ? e.message : String(e)}`,
     );
   }
-  return validateBeatValidationResult(json);
+  try {
+    return validateBeatValidationV2Result(json);
+  } catch (e) {
+    throw new BeatValidationParseError(
+      e instanceof Error ? e.message : `BeatValidator 输出不合法：${String(e)}`,
+    );
+  }
 }

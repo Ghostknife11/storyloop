@@ -24,6 +24,7 @@ import {
 } from "@/domain/quality-review-v2";
 import type { ValidationResult, ValidationIssueCode } from "@/domain/validation-result";
 import type { BeatValidationResult } from "@/domain/beat-validation";
+import type { BeatValidationV2Result } from "@/domain/beat-validation-v2";
 import type { CommercialReviewResult } from "@/domain/commercial-review";
 import { LLMError, LLMTimeoutError } from "@/infrastructure/llm/openai-compatible-llm-client";
 import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
@@ -179,6 +180,33 @@ export const SAMPLE_BEAT_VALIDATION_FAILED: BeatValidationResult = {
       severity: "error",
       message: "第 4 拍直接跳到结局，没有任何高潮或决定性对抗。",
       beat_ids: [4],
+    },
+  ],
+  summary: "缺少高潮：从升级直接跳到收束，故事没有顶点。",
+};
+
+/**
+ * v2.1.0 BeatValidator v2 的样例输出——这是「模型回复」的那一份
+ * （统一 QualityDiagnostic，category 仍是 v1.4.0 的十一个稳定 Code）。
+ * legacyBeatValidationOf 之后就是上面那两个 v1 样例，DTO 兼容层因此可对拍。
+ */
+export const SAMPLE_BEAT_VALIDATION_V2: BeatValidationV2Result = {
+  passed: true,
+  diagnostics: [],
+  summary: "骨架结构完整：开场、冲突升级、高潮、收束都有，顺序与状态一致。",
+};
+
+export const SAMPLE_BEAT_VALIDATION_V2_FAILED: BeatValidationV2Result = {
+  passed: false,
+  diagnostics: [
+    {
+      id: "beat-validator-1",
+      source: "beat-validator",
+      category: "MISSING_CLIMAX",
+      severity: "error",
+      target: "beat-plan",
+      message: "第 4 拍直接跳到结局，没有任何高潮或决定性对抗。",
+      relatedBeatIds: [4],
     },
   ],
   summary: "缺少高潮：从升级直接跳到收束，故事没有顶点。",

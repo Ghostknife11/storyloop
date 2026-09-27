@@ -36,7 +36,7 @@ const STORY = `陈岚推开派出所的玻璃门，${"雨水顺着屋檐砸在�
 
 const BEAT_VALIDATION = JSON.stringify({
   passed: true,
-  issues: [],
+  diagnostics: [],
   summary: "骨架结构完整：开场、高潮都有。",
 });
 

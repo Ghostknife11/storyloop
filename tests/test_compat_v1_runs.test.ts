@@ -29,7 +29,7 @@ import { FakeLLM, SAMPLE_BEAT_PLAN, SAMPLE_COMMERCIAL_REVIEW, SAMPLE_CONFIG, REV
 import { RUN_FILES } from "./test_contract_artifacts.test";
 
 const PLAN_REPLY = JSON.stringify(SAMPLE_BEAT_PLAN);
-const BEAT_VALIDATION_REPLY = JSON.stringify({ passed: true, issues: [], summary: "骨架结构完整。" });
+const BEAT_VALIDATION_REPLY = JSON.stringify({ passed: true, diagnostics: [], summary: "骨架结构完整。" });
 
 /** 一次 Automatic Run 的五次调用：Plan → 骨架校验 → 正文 → 结构审阅 → 商业审阅。 */
 const HAPPY_SCRIPT = [PLAN_REPLY, BEAT_VALIDATION_REPLY, SAMPLE_STORY, REVIEW_REPLY, JSON.stringify(SAMPLE_COMMERCIAL_REVIEW)];

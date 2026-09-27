@@ -21,7 +21,7 @@ import { validateRunTelemetry } from "@/domain/telemetry";
 import {
   MISSING_ENDING,
   SAMPLE_BEAT_PLAN,
-  SAMPLE_BEAT_VALIDATION,
+  SAMPLE_BEAT_VALIDATION_V2,
   SAMPLE_COMMERCIAL_REVIEW,
   SAMPLE_CONFIG,
   REVIEW_REPLY,
@@ -131,7 +131,7 @@ function pipelineWith(llm: FakeLLM, store: ArtifactStore, retryPolicy?: RetryPol
   const client = llm as never;
   // v1.4.0：Beat 校验器自带一份假 LLM——它接在 Planner 之后、Generator 之前，
   // 若和主序列共用就会把 PLAN_REPLY 吃掉。
-  const beatValidator = new BeatValidator(new FakeLLM([JSON.stringify(SAMPLE_BEAT_VALIDATION)]) as never);
+  const beatValidator = new BeatValidator(new FakeLLM([JSON.stringify(SAMPLE_BEAT_VALIDATION_V2)]) as never);
   // v1.5.0：商业审阅者同样自带一份假 LLM（§12 两个审阅者互不读取），
   // 免得它抢走主序列里给 BasicReviewer / StoryRepairer 的那几条回复。
   const commercialReviewer = new CommercialReviewer(

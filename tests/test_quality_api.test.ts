@@ -9,7 +9,7 @@ import type { QualityReviewV2Result } from "@/domain/quality-review-v2";
 import { legacyReviewOf } from "@/domain/quality-review-v2";
 import type { ValidationResult } from "@/domain/validation-result";
 import type { QualityResult } from "@/domain/quality";
-import { SAMPLE_BEAT_VALIDATION, SAMPLE_COMMERCIAL_REVIEW, commercialReviewerOf, qualityReviewV2Of } from "./helpers/fixtures";
+import { SAMPLE_BEAT_VALIDATION_V2, SAMPLE_COMMERCIAL_REVIEW, commercialReviewerOf, qualityReviewV2Of } from "./helpers/fixtures";
 
 /**
  * v1.2.0 §51/§52 质量 API 契约：quality 是纯新增字段。
@@ -100,7 +100,7 @@ async function start(overrides: {
       repair: async () => ({ repaired_story: "", issue_type: "general", success: false, notes: "测试用假 Repairer" }),
     } as never,
     // v1.4.0：这条用例只关心质量层，骨架结构校验给一份固定合格结论
-    beatValidator: { validate: async () => SAMPLE_BEAT_VALIDATION } as never,
+    beatValidator: { validate: async () => SAMPLE_BEAT_VALIDATION_V2 } as never,
     // v1.5.0：商业可读性审阅同样给假件，否则 buildPipeline 会造一个真客户端（§47）
     commercialReviewer: commercialReviewerOf(),
   } as never);

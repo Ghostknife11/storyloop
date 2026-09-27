@@ -31,7 +31,7 @@ import {
 import { experimentProvenanceText, manifestPanelState, shortDigest, temperatureRowsOf } from "@/interface/manifest-view";
 import {
   SAMPLE_BEAT_PLAN,
-  SAMPLE_BEAT_VALIDATION,
+  SAMPLE_BEAT_VALIDATION_V2,
   SAMPLE_COMMERCIAL_REVIEW,
   SAMPLE_CONFIG,
   SAMPLE_STORY,
@@ -94,7 +94,7 @@ function pipelineWith(llm: FakeLLM, store: ArtifactStore, policy?: RetryPolicy) 
     new RepairStrategy(),
     undefined,
     undefined,
-    { validate: async () => SAMPLE_BEAT_VALIDATION } as never,
+    { validate: async () => SAMPLE_BEAT_VALIDATION_V2 } as never,
     new CommercialReviewer(new FakeLLM([COMMERCIAL_REPLY]) as never) as never,
   ).withFailureAnalyzer(failureAnalyzerFor(store));
 }
@@ -131,11 +131,11 @@ describe("v1.6.0 出身清单 — 形状与校验", () => {
     }
   });
 
-  it("v2.1.0 只有 reviewer 升到 2：换了 v2 提示词，其余五个角色文案没动", () => {
+  it("v2.1.0 只有 reviewer 与 beat-validator 升到 2：换了 v2 提示词，其余四个角色文案没动", () => {
     expect(PROMPT_VERSIONS).toEqual({
       planner: "1",
       generator: "1",
-      "beat-validator": "1",
+      "beat-validator": "2",
       reviewer: "2",
       "commercial-reviewer": "1",
       repairer: "1",

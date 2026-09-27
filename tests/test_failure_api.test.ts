@@ -78,7 +78,7 @@ function stubLLM(story = `陈岚推开派出所的玻璃门，${"雨水顺着屋
               },
             })
           : text.includes("骨架结构校验者")
-            ? JSON.stringify({ passed: true, issues: [], summary: "结构完整。" })
+            ? JSON.stringify({ passed: true, diagnostics: [], summary: "结构完整。" })
             : text.includes("审阅者")
               ? JSON.stringify({
                   score: 74,

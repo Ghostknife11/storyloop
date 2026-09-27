@@ -11,7 +11,7 @@ import { validateBeatPlan } from "@/domain/beat-plan";
 import type { BeatValidationResult } from "@/domain/beat-validation";
 import { BeatValidator } from "@/engine/beat-validator";
 import { BeatValidationParseError } from "@/engine/beat-validation-parser";
-import { apiErrorOf, SAMPLE_BEAT_VALIDATION, SAMPLE_BEAT_VALIDATION_FAILED } from "./helpers/fixtures";
+import { apiErrorOf, SAMPLE_BEAT_VALIDATION, SAMPLE_BEAT_VALIDATION_V2, SAMPLE_BEAT_VALIDATION_V2_FAILED } from "./helpers/fixtures";
 import { FakeLLM } from "./helpers/fixtures";
 
 /**
@@ -75,7 +75,7 @@ function stubBeatLLM() {
   const fetchMock = vi.fn(async () => ({
     ok: true,
     status: 200,
-    json: async () => ({ choices: [{ message: { content: JSON.stringify(SAMPLE_BEAT_VALIDATION) } }] }),
+    json: async () => ({ choices: [{ message: { content: JSON.stringify(SAMPLE_BEAT_VALIDATION_V2) } }] }),
   }));
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
@@ -139,7 +139,7 @@ describe("POST /api/validate-beats（v1.4.0 §7）", () => {
     const { validateStoryBeats } = await import("@/application/generate-service");
     const outcome = await validateStoryBeats(
       { config, beat_plan: beatPlan },
-      { beatValidator: { validate: async () => SAMPLE_BEAT_VALIDATION_FAILED } as never } as never,
+      { beatValidator: { validate: async () => SAMPLE_BEAT_VALIDATION_V2_FAILED } as never } as never,
     );
     expect(outcome.status).toBe(200);
     expect((outcome.json as BeatValidationResult).passed).toBe(false);

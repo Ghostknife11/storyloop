@@ -13,7 +13,7 @@ import type { QualityReviewV2Result } from "@/domain/quality-review-v2";
 import type { ValidationResult } from "@/domain/validation-result";
 import type { RepairIssueType, RepairRequest, RepairResult } from "@/domain/repair";
 import { LLMError } from "@/infrastructure/llm/openai-compatible-llm-client";
-import { apiErrorOf, commercialReviewerOf, qualityReviewV2Of, SAMPLE_BEAT_VALIDATION } from "./helpers/fixtures";
+import { apiErrorOf, commercialReviewerOf, qualityReviewV2Of, SAMPLE_BEAT_VALIDATION_V2 } from "./helpers/fixtures";
 
 /**
  * §38/§40/§68 Repair API：POST /api/repair 的手动修订契约 +
@@ -114,7 +114,7 @@ async function runWith(
         reviewer: { review: async () => reviews[Math.min(r++, reviews.length - 1)] } as never,
         repairer: repairer as never,
         // v1.5.0：商业可读性审阅给假件，否则 buildPipeline 会造一个真客户端（§66）
-        beatValidator: { validate: async () => SAMPLE_BEAT_VALIDATION } as never,
+        beatValidator: { validate: async () => SAMPLE_BEAT_VALIDATION_V2 } as never,
         commercialReviewer: commercialReviewerOf(),
       } as never,
     );

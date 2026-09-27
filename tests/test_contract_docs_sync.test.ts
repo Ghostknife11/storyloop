@@ -14,7 +14,7 @@ import { RepairStrategy } from "@/engine/repair-strategy";
 import { failureAnalyzerFor } from "@/analysis/failure-analysis-service";
 import {
   SAMPLE_BEAT_PLAN,
-  SAMPLE_BEAT_VALIDATION,
+  SAMPLE_BEAT_VALIDATION_V2,
   SAMPLE_COMMERCIAL_REVIEW,
   SAMPLE_CONFIG,
   REVIEW_REPLY,
@@ -71,7 +71,7 @@ function pipelineWith(
     undefined,
     // v1.4.0：骨架结构校验要出现在五条路径的 metadata 里，这里注入一个固定结论的假件
     (brokenComponents?.beatValidator ?? {
-      validate: async () => SAMPLE_BEAT_VALIDATION,
+      validate: async () => SAMPLE_BEAT_VALIDATION_V2,
     }) as never,
     // v1.5.0：商业可读性审阅是另一次独立调用，单独用一条假 LLM——
     // 与结构审阅共用序列会让每条路径的回复位置全部错位（TASK §12：两个审阅者不合并）

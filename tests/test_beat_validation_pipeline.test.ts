@@ -13,11 +13,14 @@ import { RepairStrategy } from "@/engine/repair-strategy";
 import { BeatValidator } from "@/engine/beat-validator";
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "@/engine/retry-policy";
 import type { BeatValidationResult } from "@/domain/beat-validation";
+import type { BeatValidationV2Result } from "@/domain/beat-validation-v2";
 import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
 import {
   SAMPLE_BEAT_PLAN,
   SAMPLE_BEAT_VALIDATION,
   SAMPLE_BEAT_VALIDATION_FAILED,
+  SAMPLE_BEAT_VALIDATION_V2,
+  SAMPLE_BEAT_VALIDATION_V2_FAILED,
   SAMPLE_CONFIG,
   SAMPLE_REVIEW,
   SAMPLE_STORY,
@@ -26,7 +29,7 @@ import {
 } from "./helpers/fixtures";
 
 /**
- * v1.4.0 BeatPlan 结构校验在真实管道里的落点（TASK §7/§10/§12）。
+ * v2.1.0 BeatPlan 结构校验在真实管道里的落点（TASK §7/§13~§16）。
  *
  * 只有 LLM 与 BeatValidator 是假的，Pipeline / ArtifactStore / Validator / Reviewer
  * 全是真组件，落盘结构与生产一致。四件事：
@@ -34,6 +37,10 @@ import {
  *   2. 只有 warning 或干脆没问题 → 照常生成，结论落 beat-validation.json（§7）
  *   3. BeatValidator 自身抛异常 → beat_validation_status=failed，生成照常继续（§12）
  *   4. 没注入 BeatValidator → 这条路等于不存在，metadata 里一个字段都不多（§5）
+ *
+ * v2.1.0 起 BeatValidator 内部说的是统一 QualityDiagnostic，但管道边界摊平回
+ * v1.4.0 的 BeatValidationResult：beat-validation.json、metadata、Run 响应的形状
+ * 一个字都没变（TASK §14/§27），所以下面的落盘断言仍然照 v1 写。
  */
 
 const PLAN_REPLY = JSON.stringify(SAMPLE_BEAT_PLAN);
@@ -62,7 +69,7 @@ function pipelineWith(
 }
 
 /** 注入一个会返回固定结论的真 BeatValidator（自带假 LLM，不吃主回复序列）。 */
-function beatValidatorOf(beatValidation: BeatValidationResult): BeatValidator {
+function beatValidatorOf(beatValidation: BeatValidationV2Result): BeatValidator {
   return new BeatValidator(new FakeLLM([JSON.stringify(beatValidation)]) as never);
 }
 
@@ -76,7 +83,7 @@ describe("v1.4.0 结构校验未通过：整个 Run 在生成前就结束（§7�
     const llm = new FakeLLM([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW]);
     let caught: unknown;
     try {
-      await pipelineWith(llm, new ArtifactStore(), beatValidatorOf(SAMPLE_BEAT_VALIDATION_FAILED)).run(SAMPLE_CONFIG);
+      await pipelineWith(llm, new ArtifactStore(), beatValidatorOf(SAMPLE_BEAT_VALIDATION_V2_FAILED)).run(SAMPLE_CONFIG);
     } catch (e) {
       caught = e;
     }
@@ -113,7 +120,7 @@ describe("v1.4.0 结构校验未通过：整个 Run 在生成前就结束（§7�
     const llm = new FakeLLM([SAMPLE_STORY, GOOD_REVIEW]);
     let caught: unknown;
     try {
-      await pipelineWith(llm, new ArtifactStore(), beatValidatorOf(SAMPLE_BEAT_VALIDATION_FAILED)).runWithPlan(
+      await pipelineWith(llm, new ArtifactStore(), beatValidatorOf(SAMPLE_BEAT_VALIDATION_V2_FAILED)).runWithPlan(
         SAMPLE_CONFIG,
         SAMPLE_BEAT_PLAN,
       );
@@ -130,7 +137,7 @@ describe("v1.4.0 结构校验通过：照常生成（§7）", () => {
   it("passed → 进 Attempt 循环，beat-validation.json 与 metadata 字段齐全", async () => {
     const dir = withTmpDir();
     const llm = new FakeLLM([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW]);
-    const result = await pipelineWith(llm, new ArtifactStore(), beatValidatorOf(SAMPLE_BEAT_VALIDATION)).run(
+    const result = await pipelineWith(llm, new ArtifactStore(), beatValidatorOf(SAMPLE_BEAT_VALIDATION_V2)).run(
       SAMPLE_CONFIG,
     );
 
@@ -153,14 +160,17 @@ describe("v1.4.0 结构校验通过：照常生成（§7）", () => {
 
   it("只有 warning 也算通过：不阻断，照常生成正文", async () => {
     const dir = withTmpDir();
-    const warned: BeatValidationResult = {
+    const warned: BeatValidationV2Result = {
       passed: true,
-      issues: [
+      diagnostics: [
         {
-          code: "ENDING_NOT_PREPARED",
+          id: "beat-validator-1",
+          source: "beat-validator",
+          category: "ENDING_NOT_PREPARED",
           severity: "warning",
+          target: "beat-plan",
           message: "结局所需条件没有铺垫。",
-          beat_ids: [1, 2],
+          relatedBeatIds: [1, 2],
         },
       ],
       summary: "骨架撑得起一个短篇，只差一笔铺垫。",
@@ -179,7 +189,7 @@ describe("v1.4.0 结构校验通过：照常生成（§7）", () => {
     const dir = withTmpDir();
     const short = "陈岚走进派出所，然后又走了。";
     const llm = new FakeLLM([PLAN_REPLY, short, GOOD_REVIEW, SAMPLE_STORY, GOOD_REVIEW]);
-    const beatLlm = new FakeLLM([JSON.stringify(SAMPLE_BEAT_VALIDATION)]);
+    const beatLlm = new FakeLLM([JSON.stringify(SAMPLE_BEAT_VALIDATION_V2)]);
     const result = await pipelineWith(llm, new ArtifactStore(), new BeatValidator(beatLlm as never), {
       ...DEFAULT_RETRY_POLICY,
       enable_repair: false,
@@ -192,7 +202,7 @@ describe("v1.4.0 结构校验通过：照常生成（§7）", () => {
   it("骨架不被校验改写：beats.json 仍是合法 BeatPlan", async () => {
     const dir = withTmpDir();
     const llm = new FakeLLM([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW]);
-    const result = await pipelineWith(llm, new ArtifactStore(), beatValidatorOf(SAMPLE_BEAT_VALIDATION)).run(
+    const result = await pipelineWith(llm, new ArtifactStore(), beatValidatorOf(SAMPLE_BEAT_VALIDATION_V2)).run(
       SAMPLE_CONFIG,
     );
     const stored = JSON.parse(
@@ -255,7 +265,7 @@ describe("v1.4.0 BeatValidator 自身异常：只记 failed，Run 照常（§12�
     const healthy = await pipelineWith(
       new FakeLLM([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW]),
       new ArtifactStore(),
-      beatValidatorOf(SAMPLE_BEAT_VALIDATION),
+      beatValidatorOf(SAMPLE_BEAT_VALIDATION_V2),
     ).run(SAMPLE_CONFIG);
     expect(healthy.beat_validation_error).toBeNull();
 
@@ -301,7 +311,7 @@ describe("v1.4.0 GenerationResult 形状", () => {
   it("beat_validation / beat_validation_status 是返回值的一部分", async () => {
     const dir = withTmpDir();
     const llm = new FakeLLM([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW]);
-    const result: GenerationResult = await pipelineWith(llm, new ArtifactStore(), beatValidatorOf(SAMPLE_BEAT_VALIDATION)).run(
+    const result: GenerationResult = await pipelineWith(llm, new ArtifactStore(), beatValidatorOf(SAMPLE_BEAT_VALIDATION_V2)).run(
       SAMPLE_CONFIG,
     );
     const keys = Object.keys(result).sort();

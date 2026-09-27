@@ -4,6 +4,7 @@ import type {
   BeatValidationResult,
   BeatValidationStatus,
 } from "@/domain/beat-validation";
+import { legacyBeatValidationOf } from "@/domain/beat-validation-v2";
 import { reviewOverallScore, type ReviewResult, type ReviewStatus } from "@/domain/review-result";
 import { legacyReviewOf } from "@/domain/quality-review-v2";
 import type { ValidationResult, ValidationStatus } from "@/domain/validation-result";
@@ -812,7 +813,11 @@ export class GenerationPipeline {
     try {
       // §10：与故事生成、审阅各自独立拿一份结论；这里不用 runtime.temperature，
       // 结构判断需要一个稳定的低温度，不跟着正文的创作温度走。
-      beatValidation = await this.beatValidator.validate(config, plan);
+      // v2.1.0：BeatValidator 输出 BeatValidationV2Result（统一 diagnostics），
+      // 落盘与下游判定用的仍是 v1.4.0 的 BeatValidationResult——由 legacyBeatValidationOf
+      // 在边界处摊平，beat-validation.json、metadata、UI 的口径一个字都没变（TASK §14）。
+      const checked = await this.beatValidator.validate(config, plan);
+      beatValidation = legacyBeatValidationOf(checked);
     } catch (e) {
       // §12：校验器自身崩溃 ≠ BeatPlan 有问题。保留骨架，继续生成。
       // v1.9.1：这一步的非阻断失败也要在遥测里说实话——进入下一步之前先把开着的
