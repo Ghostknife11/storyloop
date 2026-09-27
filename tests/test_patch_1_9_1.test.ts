@@ -560,6 +560,8 @@ describe("F2 修订耗尽", () => {
         suggestions: [],
         summary: "ok",
       },
+      // v2.1.0 之前的 Run 没有 quality-stack.json：这一路证据就是 null
+      qualityStack: null,
       attempts: [
         {
           attemptNumber: 1,
@@ -666,6 +668,7 @@ describe("F3 修订耗尽的文案说清两个口径", () => {
         suggestions: [],
         summary: "no",
       },
+      qualityStack: null,
       attempts: [
         {
           attemptNumber: 1,
@@ -742,6 +745,7 @@ describe("F4 没有那份文件时，证据不指", () => {
       commercialReview: null,
       commercialReviewStatus: "not_started",
       quality: null,
+      qualityStack: null,
       attempts: [],
       errorCodes: ["SOME_NEW_CODE"],
       artifactPresence: {
@@ -808,6 +812,7 @@ describe("F4 没有那份文件时，证据不指", () => {
       commercialReview: null,
       commercialReviewStatus: "not_started",
       quality: null,
+      qualityStack: null,
       attempts: [],
       errorCodes: ["SOME_NEW_CODE"],
       artifactPresence: {

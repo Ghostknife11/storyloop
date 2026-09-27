@@ -58,7 +58,7 @@ export interface FailureEvidenceRow {
   note: string;
 }
 
-/** §18 信号来源 → 展示名。取值就是 FailureSignalSource 那十个。 */
+/** §18 信号来源 → 展示名。取值就是 FailureSignalSource 那十一个。 */
 const SOURCE_LABELS: Record<FailureSignal["source"], string> = {
   metadata: "metadata.json",
   telemetry: "telemetry.json",
@@ -66,6 +66,7 @@ const SOURCE_LABELS: Record<FailureSignal["source"], string> = {
   "story-validation": "validation.json",
   "quality-review": "quality.json",
   "commercial-review": "commercial-review.json",
+  "quality-stack": "quality-stack.json",
   retry: "重试策略",
   repair: "修订记录",
   storage: "产物存储",

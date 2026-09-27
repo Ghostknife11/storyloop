@@ -11,6 +11,10 @@
  * 温度不合理」一类句子。能说的只有「Run 在哪个阶段被阻止、存在哪个码、
  * 哪个证据文件里看得见」。
  *
+ * v2.1.0 TASK §29 起多了一路输入 quality-stack.json，约束一条没变：
+ * 确定性、不调 LLM、不做根因归因。它带来的新事实只有两样——三套结论在不在位，
+ * 以及审阅侧自己判定的 error 级诊断；severity 原样照抄，不升不降。
+ *
  * §21/§22 Primary / Secondary：primary 取优先级最高的类别，
  * secondary 是其余类别按同一优先级排序——顺序确定，不靠输入顺序。
  */
@@ -426,6 +430,13 @@ export class FailureAnalyzer {
       );
     }
 
+    // v2.1.0 TASK §29：统一质量视图作为结构化信号源。
+    // 仍然是确定性、不调 LLM、不做根因归因——只把盘上已经写着的三件事念出来：
+    //   装配状态（三套结论在不在位）、以及 severity = error 的诊断。
+    // 骨架层的 error 诊断不在这里重复念：上面 §6 已经逐条从 beat-validation.json 取过，
+    // 同一件事念两遍只会让证据翻倍、不会让结论更准。
+    this.collectQualityStack(input, push);
+
     // §42 产物存在性：辅助信号，不单独定类
     const missing = missingArtifacts(input);
     if (missing.length > 0) {
@@ -470,6 +481,98 @@ export class FailureAnalyzer {
     }
 
     return out;
+  }
+
+  // -------------------------------------------------------------------------
+  // v2.1.0 TASK §29：quality-stack.json 这一路信号
+  // -------------------------------------------------------------------------
+
+  /**
+   * 从统一质量视图里取信号。两类，各念各的：
+   *
+   *   1. 装配状态：三套结论少了几套、或者一套都没有。这只是完整度观察——
+   *      与 §42 的产物存在性同一口径，warning、不定类。v2.0.0 的流水线本来就没接
+   *      这几路组件，stack 是空的并不代表这次 Run 失败了（v1.9.1 同一条规则：
+   *      组件没跑起来不升级成 Run 级失败）。
+   *   2. severity = error 的诊断：审阅侧与商业侧自己判定的硬问题。
+   *      这是分析器此前完全看不到的一层事实——它原来只能看到聚合分。
+   *
+   * severity 原样照抄，不升不降：审阅说 error 就是 error，说 warning 就是 warning。
+   * 分析器不重新评分，也不把 warning 说成 error 来抬高严重程度。
+   */
+  private collectQualityStack(
+    input: FailureAnalysisInput,
+    push: (
+      code: string,
+      source: FailureSignalSource,
+      severity: FailureSignal["severity"],
+      message: string,
+      category: FailureCategory | null,
+      evidence?: FailureEvidence[],
+    ) => void,
+  ): void {
+    const stack = input.qualityStack;
+    if (stack === null || stack === undefined) return;
+
+    if (stack.status === "failed") {
+      push(
+        "QUALITY_STACK_EMPTY",
+        "quality-stack",
+        "warning",
+        "三套质量结论一套都没跑出来，这一轮没有质量侧结论可看。",
+        null,
+        [
+          {
+            sourceArtifact: "quality-stack.json",
+            sourceField: "status",
+            value: "failed",
+            note: "beatValidation / qualityReview / commercialReview 三套都不在位；这是完整度观察，不单独决定失败类别。",
+          },
+        ],
+      );
+      return;
+    }
+
+    if (stack.status === "partial") {
+      const absent = absentModulesOf(stack).map((key) => MODULE_LABELS[key]).join("、");
+      push(
+        "QUALITY_STACK_PARTIAL",
+        "quality-stack",
+        "warning",
+        `三套质量结论少了几套：${absent}。`,
+        null,
+        [
+          {
+            sourceArtifact: "quality-stack.json",
+            sourceField: "status",
+            value: "partial",
+            note: "少掉的那套没有结论；这是完整度观察，不单独决定失败类别（§42 同一口径）。",
+          },
+        ],
+      );
+    }
+
+    for (const diagnostic of stack.diagnostics) {
+      if (diagnostic.severity !== "error") continue;
+      // 骨架层的错误已经由 §6 逐条念过，跳过以免同一件事两处记账
+      if (diagnostic.source === "beat-validator") continue;
+      push(
+        "QUALITY_DIAGNOSTIC_ERROR",
+        "quality-stack",
+        "error",
+        `质量侧记录了错误级诊断（${diagnostic.source} / ${diagnostic.category}）：${diagnostic.message}`,
+        diagnostic.source === "commercial-reviewer" ? "COMMERCIAL" : "QUALITY",
+        [
+          {
+            sourceArtifact: "quality-stack.json",
+            sourceField: "diagnostics[].id",
+            code: diagnostic.id,
+            value: diagnostic.category,
+            note: diagnostic.suggestion ?? diagnostic.message,
+          },
+        ],
+      );
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -645,6 +748,25 @@ function lastRepairOf(
     };
   }
   return null;
+}
+
+/** 三套质量结论的展示名：partial 时告诉读者少掉的是哪一套。 */
+const MODULE_LABELS: Record<string, string> = {
+  beatValidation: "剧情骨架校验",
+  qualityReview: "故事质量审阅",
+  commercialReview: "商业可读性审阅",
+};
+
+/** quality-stack.json 里缺哪几套结论：键不在场就是缺，不猜它为什么缺。 */
+function absentModulesOf(stack: {
+  beatValidation?: unknown;
+  qualityReview?: unknown;
+  commercialReview?: unknown;
+}): string[] {
+  return Object.keys(MODULE_LABELS).filter((key) => {
+    const value = (stack as Record<string, unknown>)[key];
+    return value === undefined || value === null;
+  });
 }
 
 /** 四个维度里分数最低的那一个；一个都没有时返回 null（不补 0）。 */

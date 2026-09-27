@@ -38,6 +38,8 @@ function clean(): FailureAnalysisInput {
       suggestions: [],
       summary: "ok",
     },
+    // v2.1.0 之前的 Run 没有 quality-stack.json：这一路证据就是 null
+    qualityStack: null,
     attempts: [{ attemptNumber: 1, accepted: true, retryReason: null, validationPassed: true, repairCount: 0, repairs: [] }],
     errorCodes: [],
     artifactPresence: {

@@ -130,6 +130,13 @@ function fieldExists(runDir: string, evidence: FailureEvidence): boolean {
       return Array.isArray(artifact.issues);
     case "run-manifest.json:repairs[].succeeded":
       return Array.isArray(artifact.repairs);
+    // v2.1.0 TASK §29：统一质量视图。status 恒在；diagnostics[].id 要在合并诊断里找得到
+    case "quality-stack.json:status":
+      return typeof artifact.status === "string";
+    case "quality-stack.json:diagnostics[].id":
+      return (artifact.diagnostics as Array<{ id?: unknown }> | undefined)?.some(
+        (d) => d.id === evidence.code,
+      ) === true;
     case "telemetry.json:failureCode":
       return true; // 失败码只在失败时才有；没有这一跳本身就是事实
     case "telemetry.json:failureStage":

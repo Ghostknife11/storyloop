@@ -161,6 +161,7 @@ export function failureAnalysisInputOf(
     commercialReview: store.readFinalCommercialReview(runId),
     commercialReviewStatus,
     quality: store.readFinalQuality(runId),
+    qualityStack: store.readQualityStack(runId),
     attempts: attemptsOf(manifest, runId, store),
     errorCodes: [
       ...codesOfState({

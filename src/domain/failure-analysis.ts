@@ -14,6 +14,7 @@
 import type { BeatValidationResult } from "@/domain/beat-validation";
 import type { CommercialReviewResult } from "@/domain/commercial-review";
 import type { QualityResult } from "@/domain/quality";
+import type { QualityStackResult } from "@/domain/quality-stack";
 import type { ReviewResult } from "@/domain/review-result";
 import type { RunTelemetry } from "@/domain/telemetry";
 import type { ValidationResult } from "@/domain/validation-result";
@@ -82,6 +83,7 @@ export type FailureSignalSource =
   | "story-validation"
   | "quality-review"
   | "commercial-review"
+  | "quality-stack"
   | "retry"
   | "repair"
   | "storage"
@@ -167,6 +169,9 @@ export interface FailureAnalysisInput {
   commercialReview: CommercialReviewResult | null;
   commercialReviewStatus: string | null;
   quality: QualityResult | null;
+  /** v2.1.0 TASK §29：三套质量结论的统一视图。旧 Run 没有这个文件时是 null，
+   *  分析器按「没有这一路证据」处理，不补也不回填。 */
+  qualityStack: QualityStackResult | null;
   /** 各 Attempt 的采纳结论与修订摘要（§38/§39 的判定依据）。 */
   attempts: FailureAnalysisAttempt[];
   /** 中途观测到的错误码原文（含未知码，§41：不丢）。 */
