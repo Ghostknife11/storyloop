@@ -280,3 +280,19 @@ export function splitStoryTitle(story: string): { title: string | null; body: st
   const body = story.slice(match.index + match[0].length).replace(/^\n+/, "");
   return { title: textOf(heading, "title", WORKSPACE_NAME_MAX), body };
 }
+
+/**
+ * 从一次 Run 的 story.md 取出「稿件正文」。
+ *
+ * 建稿（Run→Draft）与「质量结论是否过期」（§20）必须得到同一个字符串，否则后者
+ * 永远对不上：一个说「编辑过之后旧结论不算数」，另一个却拿 story.md 全文去比，
+ * 于是每一篇稿子在界面上都显示「已过期」。所以这两件事共用这一个函数，
+ * 谁也不许自己再写一遍「去掉 H1」。
+ *
+ * 没有 H1（老版本 Run、或用户手改过的 story.md）时原样返回全文：那时候正文就是
+ * 全部内容，硬扣掉第一行只会让故事少一段。
+ */
+export function documentContentOf(story: string): string {
+  const { body } = splitStoryTitle(story);
+  return body.trim().length > 0 ? body : story;
+}

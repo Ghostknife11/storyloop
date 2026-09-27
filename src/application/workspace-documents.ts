@@ -15,6 +15,7 @@ import {
   DOCUMENT_CONTENT_MAX,
   DOCUMENT_STATUSES,
   DOCUMENT_SOURCES,
+  documentContentOf,
   splitStoryTitle,
   validateDocumentPatch,
   validateStoryDocument,
@@ -144,8 +145,9 @@ export async function createDocumentFromRun(
     throw new WorkspaceNotFoundError(runId);
   }
 
-  const { title, body } = splitStoryTitle(story);
-  const content = body.trim().length > 0 ? body : story;
+  const { title } = splitStoryTitle(story);
+  // 与「质量结论是否过期」共用一个取正文的函数（§20，见 domain/story-document.ts）
+  const content = documentContentOf(story);
   if (content.length > DOCUMENT_CONTENT_MAX) {
     throw new WorkspaceValidationError(`正文不能超过 ${DOCUMENT_CONTENT_MAX} 个字符`);
   }
