@@ -6,13 +6,13 @@ import { NextRequest } from "next/server";
 import { POST as postRepair } from "@/app/api/repair/route";
 import { GET as getRun } from "@/app/api/runs/[run_id]/route";
 import { GET as getRunAttempt } from "@/app/api/runs/[run_id]/attempts/[attempt_number]/route";
-import { repairStory, startRun, type RunOk } from "@/lib/generate-service";
-import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
-import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
-import type { ReviewResult } from "@/types/review-result";
-import type { ValidationResult } from "@/types/validation-result";
-import type { RepairIssueType, RepairRequest, RepairResult } from "@/types/repair";
-import { LLMError } from "@/lib/llm";
+import { repairStory, startRun, type RunOk } from "@/application/generate-service";
+import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
+import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
+import type { ReviewResult } from "@/domain/review-result";
+import type { ValidationResult } from "@/domain/validation-result";
+import type { RepairIssueType, RepairRequest, RepairResult } from "@/domain/repair";
+import { LLMError } from "@/infrastructure/llm/openai-compatible-llm-client";
 import { apiErrorOf, commercialReviewerOf, SAMPLE_BEAT_VALIDATION } from "./helpers/fixtures";
 
 /**

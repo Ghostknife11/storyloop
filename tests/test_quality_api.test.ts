@@ -5,9 +5,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import { GET as getRunDetail } from "@/app/api/runs/[run_id]/route";
 import { GET as getRunAttemptDetail } from "@/app/api/runs/[run_id]/attempts/[attempt_number]/route";
-import type { ReviewResult } from "@/types/review-result";
-import type { ValidationResult } from "@/types/validation-result";
-import type { QualityResult } from "@/types/quality";
+import type { ReviewResult } from "@/domain/review-result";
+import type { ValidationResult } from "@/domain/validation-result";
+import type { QualityResult } from "@/domain/quality";
 import { SAMPLE_BEAT_VALIDATION, SAMPLE_COMMERCIAL_REVIEW, commercialReviewerOf } from "./helpers/fixtures";
 
 /**
@@ -72,7 +72,7 @@ async function start(overrides: {
   reviews?: ReviewResult[];
   stories?: string[];
 } = {}) {
-  const { startRun } = await import("@/lib/generate-service");
+  const { startRun } = await import("@/application/generate-service");
   const validator = scripted(overrides.validations ?? [PASSED]);
   const reviewer = scripted(overrides.reviews ?? [review]);
   const generator = scripted(overrides.stories ?? [STORY]);
@@ -155,7 +155,7 @@ describe("§51 POST /api/runs： quality 是 additive 字段", () => {
   it("§47 Case C：Reviewer 失败时 overall_score = null，Run 仍然成功", async () => {
     withTmpDir();
     // Reviewer 直接抛异常：Pipeline 走 review_status=failed 分支
-    const { startRun } = await import("@/lib/generate-service");
+    const { startRun } = await import("@/application/generate-service");
     const res = await startRun({ config, retry_policy: { max_attempts: 1, min_review_score: 70 } }, {
       planner: { plan: async () => plan } as never,
       generator: { generate: async () => STORY } as never,
@@ -252,7 +252,7 @@ describe("§25/§26 读回：quality.json 与内存装配一致", () => {
 describe("§44 URL Gate 没有被质量工程绕过", () => {
   it("请求体 baseUrl 指向 localhost / 私网仍然 400，一个字节都没发出去", async () => {
     withTmpDir();
-    const { startRun } = await import("@/lib/generate-service");
+    const { startRun } = await import("@/application/generate-service");
     for (const baseUrl of ["http://127.0.0.1:8080/v1", "http://localhost:11434/v1", "http://192.168.1.10/v1"]) {
       const res = await startRun({ config, baseUrl }, {
         planner: { plan: async () => plan } as never,

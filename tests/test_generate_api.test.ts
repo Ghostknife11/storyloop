@@ -2,12 +2,12 @@ import { mkdtempSync, existsSync, readFileSync, readdirSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { startRun, startRunFromPlan, handleGenerate } from "@/lib/generate-service";
-import { LLMError } from "@/lib/llm";
-import { BeatParseError } from "@/lib/beat-parser";
-import { StoryGenerator } from "@/lib/story-generator";
-import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
-import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
+import { startRun, startRunFromPlan, handleGenerate } from "@/application/generate-service";
+import { LLMError } from "@/infrastructure/llm/openai-compatible-llm-client";
+import { BeatParseError } from "@/engine/beat-parser";
+import { StoryGenerator } from "@/engine/story-generator";
+import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
+import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
 import { apiErrorOf, repoVersion } from "./helpers/fixtures";
 
 const config: StoryConfig = validateStoryConfig({

@@ -6,12 +6,12 @@ import { NextRequest } from "next/server";
 import { POST as postCommercialReview } from "@/app/api/review/commercial/route";
 import { GET as getRunDetail } from "@/app/api/runs/[run_id]/route";
 import { GET as getRunAttemptDetail } from "@/app/api/runs/[run_id]/attempts/[attempt_number]/route";
-import { getRun, getRunAttempt, reviewStoryCommercial } from "@/lib/generate-service";
-import { reviewStoryCommercial as reviewStoryCommercialFromApi } from "@/lib/api";
-import { ArtifactStore } from "@/storage/artifact-store";
-import { CommercialReviewer } from "@/lib/commercial-reviewer";
-import { CommercialReviewParseError } from "@/lib/commercial-review-parser";
-import { aggregateCommercialDimensions } from "@/types/commercial-review";
+import { getRun, getRunAttempt, reviewStoryCommercial } from "@/application/generate-service";
+import { reviewStoryCommercial as reviewStoryCommercialFromApi } from "@/interface/api";
+import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
+import { CommercialReviewer } from "@/engine/commercial-reviewer";
+import { CommercialReviewParseError } from "@/engine/commercial-review-parser";
+import { aggregateCommercialDimensions } from "@/domain/commercial-review";
 import { apiErrorOf, FakeLLM, SAMPLE_COMMERCIAL_REVIEW } from "./helpers/fixtures";
 
 /**
@@ -308,7 +308,7 @@ describe("读接口的商业可读性字段（v1.5.0 §32 旧 Run 兼容）", ()
   });
 });
 
-describe("src/lib/api.ts 客户端接线（§31）", () => {
+describe("src/interface/api.ts 客户端接线（§31）", () => {
   it("reviewStoryCommercial 打在 /api/review/commercial 上，story 与 run_id 都在请求体里", async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,

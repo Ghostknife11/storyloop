@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { startRunFromPlan } from "@/lib/generate-service";
-import { errorBody } from "@/lib/api-error";
+import { createStoryLoop } from "@/composition";
+import { errorBody } from "@/application/error-model";
 
 /**
  * §29 POST /api/runs/from-plan —— Manual Run。
@@ -13,6 +13,6 @@ export async function POST(request: NextRequest) {
   } catch {
     return NextResponse.json(errorBody("CONFIG_INVALID", "请求体不是合法 JSON"), { status: 400 });
   }
-  const { status, json } = await startRunFromPlan(body);
+  const { status, json } = await createStoryLoop().service.generateFromPlan(body);
   return NextResponse.json(json, { status });
 }

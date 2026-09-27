@@ -7,10 +7,10 @@ import { POST as postRuns } from "@/app/api/runs/route";
 import { POST as postRunsFromPlan } from "@/app/api/runs/from-plan/route";
 import { GET as getRun } from "@/app/api/runs/[run_id]/route";
 import { GET as getRunAttempt } from "@/app/api/runs/[run_id]/attempts/[attempt_number]/route";
-import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
-import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
-import type { ReviewResult } from "@/types/review-result";
-import type { ValidationResult } from "@/types/validation-result";
+import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
+import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
+import type { ReviewResult } from "@/domain/review-result";
+import type { ValidationResult } from "@/domain/validation-result";
 import { apiErrorOf, commercialReviewerOf, SAMPLE_BEAT_VALIDATION } from "./helpers/fixtures";
 
 /**
@@ -95,7 +95,7 @@ async function runWith(
   validations: ValidationResult[],
   reviews: ReviewResult[],
 ) {
-  const { startRun } = await import("@/lib/generate-service");
+  const { startRun } = await import("@/application/generate-service");
   return startRun(body, {
     planner: { plan: async () => plan } as never,
     generator: scriptedGenerator(stories) as never,

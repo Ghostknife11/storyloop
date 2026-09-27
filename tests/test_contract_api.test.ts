@@ -14,7 +14,7 @@ import {
   errorBody,
   toApiError,
   type ApiErrorCode,
-} from "@/lib/api-error";
+} from "@/application/error-model";
 import {
   getRun,
   getRunAttempt,
@@ -24,26 +24,26 @@ import {
   repairStory,
   validateStory,
   planStory,
-} from "@/lib/generate-service";
-import { ArtifactStore } from "@/storage/artifact-store";
-import { BeatPlanner } from "@/lib/beat-planner";
-import { BeatValidator } from "@/lib/beat-validator";
-import { StoryGenerator } from "@/lib/story-generator";
-import { StoryValidator } from "@/lib/story-validator";
-import { BasicReviewer } from "@/lib/basic-reviewer";
-import { CommercialReviewer } from "@/lib/commercial-reviewer";
-import { StoryRepairer } from "@/lib/story-repairer";
-import { RepairStrategy } from "@/core/repair-strategy";
-import { LLMError, LLMTimeoutError } from "@/lib/llm";
-import { BeatParseError } from "@/lib/beat-parser";
-import { BeatValidationParseError } from "@/lib/beat-validation-parser";
-import { ReviewParseError } from "@/lib/review-parser";
-import { CommercialReviewParseError } from "@/lib/commercial-review-parser";
-import { ValidatorError } from "@/lib/story-validator";
-import { ArtifactWriteError } from "@/storage/artifact-store";
-import { ConfigValidationError } from "@/types/story-config";
-import { BeatPlanValidationError } from "@/types/beat-plan";
-import type { BeatPlan } from "@/types/beat-plan";
+} from "@/application/generate-service";
+import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
+import { BeatPlanner } from "@/engine/beat-planner";
+import { BeatValidator } from "@/engine/beat-validator";
+import { StoryGenerator } from "@/engine/story-generator";
+import { StoryValidator } from "@/engine/story-validator";
+import { BasicReviewer } from "@/engine/basic-reviewer";
+import { CommercialReviewer } from "@/engine/commercial-reviewer";
+import { StoryRepairer } from "@/engine/story-repairer";
+import { RepairStrategy } from "@/engine/repair-strategy";
+import { LLMError, LLMTimeoutError } from "@/infrastructure/llm/openai-compatible-llm-client";
+import { BeatParseError } from "@/engine/beat-parser";
+import { BeatValidationParseError } from "@/engine/beat-validation-parser";
+import { ReviewParseError } from "@/engine/review-parser";
+import { CommercialReviewParseError } from "@/engine/commercial-review-parser";
+import { ValidatorError } from "@/engine/story-validator";
+import { ArtifactWriteError } from "@/infrastructure/storage/artifact-store";
+import { ConfigValidationError } from "@/domain/story-config";
+import { BeatPlanValidationError } from "@/domain/beat-plan";
+import type { BeatPlan } from "@/domain/beat-plan";
 import {
   SAMPLE_BEAT_PLAN,
   SAMPLE_BEAT_VALIDATION,
@@ -57,7 +57,7 @@ import {
   repoVersion,
   withTmpDir,
 } from "./helpers/fixtures";
-import type { BeatValidationResult } from "@/types/beat-validation";
+import type { BeatValidationResult } from "@/domain/beat-validation";
 
 /**
  * v1.0.0 合同测试：公开 API 表面冻结（TASK §12/§13/§14/§51）。
@@ -260,11 +260,30 @@ describe("v1.0.0 API 冻结 — 路由清单", () => {
 });
 
 describe("v1.0.0 API 冻结 — 纯路由", () => {
-  it("GET /api/health 只返回 status: ok", async () => {
+  it("GET /api/health 只回答是非题：状态、版本、能力，不泄任何凭据", async () => {
     // 纯路由不接收任何参数：签名走样（开始读 request/依赖注入）就算破坏契约
-    const res = await getHealth();
-    expect(res.status).toBe(200);
-    expect(await jsonOf(res)).toEqual({ status: "ok" });
+    const previous = process.env.LLM_API_KEY;
+    process.env.LLM_API_KEY = "test-key-not-a-real-credential";
+    try {
+      const res = await getHealth();
+      expect(res.status).toBe(200);
+      const body = await jsonOf(res);
+      const capabilities = body.capabilities as Record<string, unknown>;
+      // §46：可以给版本/状态/可写性/是否配了提供方
+      expect(Object.keys(body).sort()).toEqual(["capabilities", "status", "version"]);
+      expect(body.version).toBe(repoVersion());
+      expect(capabilities.llm_configured).toBe(true);
+      expect(capabilities.storage_writable).toBe(true);
+      expect(capabilities.experiments).toBe(true);
+      expect(body.status).toBe("ok");
+      // §46：API Key 与 baseUrl 一个字都不能出现——连「配置了什么」都不回答
+      const raw = JSON.stringify(body);
+      expect(raw).not.toMatch(/api[_-]?key|authorization|bearer|sk-/i);
+      expect(raw).not.toContain("http");
+    } finally {
+      if (previous === undefined) delete process.env.LLM_API_KEY;
+      else process.env.LLM_API_KEY = previous;
+    }
   });
 
   it("GET /api/version 的 version 与仓库 VERSION 一致", async () => {

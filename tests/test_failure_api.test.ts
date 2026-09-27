@@ -6,9 +6,9 @@ import { NextRequest } from "next/server";
 import { POST as postRuns } from "@/app/api/runs/route";
 import { GET as getRunDetail } from "@/app/api/runs/[run_id]/route";
 import { GET as getRunFailureAnalysis } from "@/app/api/runs/[run_id]/failure-analysis/route";
-import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
-import { ArtifactStore } from "@/storage/artifact-store";
-import { failureAnalysisOf } from "@/types/failure-analysis";
+import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
+import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
+import { failureAnalysisOf } from "@/domain/failure-analysis";
 import { apiErrorOf } from "./helpers/fixtures";
 
 /**

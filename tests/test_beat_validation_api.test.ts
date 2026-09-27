@@ -5,12 +5,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { POST as postValidateBeats } from "@/app/api/validate-beats/route";
 import { GET as getRunDetail } from "@/app/api/runs/[run_id]/route";
-import { getRun } from "@/lib/generate-service";
-import { ArtifactStore } from "@/storage/artifact-store";
-import { validateBeatPlan } from "@/types/beat-plan";
-import type { BeatValidationResult } from "@/types/beat-validation";
-import { BeatValidator } from "@/lib/beat-validator";
-import { BeatValidationParseError } from "@/lib/beat-validation-parser";
+import { getRun } from "@/application/generate-service";
+import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
+import { validateBeatPlan } from "@/domain/beat-plan";
+import type { BeatValidationResult } from "@/domain/beat-validation";
+import { BeatValidator } from "@/engine/beat-validator";
+import { BeatValidationParseError } from "@/engine/beat-validation-parser";
 import { apiErrorOf, SAMPLE_BEAT_VALIDATION, SAMPLE_BEAT_VALIDATION_FAILED } from "./helpers/fixtures";
 import { FakeLLM } from "./helpers/fixtures";
 
@@ -124,7 +124,7 @@ describe("POST /api/validate-beats（v1.4.0 §7）", () => {
 
   it("模型输出不是 JSON → 502 BEAT_VALIDATION_FAILED，不 500", async () => {
     withTmpDir();
-    const { validateStoryBeats } = await import("@/lib/generate-service");
+    const { validateStoryBeats } = await import("@/application/generate-service");
     const outcome = await validateStoryBeats(
       { config, beat_plan: beatPlan },
       { beatValidator: new BeatValidator(new FakeLLM(["我觉得这份骨架还行"]) as never) } as never,
@@ -136,7 +136,7 @@ describe("POST /api/validate-beats（v1.4.0 §7）", () => {
 
   it("校验结论带 error → 200，由调用方决定要不要改（这里只报告）", async () => {
     withTmpDir();
-    const { validateStoryBeats } = await import("@/lib/generate-service");
+    const { validateStoryBeats } = await import("@/application/generate-service");
     const outcome = await validateStoryBeats(
       { config, beat_plan: beatPlan },
       { beatValidator: { validate: async () => SAMPLE_BEAT_VALIDATION_FAILED } as never } as never,
@@ -147,7 +147,7 @@ describe("POST /api/validate-beats（v1.4.0 §7）", () => {
 
   it("BeatValidationParseError 也归到 BEAT_VALIDATION_FAILED", async () => {
     withTmpDir();
-    const { validateStoryBeats } = await import("@/lib/generate-service");
+    const { validateStoryBeats } = await import("@/application/generate-service");
     const outcome = await validateStoryBeats(
       { config, beat_plan: beatPlan },
       {

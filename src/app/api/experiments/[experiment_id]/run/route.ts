@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { runExperimentById } from "@/lib/experiment-service";
-import { toApiError } from "@/lib/api-error";
-import { logger } from "@/lib/logger";
+import { createStoryLoop } from "@/composition";
+import { toApiError } from "@/application/error-model";
 
 /**
  * §39 POST /api/experiments/<experiment_id>/run —— 把这份定义跑完。
@@ -15,11 +14,11 @@ import { logger } from "@/lib/logger";
 export async function POST(_request: Request, ctx: RouteContext<"/api/experiments/[experiment_id]/run">) {
   const { experiment_id } = await ctx.params;
   try {
-    const result = await runExperimentById(experiment_id);
+    const result = await createStoryLoop().service.runExperiment(experiment_id);
     return NextResponse.json(result);
   } catch (e) {
     const err = toApiError(e);
-    logger.error(`run experiment failed (${err.code}): ${err.message}`, e);
+    // 堆栈已由用例层记进服务端日志（§37：路由只解析 / 调用 / 映射）
     return NextResponse.json(err.body(), { status: err.httpStatus });
   }
 }

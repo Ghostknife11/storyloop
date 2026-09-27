@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getRunFailureAnalysis } from "@/lib/generate-service";
+import { createStoryLoop } from "@/composition";
 
 /**
  * §31 GET /api/runs/<run_id>/failure-analysis —— 读回这次 Run 的失败分类。
@@ -8,6 +8,6 @@ import { getRunFailureAnalysis } from "@/lib/generate-service";
  */
 export async function GET(_request: Request, ctx: RouteContext<"/api/runs/[run_id]/failure-analysis">) {
   const { run_id } = await ctx.params;
-  const { status, json } = await getRunFailureAnalysis(run_id);
+  const { status, json } = await createStoryLoop().service.getRunFailureAnalysis(run_id);
   return NextResponse.json(json, { status });
 }

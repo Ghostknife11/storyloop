@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import { POST as postValidate } from "@/app/api/validate/route";
-import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
-import type { ValidationResult } from "@/types/validation-result";
+import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
+import type { ValidationResult } from "@/domain/validation-result";
 import { apiErrorOf } from "./helpers/fixtures";
 
 /**

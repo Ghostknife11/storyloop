@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getRunTelemetry } from "@/lib/generate-service";
+import { createStoryLoop } from "@/composition";
 
 /**
  * §25 GET /api/runs/<run_id>/telemetry —— 读回这次 Run 的遥测。
@@ -8,6 +8,6 @@ import { getRunTelemetry } from "@/lib/generate-service";
  */
 export async function GET(_request: Request, ctx: RouteContext<"/api/runs/[run_id]/telemetry">) {
   const { run_id } = await ctx.params;
-  const { status, json } = await getRunTelemetry(run_id);
+  const { status, json } = await createStoryLoop().service.getRunTelemetry(run_id);
   return NextResponse.json(json, { status });
 }

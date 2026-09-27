@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createExperiment, listExperiments } from "@/lib/experiment-service";
-import { errorBody, toApiError } from "@/lib/api-error";
-import { logger } from "@/lib/logger";
+import { createStoryLoop } from "@/composition";
+import { errorBody, toApiError } from "@/application/error-model";
 
 /**
  * §36 POST /api/experiments —— 建一份实验定义（先建，不跑）。
@@ -18,18 +17,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(errorBody("EXPERIMENT_INVALID", "请求体不是合法 JSON"), { status: 400 });
   }
   try {
-    const definition = await createExperiment(body);
+    const definition = await createStoryLoop().service.createExperiment(body);
     return NextResponse.json(definition, { status: 201 });
   } catch (e) {
     const err = toApiError(e);
-    // 与其它路由同一套口径：堆栈只进服务端日志，响应里只有 code 与一句话
-    logger.error(`create experiment failed (${err.code}): ${err.message}`, e);
+    // 堆栈已由用例层记进服务端日志（§37：路由只解析 / 调用 / 映射）
     return NextResponse.json(err.body(), { status: err.httpStatus });
   }
 }
 
 /** §40 不提供跨实验的统计口径：这里只有「有哪些实验、各自跑到哪一步」。 */
 export async function GET() {
-  const items = await listExperiments();
+  const items = await createStoryLoop().service.listExperiments();
   return NextResponse.json({ experiments: items });
 }

@@ -6,12 +6,12 @@ import { NextRequest } from "next/server";
 import { POST as postRuns } from "@/app/api/runs/route";
 import { POST as postRunsFromPlan } from "@/app/api/runs/from-plan/route";
 import { POST as postReview } from "@/app/api/review/route";
-import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
-import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
-import type { ReviewResult } from "@/types/review-result";
-import type { ValidationResult } from "@/types/validation-result";
-import type { CommercialReviewResult } from "@/types/commercial-review";
-import type { AttemptSummaryApi } from "@/lib/api";
+import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
+import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
+import type { ReviewResult } from "@/domain/review-result";
+import type { ValidationResult } from "@/domain/validation-result";
+import type { CommercialReviewResult } from "@/domain/commercial-review";
+import type { AttemptSummaryApi } from "@/interface/api";
 import { SAMPLE_COMMERCIAL_REVIEW, apiErrorOf } from "./helpers/fixtures";
 
 /**

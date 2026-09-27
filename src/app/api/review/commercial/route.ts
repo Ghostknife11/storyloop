@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { reviewStoryCommercial } from "@/lib/generate-service";
-import { errorBody } from "@/lib/api-error";
+import { createStoryLoop } from "@/composition";
+import { errorBody } from "@/application/error-model";
 
 /**
  * v1.5.0 POST /api/review/commercial —— 手动商业可读性审阅。
@@ -16,6 +16,6 @@ export async function POST(request: NextRequest) {
   } catch {
     return NextResponse.json(errorBody("CONFIG_INVALID", "请求体不是合法 JSON"), { status: 400 });
   }
-  const { status, json } = await reviewStoryCommercial(body);
+  const { status, json } = await createStoryLoop().service.reviewCommercial(body);
   return NextResponse.json(json, { status });
 }

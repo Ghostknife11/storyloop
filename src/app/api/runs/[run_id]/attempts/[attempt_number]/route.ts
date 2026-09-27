@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getRunAttempt } from "@/lib/generate-service";
+import { createStoryLoop } from "@/composition";
 
 /**
  * §39 GET /api/runs/<run_id>/attempts/<attempt_number>。
@@ -10,6 +10,6 @@ export async function GET(
   ctx: RouteContext<"/api/runs/[run_id]/attempts/[attempt_number]">,
 ) {
   const { run_id, attempt_number } = await ctx.params;
-  const { status, json } = await getRunAttempt(run_id, attempt_number);
+  const { status, json } = await createStoryLoop().service.getRunAttempt(run_id, attempt_number);
   return NextResponse.json(json, { status });
 }

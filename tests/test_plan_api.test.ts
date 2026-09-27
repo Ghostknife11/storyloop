@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { planStory } from "@/lib/generate-service";
-import { BeatParseError } from "@/lib/beat-parser";
-import { LLMError } from "@/lib/llm";
-import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
-import type { BeatPlan } from "@/types/beat-plan";
+import { planStory } from "@/application/generate-service";
+import { BeatParseError } from "@/engine/beat-parser";
+import { LLMError } from "@/infrastructure/llm/openai-compatible-llm-client";
+import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
+import type { BeatPlan } from "@/domain/beat-plan";
 import { apiErrorOf } from "./helpers/fixtures";
 
 /** §28 POST /api/plan 服务层：StoryConfig → BeatPlanner → BeatPlan。 */

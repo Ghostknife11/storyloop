@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getExperiment } from "@/lib/experiment-service";
-import { toApiError } from "@/lib/api-error";
+import { createStoryLoop } from "@/composition";
+import { toApiError } from "@/application/error-model";
 
 /**
  * §37 GET /api/experiments/<experiment_id> —— 一份实验的定义、格子与结果。
@@ -12,7 +12,7 @@ import { toApiError } from "@/lib/api-error";
 export async function GET(_request: Request, ctx: RouteContext<"/api/experiments/[experiment_id]">) {
   const { experiment_id } = await ctx.params;
   try {
-    const detail = await getExperiment(experiment_id);
+    const detail = await createStoryLoop().service.getExperiment(experiment_id);
     return NextResponse.json(detail);
   } catch (e) {
     const err = toApiError(e);

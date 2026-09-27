@@ -7,7 +7,7 @@ import { GET as listExperiments, POST as postExperiment } from "@/app/api/experi
 import { GET as getExperiment } from "@/app/api/experiments/[experiment_id]/route";
 import { POST as runExperiment } from "@/app/api/experiments/[experiment_id]/run/route";
 import { SAMPLE_BEAT_PLAN } from "./helpers/fixtures";
-import type { StoryConfig } from "@/types/story-config";
+import type { StoryConfig } from "@/domain/story-config";
 
 /**
  * v1.7.0 实验 API：先建、再跑、只读三条链路。
