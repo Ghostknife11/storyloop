@@ -7,7 +7,10 @@
  * 放在 Infrastructure 就意味着「想知道自己为什么失败」得先 import 一个客户端实现。
  *
  * 适配器（OpenAIClient）照旧抛出这三个类；Infrastructure 那边按旧路径 re-export，
- * 既有的 `from "@/infrastructure/llm/openai-compatible-llm-client"` 导入继续可用。
+ * 所以 `openai-compatible-llm-client` 那个模块仍然继续可用。
+ * （注：这里故意不写 `import ... from "旧路径"` 这种字样——注释里出现一句长得像
+ * 导入的字符串，静态扫描就把它当成真的导入边走，工作区路由会因此「两跳到达」
+ * 一个 HTTP 客户端。这只是说明历史路径，不是导入。）
  */
 
 /** §16 轻量异常体系：三个类，不建巨大层级。 */

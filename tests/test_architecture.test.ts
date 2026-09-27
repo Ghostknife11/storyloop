@@ -292,15 +292,61 @@ describe("§39 界面层不直接实例化基础设施实现", () => {
 });
 
 // ---------------------------------------------------------------------------
+// v2.2.0 §45  浏览器数据层与服务端用例不共用函数名
+// ---------------------------------------------------------------------------
+
+/** 从源码里抽出导出的函数名。只认 `export ... function name(`，注释先剥掉。 */
+function exportedFunctionNames(rel: string): string[] {
+  const cleaned = stripComments(readFileSync(join(SRC, rel), "utf8"));
+  return [...cleaned.matchAll(/export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]);
+}
+
+describe("v2.2.0 §45 两边不共用函数名", () => {
+  /**
+   * `src/interface/api.ts` 是浏览器那一侧（里面就是全仓唯一一处 fetch），
+   * `src/application/workspace-*.ts` 是服务端用例。两边一旦导出同名函数，
+   * 读代码的人和按名字认符号的静态分析都会认错：v2.2.0 的 saveDocument /
+   * updateProject / createDocumentFromRun / exportDocument 四个名字两边都有，
+   * 结果路由里的一个用例调用被分析成「经浏览器客户端 2 跳到达 fetch」，
+   * 报成四条高危 SSRF——群里追了半天的假警报，根子就是同名。
+   *
+   * 规矩因此写死：浏览器侧按 HTTP 动词命名（fetch / post / patch / download），
+   * 服务端用例才用领域名词。两侧函数名集合必须不相交。
+   */
+  it("浏览器数据层导出的函数名，与服务端工作区用例的函数名不相交", () => {
+    const browserSide = exportedFunctionNames("interface/api.ts");
+    expect(browserSide.length).toBeGreaterThan(10);
+    const serverSide = [
+      "application/workspace-projects.ts",
+      "application/workspace-documents.ts",
+      "application/workspace-exports.ts",
+      "application/workspace-health.ts",
+    ].flatMap((rel) => exportedFunctionNames(rel));
+    const shared = browserSide.filter((name) => serverSide.includes(name));
+    expect(shared, `这些名字两边都有：${shared.join(", ")}`).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // §16/§37  路由与 CLI 都从组合根拿用例
 // ---------------------------------------------------------------------------
 
 describe("§16/§37 每个入口都从组合根取用例", () => {
-  it("src/app/api 下每个 route.ts 都 import @/composition", () => {
+  /**
+   * v2.2.0 起组合根按能力拆成两个模块：`@/composition`（生成管线，含模型客户端）与
+   * `@/composition/workspace`（项目 / 稿件 / 导出 / 健康，纯文件读写）。
+   *
+   * 规矩从「必须 import @/composition」改成「必须 import @/composition 或其一个子模块」：
+   * 想保护的还是原来那件事——用例只从组合根拿，不许直接 new 基础设施。这里是按前缀
+   * 放宽，不是闭嘴：直接 import @/infrastructure、@/application 的路由照样抓得到
+   * （下面 §12 那张禁止边表盯着），而 test_workspace_network_boundary 更进一步——
+   * 工作区路由的导入闭包里一个 HTTP 客户端都不许有，那才是拆模块真正买到的东西。
+   */
+  it("src/app/api 下每个 route.ts 都从组合根（或其子模块）取用例", () => {
     const routes = allFiles().filter((f) => f.startsWith("app/api/") && f.endsWith("route.ts"));
     expect(routes.length).toBeGreaterThan(0);
     const offenders = routes.filter(
-      (rel) => !specifiersOf(readFileSync(join(SRC, rel), "utf8")).includes("@/composition"),
+      (rel) => !specifiersOf(readFileSync(join(SRC, rel), "utf8")).some((s) => s === "@/composition" || s.startsWith("@/composition/")),
     );
     expect(offenders).toEqual([]);
   });

@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   FlaskConical,
+  FolderOpen,
   Info,
   PenLine,
   Settings,
@@ -27,6 +28,9 @@ const NAV = [
   // v1.7.0：受控实验入口。只暴露「建 / 跑 / 看分组均值」三件事，
   // 不做排名、不做自动调参，所以导航里也没有「跑分」这类字眼
   { href: "/experiments", label: "Experiments", description: "受控实验", icon: FlaskConical },
+  // v2.2.0：项目工作区。一个项目 = 一堆 Run + 若干可编辑可导出的稿件；
+  // 没有「推荐 / 优化 / 协作」这类本版本没有的能力，导航里也就不必留位置
+  { href: "/workspace", label: "Workspace", description: "项目与稿件", icon: FolderOpen },
   { href: "/settings", label: "Settings", description: "模型与参数", icon: Settings },
   { href: "/about", label: "About", description: "版本与许可", icon: Info },
 ];

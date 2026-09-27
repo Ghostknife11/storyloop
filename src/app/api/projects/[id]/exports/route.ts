@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createWorkspace } from "@/composition";
+import { createWorkspace } from "@/composition/workspace";
 import { errorBody, toApiError } from "@/application/error-model";
 
 /**

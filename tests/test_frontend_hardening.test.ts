@@ -92,9 +92,12 @@ describe("§33 前端 API 访问集中", () => {
     const src = readFileSync(join("src", "interface", "api.ts"), "utf8");
     const exported = [...src.matchAll(/export async function (\w+)/g)].map((m) => m[1]);
     expect(exported.length).toBeGreaterThanOrEqual(9);
+    // 这一条是真正的闸门：全文件只允许一个 fetch 调用点。内部助手可以加
+    // （v2.2.0 的 requestBinary 处理导出文件下载），但只要第二个 await fetch 出现，
+    // 这里立刻就红——超时与网络错误从此就有两处要改了。
     expect(src.match(/await fetch\(/g)?.length ?? 0).toBe(1);
-    // 内部请求助手：requestJson 本身，以及包住它的 postRun
-    const HELPERS = ["requestJson", "postRun"];
+    // 内部请求助手：requestJson 本身、包住它的 postRun，以及二进制下载分支 requestBinary
+    const HELPERS = ["requestJson", "postRun", "requestBinary"];
     for (const name of exported) {
       const body = src.slice(src.indexOf(`export async function ${name}`));
       const next = body.indexOf("\nexport async function");

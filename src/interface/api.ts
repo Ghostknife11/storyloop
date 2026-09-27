@@ -133,15 +133,13 @@ function isTimeout(e: unknown): boolean {
  * §33/§34 唯一的请求出口：Network Error / Timeout / Invalid Response / API Error
  * 四种失败都在这里变成同一类 RunApiError，消息稳定、可直接 Toast。
  * 组件不再自己 fetch，也不再各自解释异常。
+ *
+ * 全文件只有这一个 `await fetch`：JSON 路径与二进制路径都从 send() 出去，
+ * 于是超时与网络错误永远只有一处要改。
  */
-async function requestJson(
-  url: string,
-  init: RequestInit | undefined,
-  fallback: string,
-): Promise<unknown> {
-  let res: Response;
+async function send(url: string, init: RequestInit | undefined, fallback: string): Promise<Response> {
   try {
-    res = await fetch(url, {
+    return await fetch(url, {
       ...init,
       ...(init?.signal ? {} : { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) }),
     });
@@ -156,6 +154,14 @@ async function requestJson(
     }
     throw new RunApiError(`${fallback}：网络错误，请检查连接后重试`, undefined, undefined, "network");
   }
+}
+
+async function requestJson(
+  url: string,
+  init: RequestInit | undefined,
+  fallback: string,
+): Promise<unknown> {
+  const res = await send(url, init, fallback);
 
   // §34 Invalid Response：代理 / 中间层可能返回 HTML，res.json() 会抛 SyntaxError
   let data: unknown = null;
@@ -173,6 +179,26 @@ async function requestJson(
     throw new RunApiError(`${fallback}：响应不是合法 JSON`, undefined, undefined, "invalid_response");
   }
   return data;
+}
+
+/**
+ * 同一条出口的二进制分支：只用于导出文件下载（§32）。
+ *
+ * 为什么不直接 <a href>：下载接口的失败体是 JSON 错误（"这条记录对应的文件已经
+ * 不在了"），走链接会把它当文件存下来。所以先按 JSON 解出这句话，成功了才取 blob。
+ */
+async function requestBinary(url: string, fallback: string): Promise<Response> {
+  const res = await send(url, undefined, fallback);
+  if (!res.ok) {
+    let message = fallback;
+    try {
+      message = apiErrorDetailOf(await res.json(), message).message;
+    } catch {
+      // 响应不是 JSON：保留兜底文案，不把服务端原文透到界面上
+    }
+    throw new RunApiError(message);
+  }
+  return res;
 }
 
 async function postRun(url: string, payload: unknown): Promise<RunApiResult> {
@@ -671,4 +697,275 @@ export async function startExperimentRun(experimentId: string): Promise<Experime
     { method: "POST" },
     "运行实验失败",
   )) as ExperimentResultApi;
+}
+
+// ---------------------------------------------------------------------------
+// v2.2.0 Creator Workspace（TASK §30/§31/§32/§36-§39）
+//
+// 这里的名字一律带 Project / Document 前缀，不叫 createProject 之外的简称：
+// 工作区里"建一个东西"这件事已经在生成页发生过一次了，两处共用一个短名字，
+// 读的人（和静态分析）都要先想一次是哪一个。
+// ---------------------------------------------------------------------------
+
+/** §30 列表项：项目本身 + 名下 Run 数。 */
+export interface ProjectSummaryApi {
+  project: ProjectApi;
+  runCount: number;
+}
+
+/** §30 项目。字段与 domain/project 一一对应，UI 不做二次裁剪。 */
+export interface ProjectApi {
+  schemaVersion: string;
+  id: string;
+  name: string;
+  status: "active" | "archived";
+  createdAt: string;
+  updatedAt: string;
+  storyConfigRef: string | null;
+  currentDocumentId: string | null;
+  isFavorite: boolean;
+}
+
+/** §30 详情：项目 + 扫 Manifest 归纳出来的 Run 归属 + 稿件 id。 */
+export interface ProjectDetailApi {
+  project: ProjectApi;
+  runIds: string[];
+  documentIds: string[];
+}
+
+/** §31 稿件列表项：元数据齐，正文不进来。 */
+export interface DocumentSummaryApi {
+  id: string;
+  title: string;
+  status: "draft" | "final";
+  source: "generated" | "edited" | "imported";
+  sourceRunId: string | null;
+  wordCount: number;
+  updatedAt: string;
+  createdAt: string;
+  isFavorite: boolean;
+}
+
+/** §31 稿件全文：编辑器要的就是这一份，含 contentHash。 */
+export interface StoryDocumentApi {
+  schemaVersion: string;
+  id: string;
+  projectId: string;
+  title: string;
+  status: "draft" | "final";
+  source: "generated" | "edited" | "imported";
+  content: string;
+  sourceRunId: string | null;
+  contentHash: string;
+  createdAt: string;
+  updatedAt: string;
+  isFavorite: boolean;
+}
+
+/** §24/§32 导出记录。没有字节——下载走另一个接口。 */
+export interface ExportResultApi {
+  schemaVersion: string;
+  id: string;
+  projectId: string;
+  documentId: string;
+  format: "docx" | "epub";
+  /** 项目内相对路径，不是服务器绝对路径（§67）。 */
+  artifactPath: string;
+  contentHash: string;
+  filename: string;
+  byteSize: number;
+  createdAt: string;
+}
+
+/** §32 导出动作的结果：记录 + 两个响应头信息。 */
+export interface ExportOutcomeApi {
+  result: ExportResultApi;
+  download: string;
+  mimeType: string;
+  byteSize: number;
+}
+
+/** §17/§18 健康结论。signals 按码排序，同一输入必得同一输出。 */
+export interface ProjectHealthApi {
+  status: "healthy" | "attention" | "blocked";
+  signals: Array<{
+    code: string;
+    severity: "info" | "warning" | "error";
+    message: string;
+    source?: string;
+  }>;
+  updatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// §30 Workspace：项目 / 稿件 / 导出 / 健康
+//
+// 命名规则（v2.2.0 起，写在这里免得下一个人再踩）：
+// **浏览器这一侧的函数一律按 HTTP 动词命名**（fetch / post / patch / download），
+// 服务端用例那一侧才用领域名词（createProject / updateProject / saveDocument / …）。
+//
+// 为什么值得为 naming 破例：两边同名是最容易出事的一种歧义。`saveDocument` 在
+// `src/application/workspace-documents.ts` 里是「把一篇稿写进 projects/」，在
+// 这里却是「往 /api/projects/<id>/documents/<docId> 发一个 PATCH」。路由处理器里
+// 一旦 import 错，浏览器数据层（带 fetch 的那个）就被拖进了服务端；静态扫描也
+// 只按名字认符号，四条同名链就是这么被误报成「2 跳到达 ssrf」的。动词命名之后，
+// 在 route.ts 里看到 postExport( 立刻就该知道它来错了地方。
+// ---------------------------------------------------------------------------
+
+/** §30 GET /api/projects：项目列表。 */
+export async function fetchProjects(): Promise<ProjectSummaryApi[]> {
+  const data = (await requestJson("/api/projects", undefined, "读取项目列表失败")) as { projects?: unknown };
+  return Array.isArray(data.projects) ? (data.projects as ProjectSummaryApi[]) : [];
+}
+
+/** §30 POST /api/projects：建一个项目。name 可省（服务端给"未命名项目"）。 */
+export async function postProject(payload: unknown): Promise<ProjectApi> {
+  return (await requestJson("/api/projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }, "创建项目失败")) as ProjectApi;
+}
+
+/** §30 PATCH /api/projects/<id>：改名 / 收藏 / 归档。白名单外字段服务端一律 400。 */
+export async function patchProject(projectId: string, payload: unknown): Promise<ProjectApi> {
+  return (await requestJson(`/api/projects/${encodeURIComponent(projectId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }, "更新项目失败")) as ProjectApi;
+}
+
+/** §30 GET /api/projects/<id>：项目详情。 */
+export async function fetchProject(projectId: string): Promise<ProjectDetailApi> {
+  return (await requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}`,
+    undefined,
+    "读取项目失败",
+  )) as ProjectDetailApi;
+}
+
+/** §31 GET /api/projects/<id>/documents：稿件列表。 */
+export async function fetchDocuments(projectId: string): Promise<DocumentSummaryApi[]> {
+  const data = (await requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/documents`,
+    undefined,
+    "读取稿件列表失败",
+  )) as { documents?: unknown };
+  return Array.isArray(data.documents) ? (data.documents as DocumentSummaryApi[]) : [];
+}
+
+/** §31 POST /api/projects/<id>/documents：从一次 Run 建稿（Run → Draft）。 */
+export async function postDocumentFromRun(projectId: string, payload: unknown): Promise<StoryDocumentApi> {
+  return (await requestJson(`/api/projects/${encodeURIComponent(projectId)}/documents`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }, "从 Run 建稿失败")) as StoryDocumentApi;
+}
+
+/** §31 GET /api/projects/<id>/documents/<docId>：读一篇稿。 */
+export async function fetchDocument(projectId: string, documentId: string): Promise<StoryDocumentApi> {
+  return (await requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/documents/${encodeURIComponent(documentId)}`,
+    undefined,
+    "读取稿件失败",
+  )) as StoryDocumentApi;
+}
+
+/** §31 PATCH：存稿。只发 title / content / status / isFavorite，其余服务端不认。 */
+export async function patchDocument(
+  projectId: string,
+  documentId: string,
+  payload: unknown,
+): Promise<StoryDocumentApi> {
+  return (await requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/documents/${encodeURIComponent(documentId)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+    "保存稿件失败",
+  )) as StoryDocumentApi;
+}
+
+/** §32 POST /api/projects/<id>/exports：导出一篇稿（docx / epub）。 */
+export async function postExport(projectId: string, payload: unknown): Promise<ExportOutcomeApi> {
+  return (await requestJson(`/api/projects/${encodeURIComponent(projectId)}/exports`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }, "导出失败")) as ExportOutcomeApi;
+}
+
+/** §32 GET /api/projects/<id>/exports：导出历史。 */
+export async function fetchExports(projectId: string): Promise<ExportResultApi[]> {
+  const data = (await requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/exports`,
+    undefined,
+    "读取导出历史失败",
+  )) as { exports?: unknown };
+  return Array.isArray(data.exports) ? (data.exports as ExportResultApi[]) : [];
+}
+
+/** §16/§18 GET /api/projects/<id>/health：项目健康结论。 */
+export async function fetchProjectHealth(projectId: string): Promise<ProjectHealthApi> {
+  return (await requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/health`,
+    undefined,
+    "读取项目健康失败",
+  )) as ProjectHealthApi;
+}
+
+/**
+ * §32 GET /api/projects/<id>/exports/<exportId>：把文件取回来交给浏览器下载。
+ *
+ * 不用 <a href> 直链：那个接口按 index.json 里记的文件名取文件，URL 上写什么都白搭，
+ * 但我们还想把 Content-Disposition 里清洗过的文件名接到下载上；而且失败时我们想给出
+ * 「这条记录对应的文件已经不在了」这句人话，而不是让浏览器下载一个 404 页面。
+ */
+export async function downloadExport(projectId: string, exportId: string, fallbackName: string): Promise<void> {
+  const res = await requestBinary(
+    `/api/projects/${encodeURIComponent(projectId)}/exports/${encodeURIComponent(exportId)}`,
+    "下载导出文件失败",
+  );
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filenameOfDisposition(res.headers.get("content-disposition")) || fallbackName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // 立刻 revoke 会让个别浏览器取消下载，所以延后一次事件循环
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+/**
+ * 从 Content-Disposition 里取文件名（RFC 5987 双轨，中文标题也能取对）。
+ *
+ * 手写拆分而不上正则：这个头的形状本来就简单（几段 `key=value`），逐段看前缀
+ * 比一个要读两遍的表达式更清楚。两端都没有 → 空串，调用方拿记录里的 filename 兜底。
+ */
+function filenameOfDisposition(header: string | null): string {
+  if (!header) return "";
+  const EXTENDED = "filename*=utf-8''";
+  const PLAIN = "filename=";
+  for (const raw of header.split(";")) {
+    const part = raw.trim();
+    const lower = part.toLowerCase();
+    if (lower.startsWith(EXTENDED)) {
+      try {
+        return decodeURIComponent(part.slice(EXTENDED.length));
+      } catch {
+        return "";
+      }
+    }
+    if (lower.startsWith(PLAIN)) {
+      const value = part.slice(PLAIN.length).trim();
+      return value.startsWith('"') && value.endsWith('"') && value.length >= 2 ? value.slice(1, -1) : value;
+    }
+  }
+  return "";
 }
