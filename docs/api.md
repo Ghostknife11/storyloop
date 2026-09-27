@@ -14,6 +14,11 @@
 > 同样是 additive：路由清单只增不改，错误码一个都没新增（这条路由复用
 > `RUN_NOT_FOUND` 与既有的 `run_id` 校验）。
 >
+> v2.2.0 新增 Creator Workspace：十二条 `/api/projects/**` 路由、四个新错误码
+> （`WORKSPACE_INVALID` / `WORKSPACE_NOT_FOUND` / `WORKSPACE_CONFLICT` /
+> `WORKSPACE_WRITE_FAILED`），以及 `projects/` 这一份全新的产物树。同样是 additive：
+> Run 类路由、字段与错误码逐字未动。详见 [docs/workspace.md](docs/workspace.md)。
+>
 > 契约测试：`tests/test_contract_api.test.ts`（同时守护路由清单本身）
 
 ## 通用约定
@@ -46,6 +51,10 @@
 | `EXPERIMENT_INVALID` | 400 | v1.7.0 新增：实验定义不合法——结构不对、变体数或重复次数越界、总样本数超上限、override 键不在白名单、`story_config` 之外的位置出现凭据形状的字段 |
 | `EXPERIMENT_NOT_FOUND` | 404 | v1.7.0 新增：实验 id 不存在 |
 | `EXPERIMENT_CONFLICT` | 409 | v1.7.0 新增：实验 id 已存在、实验已经跑过（第三个文件 `results.json` 已落盘），或这个实验正在运行中 |
+| `WORKSPACE_INVALID` | 400 | v2.2.0 新增：工作区请求体不是合法 JSON、字段不在白名单、项目 / 稿件 / 导出 id 形状不合法、`runId` 不存在或那次运行的正文是空的 |
+| `WORKSPACE_NOT_FOUND` | 404 | v2.2.0 新增：项目 / 稿件 / 导出记录不存在，或导出记录对应的文件已经不在 |
+| `WORKSPACE_CONFLICT` | 409 | v2.2.0 新增：生成的 id 撞上了已有项目或已有稿件，重试即可 |
+| `WORKSPACE_WRITE_FAILED` | 500 | v2.2.0 新增：工作区落盘失败，或保存稿件时 `contentHash` 对不上（整篇都不落盘） |
 
 用户错误（改请求就能解决）一律 4xx，运行时错误 5xx。响应里永远不出现堆栈、
 本机绝对路径或凭据：异常文本会先过 `src/lib/safe-text.ts`。
@@ -120,6 +129,24 @@
 | GET | `/api/experiments` | v1.7.0 新增：实验列表，按 `createdAt` 倒序 |
 | GET | `/api/experiments/<experiment_id>` | v1.7.0 新增：实验详情 + `runs` + `result`（没跑过时两者为 `null`） |
 | POST | `/api/experiments/<experiment_id>/run` | v1.7.0 新增：按定义批量跑，逐格写 `runs.json`，收尾写 `results.json`；已在运行时返回 409 |
+
+v2.2.0 新增 Creator Workspace 的十二条路由（全部 additive，原有路由一个未动）。
+字段级契约见 [docs/workspace.md](docs/workspace.md)：
+
+| 方法 | 路径 | 作用 |
+|---|---|---|
+| GET | `/api/projects` | v2.2.0 新增：项目列表，未归档在前，再按更新时间倒序 |
+| POST | `/api/projects` | v2.2.0 新增：建项目；只认 `name` / `storyConfigRef` / `isFavorite` |
+| GET | `/api/projects/<id>` | v2.2.0 新增：项目详情（项目 + 归属的 Run + 稿件 id） |
+| PATCH | `/api/projects/<id>` | v2.2.0 新增：改名 / 收藏 / 归档；只认 `name` / `isFavorite` / `status` |
+| GET | `/api/projects/<id>/documents` | v2.2.0 新增：稿件列表（不含正文） |
+| POST | `/api/projects/<id>/documents` | v2.2.0 新增：从一次 Run 建稿（复制，不回写 Run）；只认 `runId` |
+| GET | `/api/projects/<id>/documents/<docId>` | v2.2.0 新增：读一篇稿（含正文） |
+| PATCH | `/api/projects/<id>/documents/<docId>` | v2.2.0 新增：保存；只认 `title` / `content` / `status` / `isFavorite` |
+| GET | `/api/projects/<id>/exports` | v2.2.0 新增：导出历史（只增不改） |
+| POST | `/api/projects/<id>/exports` | v2.2.0 新增：导出一篇稿件为 DOCX / EPUB；只认 `documentId` / `format` |
+| GET | `/api/projects/<id>/exports/<exportId>` | v2.2.0 新增：下载已导出的文件（二进制，按账本里的文件名读） |
+| GET | `/api/projects/<id>/health` | v2.2.0 新增：项目健康结论（确定性，不调模型，不给建议） |
 
 ## 响应字段
 

@@ -116,9 +116,17 @@ StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts
   筛选）。三套结论的分数语义一个都没改：Co/N/C/Ca 与 H/P/E/Pf 的维度名、0–100 口径与均分
   算法逐字保留，`review.json` / `commercial-review.json` / `beat-validation.json` 的既有字段
   一个不少。诊断只说明、不驱动：不触发重试、不触发修订、不换模型、不换 Prompt
+- **Creator Workspace（创作者工作区，v2.2.0）**：把散落各处的 Run 收进**项目**，把一次 Run
+  复制成一篇**可编辑、可导出的稿件**，再给每个项目一份**确定性**的健康结论。产物落在与
+  `runs/` 同级的 `projects/` 树里（`project.json` / `documents/` / `revisions/` / `exports/`），
+  HTTP 出口是十二条 additive 路由 `/api/projects/**`，界面是 `Workspace`（项目列表）与
+  `/workspace/<id>`（Overview / Editor / Runs / Quality / Exports 五个签）。从 Run 建稿是
+  **复制**：之后怎么改都不回写 Run 的 `story.md`。Creator Health 只摆九个登记在册的信号码，
+  同一份磁盘事实两次请求逐字相同——**不给建议、不打分、不排序、不驱动任何行为**。
+  契约见 [docs/workspace.md](docs/workspace.md)
 - **现代 Web UI**：六阶段进度、Attempt 计数、修订明细、Validation / Review / Commercial
   Review / Quality Center / Run Provenance / 可观测性 / 失败分析面板、实验列表与实验详情、
-  Run ID 与产物清单
+  Workspace（项目 / 稿件 / 导出 / 健康）、Run ID 与产物清单
 - **Modular Platform Architecture（平台化架构，v2.0.0）**：上面每一种能力都落在明确的层里——
   Stable Domain Contracts（领域契约与纯规则）、Application Use Cases（用例编排与公共门面）、
   Engine（生成 / 校验 / 审阅 / 修订 / 管道）、Analysis（实验汇总与失败分类）、
@@ -178,6 +186,15 @@ StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts
 > `quality-stack.json` 同样不是第四套评价：不调用模型、不重新评分、不补维度，只是把已有的
 > 三套结论汇到一页。某一套没跑出来时对应的键整个不出现（`status` 相应变成 `partial` 或
 > `failed`），没有这个文件的旧 Run 面板整个隐藏——不补 0、不编一份「0 条诊断」冒充跑过。
+>
+> **Creator Workspace 只收拢，不代劳（v2.2.0）**：项目、稿件、导出三条都是**读写已有的事实**。
+> 它**不删**（归档不删数据，本版本没有「永久删除项目 / 删除稿件 / 删除导出」）、
+> **不自动**（没有一键成稿、自动优化、推荐下一步；编辑器自动保存只做存盘）、
+> **不打分**（除 Run 自带的 `review.score` / `commercial_review.score` 之外没有别的数字，
+> 缺分显示「—」，不补 0）、**不外联**（工作区这一层一次 HTTP 请求都不发）、
+> **不碰 Run**（建稿是复制，不回写 Story，不给 Run 追加字段）。
+> Creator Health 那份结论也没有「换个模型试试」这种话——那需要一次新的判断，
+> 而这个版本不打算在背后替用户做任何主张。
 >
 > 后端没有任何为未实现能力预留的隐藏接口——没有的功能就没有入口。
 
@@ -949,6 +966,21 @@ v1.4.0 起 Storyloop 只回答「哪一步失败了」，v1.9.0 把这件事往�
 | POST | `/api/experiments/<experiment_id>/run` | 顺序跑完整个实验，回传 `ExperimentResult` |
 | GET | `/api/health` | `{status: "ok"}` |
 | GET | `/api/version` | `{version: "<VERSION 文件内容>"}` |
+| GET | `/api/projects` | v2.2.0 新增：项目列表（未归档在前，再按更新时间倒序） |
+| POST | `/api/projects` | v2.2.0 新增：建项目；只认 `name` / `storyConfigRef` / `isFavorite` |
+| GET | `/api/projects/<id>` | v2.2.0 新增：项目详情（项目 + 归属的 Run + 稿件 id） |
+| PATCH | `/api/projects/<id>` | v2.2.0 新增：改名 / 收藏 / 归档 |
+| GET | `/api/projects/<id>/documents` | v2.2.0 新增：稿件列表（不含正文） |
+| POST | `/api/projects/<id>/documents` | v2.2.0 新增：从一次 Run 建稿（复制，不回写 Run）；只认 `runId` |
+| GET | `/api/projects/<id>/documents/<docId>` | v2.2.0 新增：读一篇稿（含正文） |
+| PATCH | `/api/projects/<id>/documents/<docId>` | v2.2.0 新增：保存；只认 `title` / `content` / `status` / `isFavorite` |
+| GET | `/api/projects/<id>/exports` | v2.2.0 新增：导出历史 |
+| POST | `/api/projects/<id>/exports` | v2.2.0 新增：导出一篇稿件为 DOCX / EPUB |
+| GET | `/api/projects/<id>/exports/<exportId>` | v2.2.0 新增：下载已导出的文件（二进制） |
+| GET | `/api/projects/<id>/health` | v2.2.0 新增：项目健康结论（确定性，不调模型） |
+
+Run 类路由的字段与错误码与 v2.1.0 逐字一致；工作区十二条路由是纯新增，
+字段级契约见 [docs/workspace.md](docs/workspace.md)。
 
 `retry_policy` 可省略，省略时用默认值。它不属于 StoryConfig，不会写进 `config.json`，
 只会记录在 Run 的 `metadata.json` 里。非法值返回 400，Run 不会开始。
@@ -1094,6 +1126,15 @@ mapped / NAT64 地址按内嵌的那个地址判
   这一版没有多模态、没有外部知识库、没有检索增强，也没有把任何未实现能力预埋成接口
 
 ## 升级说明
+
+v2.2.0 加上 Creator Workspace，**不需要改任何代码、也不需要迁移任何产物**：Run 类路由、
+请求响应字段、CLI、错误码、`runs/` 下原有产物的布局与字段、界面全部与 2.1.0 逐字一致。
+要紧的有三条：多一棵与 `runs/` 同级的产物树 `projects/`（不入库，与 `runs/` 一样在
+`.gitignore` 里）；多十二条 `/api/projects/**` 路由与四个 `WORKSPACE_*` 错误码；
+`run-manifest.json` 上多一个可选的 `workspace.projectId` 字段，把一次 Run 指到它所属的项目
+——2.1.0 及更早写的 Run 没有这个字段，那些 Run 不属于任何项目（不是错误，只是没有归属）。
+回滚到 2.1.0 的代价为零：多出来的树、字段与路由被旧版本整个忽略。逐字段契约见
+[docs/workspace.md](docs/workspace.md)，逐版说明见 [docs/upgrade.md](docs/upgrade.md)。
 
 v2.1.0 在 2.0 平台架构上升级质量系统，**不需要改任何代码、也不需要迁移任何产物**：
 HTTP API、请求响应字段、CLI、错误码、`runs/` 下原有产物的布局与字段、界面全部与 2.0.0
@@ -1358,7 +1399,24 @@ v2.1.0 的统一质量视图新增八个测试文件（同样只用假组件，�
 `test_quality_dimensions` / `test_review_parser` / `test_failure_analyzer` 等原有文件里
 （+200 余条，未新增文件）。
 
-全部测试合计 **99 个文件 / 1552 条**，全部只调用真实 LLM 之外的桩：
+v2.2.0 的 Creator Workspace 另有十一个测试文件（同样只用假组件，不调真实接口）：
+`test_workspace_project`（项目档案的字段守卫、id 规则、归档与解除）、
+`test_workspace_document`（稿件正文、revision 历史与「另一个 id 就是一坨文本」的拒绝）、
+`test_workspace_export`（导出用例：DOCX/EPUB 走真渲染器、纯文件读写、失败不写半份文件）、
+`test_workspace_export_store`（导出文件落 `exports/<项目>/`、账本追加不覆盖）、
+`test_workspace_export_case`（每条文档导出只能选那一次指定格式，旧版本文档照样可导）、
+`test_workspace_run_draft`（run 草稿可整体整出可用的 BeatPlan 与 StoryConfig，
+且只从盘上真实存在的产物取数）、
+`test_workspace_health`（九类信号的判定规则、`retry_pressure` 按真实计数、
+「当前稿件在审阅后改过」要跟磁盘时间比，不与阈值猜）、
+`test_workspace_view`（给健康信号摆事实不给建议）、
+`test_workspace_ui`（十一个界面面板的状态推导、刷新后回到列表、码与版本对应在界面上原样出现）、
+`test_workspace_api`（十二条路由的字段、错误码与「路由不进第二个栈」）、
+`test_workspace_network_boundary`（`§45` 网络边界守卫：工作区落地层的 import 闭包与
+七条 route 的闭包里**都不许出现任何 HTTP 客户端**，另有真实跑全流程并用假 `fetch`
+计数确认一次外联都没发的行为测试）。
+
+全部测试合计 **110 个文件 / 1782 条**，全部只调用真实 LLM 之外的桩：
 LLM 由注入的桩对象或 `FakeLLM` 替代（`tests/helpers/fixtures.ts`），
 `fetch` 也被桩掉。重试相关断言同样只用桩，从不触发真实模型调用。
 URL 校验的用例用注入的假解析器跑，不真的查 DNS，也不碰任何真实主机。
@@ -1381,6 +1439,7 @@ URL 校验的用例用注入的假解析器跑，不真的查 DNS，也不碰任
 | [docs/telemetry.md](docs/telemetry.md) | Run Telemetry 契约（v1.8.0）：telemetry.json 字段、计数语义与边界 |
 | [docs/failure-analysis.md](docs/failure-analysis.md) | 失败分析契约（v1.9.0）：类别、优先级、证据指向、状态记法与边界 |
 | [docs/quality-stack.md](docs/quality-stack.md) | 统一质量视图契约（v2.1.0）：QualityDiagnostic 字段、三套 category 白名单、quality-stack.json 与 Quality Center |
+| [docs/workspace.md](docs/workspace.md) | Creator Workspace 契约（v2.2.0）：projects/ 产物布局、StoryDocument 字段、十二条工作区路由与健康信号 |
 | [docs/cli.md](docs/cli.md) | CLI 命令、参数、退出码 |
 | [docs/upgrade.md](docs/upgrade.md) | 从 0.9.x / 1.0.0 升级到当前版本 |
 | [docs/compatibility.md](docs/compatibility.md) | 兼容性策略与扩展方式 |

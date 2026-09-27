@@ -107,6 +107,33 @@ const { status, json } = await app.service.generate(body);
 每次调用都重新解析一次环境与目录，不在模块级缓存：`RUNS_DIR` / `LLM_*` 是运维旋钮，
 改了要立刻生效（这条从 v1.x 沿用至今）。
 
+### v2.2.0：组合根按能力拆成两个模块
+
+v2.2.0 加了 Creator Workspace 之后，`src/composition/` 分成两个模块：
+
+| 模块 | 装什么 | 谁 import |
+|---|---|---|
+| `@/composition`（`index.ts`） | 生成管线：`createDependencies` / `createStoryLoopApplication` / `createStoryLoop`。这里会 `new` 出按请求现建的模型客户端 | `/api/plan`、`/api/runs/**`、`/api/generate`、`/api/review*`、`/api/repair`、`/api/experiments/**`、CLI |
+| `@/composition/workspace` | Workspace：`createWorkspace` / `createWorkspaceBundle`。只 new 三个文件存储（项目 / 稿件 / 导出），**依赖图里一个 HTTP 客户端都没有** | `/api/projects/**` 十二条路由 |
+
+`index.ts` 仍然 re-export workspace 那几个符号（老 import 路径不断），但**新路由必须直接
+import `@/composition/workspace`**：绕回 index 就等于把模型客户端拉回工作区的依赖图里，
+拆模块买到的东西就没了。
+
+拆开买到的是两件实在事：
+
+1. **看得见**。工作区路由的 import 闭包里连一个会发请求的模块都不存在，
+   `tests/test_workspace_network_boundary.test.ts` 把这条当断言跑（静态闭包 + 把 `fetch`
+   换成会计数的桩跑四个写接口，两层都查）。
+2. **读代码的人不会再猜**。一个只读写 `projects/` 的入口，看的组合根就是它该看的那一个。
+
+同一处还有一条命名规矩，写在 `src/interface/api.ts` 里：**浏览器数据层按 HTTP 动词命名**
+（`fetchProjects` / `postProject` / `patchDocument` / `postExport` / `downloadExport`），
+服务端用例才用领域名词（`createProject` / `saveDocument` / …）。两侧共用函数名时，
+读代码的人和按名字认符号的静态分析都会认错——v2.2.0 因此吃过一次误报：四条
+「2 跳到达 ssrf」全是把路由里的用例调用认成了浏览器侧同名函数。
+`tests/test_architecture.test.ts` 有一条断言把两侧函数名集合钉成不相交。
+
 ## Ports 与 Adapters
 
 端口是 `src/ports/` 下的 type，一个文件一副职责，没有 `GenericRepository<T>`：
@@ -182,6 +209,22 @@ v2.1.0 在运行级多一个 `quality-stack.json`（三套质量结论的统一�
 算出，经 Engine 调端口落盘；上面每一个原有文件一个字段都没少。逐字段契约见
 [quality-stack.md](./quality-stack.md)。
 
+v2.2.0 多了**第二棵产物树**，与 `runs/` 同级：
+
+```text
+projects/<project_id>/
+├── project.json             项目本身
+├── documents/<doc_id>.json  稿件（含正文与 contentHash）
+├── revisions/<doc_id>/      同一篇稿的轻量修订记录（只增不改）
+└── exports/
+    ├── index.json           导出账本（只增不改）
+    └── <文件名>.docx|.epub  导出文件本体
+```
+
+归属规则还是那一条：写盘只在 Infrastructure。`run-manifest.json` 上多一个可选的
+`workspace.projectId`，把一次 Run 指到它所属的项目——这是 Run 归属的唯一事实源，
+项目详情是扫出来的，不缓存第二份。逐字段契约见 [workspace.md](./workspace.md)。
+
 ## 安全边界
 
 | 边界 | 位置 | 守住的约定 |
@@ -193,14 +236,22 @@ v2.1.0 在运行级多一个 `quality-stack.json`（三套质量结论的统一�
 | URL 关卡唯一实现 | `infrastructure/security/url-guard.ts` | `assertPublicBaseUrl` 只有一份定义，架构测试盯着 |
 | 健康接口 | `app/api/health/route.ts` | 只回答是非题（配没配 / 能不能写），不返回密钥、不返回 baseUrl |
 | 配置来源 | `infrastructure/**` | `process.env` 只在 Infrastructure 读；`src/app` / `scripts` / 界面一个都不读 |
+| 工作区不外联 | `composition/workspace.ts` · `tests/test_workspace_network_boundary.test.ts` | v2.2.0 新增：工作区十二条路由的 import 闭包里没有 LLM 客户端、没有 URL 关卡、没有生成管线；并且把 `fetch` 换成会计数的桩后，建稿 / 改名 / 存稿 / 导出照旧成功、计数为 0 |
+| 工作区不跑出项目目录 | `infrastructure/storage/{project,document,export}-store.ts` | 所有路径拼接后必须仍落在 `projects/<id>/` 内；越界一律 400，不去读目录外的东西 |
+| 工作区不认未登记字段 | `domain/workspace.ts` | 白名单外的键（含 `apiKey` 这类凭据形状的字段名）一律 400；`contentHash` 只能由服务端现算 |
 
 ## 架构测试
 
 `tests/test_architecture.test.ts`（静态扫 import，不跑真代码）守住本页的全部约定：
 
 - 六层的允许 / 禁止依赖表，含「Domain 不许 import `next` / `react` / `node:`」
-- `src/app/**/route.ts` 必须从组合根取用例，且不自己 `new` 任何基础设施实现
+- `src/app/**/route.ts` 必须从组合根（或其按能力拆出的子模块）取用例，且不自己 `new` 任何基础设施实现
 - `assertPublicBaseUrl` 只允许有一份定义（v1.1.0 的关卡不许出现第二个实现）
 - 三个仓储端口文件存在，且没有 `GenericRepository<T>`
 - Engine → Infrastructure 的白名单逐条列死，多一条就红灯
 - 无循环依赖（迭代式 DFS 染色检测）
+- v2.2.0 新增：浏览器数据层与服务端用例不共用函数名（静态分析按名字认符号，同名就会被认错）
+
+另有两个专项测试文件守工作区边界（都只读源码 / 打桩，不调真模型）：
+`tests/test_workspace_network_boundary.test.ts`（导入闭包无 HTTP 客户端 + `fetch` 桩计数为 0）
+与 `tests/test_workspace_ui.test.ts`（界面禁词与三条边界）。

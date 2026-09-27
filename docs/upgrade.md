@@ -5,6 +5,34 @@
 >
 > 版本策略见 [compatibility.md](./compatibility.md)。
 
+## 从 2.1.0 升级到 2.2.0
+
+**没有任何需要改代码的地方，也没有任何产物要迁移。** 2.2.0 在 2.0 平台架构上加了
+Creator Workspace：项目、稿件、导出、健康。Run 类路由、请求响应字段、CLI、错误码、
+`runs/` 下原有产物的布局与字段、界面全部与 2.1.0 逐字一致，2.0.0 及更早写的 Run 原样可读。
+契约见 [workspace.md](./workspace.md)。
+
+要紧的有四条：
+
+1. **多一棵与 `runs/` 同级的产物树 `projects/`。** `projects/<project_id>/` 下有
+   `project.json`、`documents/<doc_id>.json`、`revisions/<doc_id>/` 与 `exports/`
+   （`index.json` 账本 + 文件本体）。它和 `runs/` 一样由存储层生成、不入库
+   （`.gitignore` 里已加 `/projects/`）。**`runs/` 里的东西一个字节都没动。**
+2. **多十二条 `/api/projects/**` 路由与四个 `WORKSPACE_*` 错误码。** 全部 additive：
+   Run 类路由清单、字段名、状态码含义与错误码逐字保留。按「键在不在」解析的下游
+   要么整个不看这些新键，要么按新契约处理——不会因为多一个键而出错。
+3. **`run-manifest.json` 上多一个可选的 `workspace.projectId`。** 它把一次 Run 指到
+   它所属的项目，是 Run 归属的唯一事实源（项目详情是扫 Manifest 归纳出来的，
+   `project.json` 里不缓存第二份清单）。**2.1.0 及更早写的 Run 没有这个字段**，
+   那些 Run 不属于任何项目——不是错误，只是没有归属。
+4. **工作区这一层一次外联都不发。** 十二条工作区路由的 import 闭包里没有 LLM 客户端、
+   没有 URL 关卡、没有生成管线；组合根也因此按能力拆成 `@/composition`（管线）与
+   `@/composition/workspace`（纯文件读写）。`index.ts` 仍然 re-export workspace 那几个
+   符号，所以既有 `import { createWorkspace } from "@/composition"` 的写法照样能用；
+   新代码请直接 `import { createWorkspace } from "@/composition/workspace"`。
+
+回滚到 2.1.0 的代价为零：多出来的产物树、路由与字段被旧版本整个忽略。
+
 ## 从 2.0.0 升级到 2.1.0
 
 **没有任何需要改代码的地方，也没有任何产物要迁移。** 2.1.0 是 2.0 平台架构上的第一个
