@@ -14,8 +14,8 @@
  * src/types/story-config.ts），于是领域模型、API 响应、metadata、quality.json 四处同名。
  */
 
-import { REVIEW_SCORE_MAX, REVIEW_SCORE_MIN, validateQualityDimensions } from "@/types/review-result";
-import type { QualityDimensions } from "@/types/quality-dimensions";
+import { REVIEW_SCORE_MAX, REVIEW_SCORE_MIN, validateQualityDimensions } from "@/domain/review-result";
+import type { QualityDimensions } from "@/domain/quality-dimensions";
 
 /** §9 QualityIssue 来源：一条问题出自硬性校验还是基础审阅。 */
 export type QualityIssueSource = "validation" | "review";

@@ -3,7 +3,7 @@ import {
   REVIEW_SCORE_MAX,
   REVIEW_SCORE_MIN,
   validateReviewResult,
-} from "@/types/review-result";
+} from "@/domain/review-result";
 
 /**
  * §40 ReviewResult：只查结构，不评价 Review 本身的质量。

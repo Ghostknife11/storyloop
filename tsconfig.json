@@ -19,6 +19,13 @@
       }
     ],
     "paths": {
+      "@/domain/*": ["./src/domain/*"],
+      "@/ports/*": ["./src/ports/*"],
+      "@/engine/*": ["./src/engine/*"],
+      "@/analysis/*": ["./src/analysis/*"],
+      "@/application/*": ["./src/application/*"],
+      "@/infrastructure/*": ["./src/infrastructure/*"],
+      "@/interface/*": ["./src/interface/*"],
       "@/*": ["./src/*"]
     }
   },

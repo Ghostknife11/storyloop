@@ -7,7 +7,7 @@ import {
   validateBeatPlan,
   type BeatPlan,
   type StoryBeat,
-} from "@/types/beat-plan";
+} from "@/domain/beat-plan";
 import { repoRoot } from "./helpers/fixtures";
 
 /**

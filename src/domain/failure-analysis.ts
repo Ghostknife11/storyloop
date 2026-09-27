@@ -11,12 +11,12 @@
  * quality.ts 一致），于是模型、failure-analysis.json、API 响应三处同名。
  */
 
-import type { BeatValidationResult } from "@/types/beat-validation";
-import type { CommercialReviewResult } from "@/types/commercial-review";
-import type { QualityResult } from "@/types/quality";
-import type { ReviewResult } from "@/types/review-result";
-import type { RunTelemetry } from "@/types/telemetry";
-import type { ValidationResult } from "@/types/validation-result";
+import type { BeatValidationResult } from "@/domain/beat-validation";
+import type { CommercialReviewResult } from "@/domain/commercial-review";
+import type { QualityResult } from "@/domain/quality";
+import type { ReviewResult } from "@/domain/review-result";
+import type { RunTelemetry } from "@/domain/telemetry";
+import type { ValidationResult } from "@/domain/validation-result";
 
 /** §27 failure-analysis.json 的 schema 版本。只增字段不改语义时不动它。 */
 export const FAILURE_ANALYSIS_SCHEMA_VERSION = "1";

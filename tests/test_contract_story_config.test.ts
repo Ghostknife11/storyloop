@@ -12,7 +12,7 @@ import {
   UnsupportedConfigVersionError,
   validateStoryConfig,
   type StoryConfig,
-} from "@/types/story-config";
+} from "@/domain/story-config";
 import { repoRoot } from "./helpers/fixtures";
 
 /**

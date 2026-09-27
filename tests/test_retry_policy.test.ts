@@ -8,9 +8,9 @@ import {
   decideRetry,
   validateRetryPolicy,
   type RetryDecisionInput,
-} from "@/core/retry-policy";
-import type { ReviewResult } from "@/types/review-result";
-import type { ValidationResult } from "@/types/validation-result";
+} from "@/engine/retry-policy";
+import type { ReviewResult } from "@/domain/review-result";
+import type { ValidationResult } from "@/domain/validation-result";
 
 /**
  * §44/§45 RetryPolicy：纯 Fixture 决策表，绝不打真实付费 API。

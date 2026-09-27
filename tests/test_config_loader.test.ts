@@ -7,8 +7,8 @@ import {
   parseStoryConfig,
   serializeStoryConfig,
   ConfigLoadError,
-} from "@/lib/config-io";
-import { UnsupportedConfigVersionError } from "@/types/story-config";
+} from "@/infrastructure/config/config-io";
+import { UnsupportedConfigVersionError } from "@/domain/story-config";
 
 const config = {
   config_version: "1",

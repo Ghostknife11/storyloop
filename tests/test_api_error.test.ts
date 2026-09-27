@@ -12,16 +12,16 @@ import {
   errorBody,
   errorMessageOf,
   toApiError,
-} from "@/lib/api-error";
-import { LLMError, LLMRequestError, LLMTimeoutError } from "@/lib/llm";
-import { BeatParseError } from "@/lib/beat-parser";
-import { BeatValidationParseError } from "@/lib/beat-validation-parser";
-import { BeatPlanValidationError } from "@/types/beat-plan";
-import { BeatValidationValidationError } from "@/types/beat-validation";
-import { ReviewParseError } from "@/lib/review-parser";
-import { CommercialReviewParseError } from "@/lib/commercial-review-parser";
-import { PipelineError } from "@/core/pipeline";
-import { ArtifactWriteError } from "@/storage/artifact-store";
+} from "@/application/error-model";
+import { LLMError, LLMRequestError, LLMTimeoutError } from "@/infrastructure/llm/openai-compatible-llm-client";
+import { BeatParseError } from "@/engine/beat-parser";
+import { BeatValidationParseError } from "@/engine/beat-validation-parser";
+import { BeatPlanValidationError } from "@/domain/beat-plan";
+import { BeatValidationValidationError } from "@/domain/beat-validation";
+import { ReviewParseError } from "@/engine/review-parser";
+import { CommercialReviewParseError } from "@/engine/commercial-review-parser";
+import { PipelineError } from "@/engine/pipeline";
+import { ArtifactWriteError } from "@/infrastructure/storage/artifact-store";
 
 const RUN_ID = "20260922_101500_ab12cd";
 

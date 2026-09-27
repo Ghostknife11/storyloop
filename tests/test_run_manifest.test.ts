@@ -2,32 +2,33 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "@/core/retry-policy";
-import { GenerationPipeline } from "@/core/pipeline";
-import { ArtifactStore } from "@/storage/artifact-store";
-import { BeatPlanner } from "@/lib/beat-planner";
-import { StoryGenerator } from "@/lib/story-generator";
-import { StoryValidator } from "@/lib/story-validator";
-import { BasicReviewer } from "@/lib/basic-reviewer";
-import { CommercialReviewer } from "@/lib/commercial-reviewer";
-import { StoryRepairer } from "@/lib/story-repairer";
-import { RepairStrategy } from "@/core/repair-strategy";
-import { buildRunManifest, DEFAULT_MODEL_SLOT } from "@/lib/tracking/manifest-builder";
+import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "@/engine/retry-policy";
+import { GenerationPipeline } from "@/engine/pipeline";
+import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
+import { BeatPlanner } from "@/engine/beat-planner";
+import { StoryGenerator } from "@/engine/story-generator";
+import { StoryValidator } from "@/engine/story-validator";
+import { BasicReviewer } from "@/engine/basic-reviewer";
+import { CommercialReviewer } from "@/engine/commercial-reviewer";
+import { StoryRepairer } from "@/engine/story-repairer";
+import { RepairStrategy } from "@/engine/repair-strategy";
+import { buildRunManifest, DEFAULT_MODEL_SLOT } from "@/infrastructure/tracking/manifest-builder";
+import { failureAnalyzerFor } from "@/analysis/failure-analysis-service";
 import {
   PROMPT_VERSIONS,
   promptFileNameOf,
   promptSnapshots,
   readPromptText,
-} from "@/lib/tracking/prompt-registry";
-import { sha256Hex } from "@/lib/tracking/digest";
-import { projectSnapshot } from "@/lib/tracking/project-snapshot";
+} from "@/infrastructure/tracking/prompt-registry";
+import { sha256Hex } from "@/infrastructure/tracking/digest";
+import { projectSnapshot } from "@/infrastructure/tracking/project-snapshot";
 import {
   RUN_MANIFEST_SCHEMA_VERSION,
   runManifestOf,
   validateRunManifest,
   type RunManifest,
-} from "@/types/run-manifest";
-import { experimentProvenanceText, manifestPanelState, shortDigest, temperatureRowsOf } from "@/lib/manifest-view";
+} from "@/domain/run-manifest";
+import { experimentProvenanceText, manifestPanelState, shortDigest, temperatureRowsOf } from "@/interface/manifest-view";
 import {
   SAMPLE_BEAT_PLAN,
   SAMPLE_BEAT_VALIDATION,
@@ -99,7 +100,7 @@ function pipelineWith(llm: FakeLLM, store: ArtifactStore, policy?: RetryPolicy) 
     undefined,
     { validate: async () => SAMPLE_BEAT_VALIDATION } as never,
     new CommercialReviewer(new FakeLLM([COMMERCIAL_REPLY]) as never) as never,
-  );
+  ).withFailureAnalyzer(failureAnalyzerFor(store));
 }
 
 /** 跑一次真 Pipeline（只有 LLM / 校验 / 审阅是假的），返回 run 目录与落盘的清单。 */

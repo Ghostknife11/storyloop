@@ -409,3 +409,48 @@ export function runTelemetryOf(raw: unknown): RunTelemetry | null {
     return null;
   }
 }
+
+/**
+ * §22 遥测错误码与固定文案。
+ *
+ * 为什么在 Domain：错误码是遥测契约的组成部分（failureCode / errorCode 都取这组值），
+ * 而「码 → 一句话」的映射会被界面直接拿来显示。放在 Infrastructure 就意味着界面
+ * 为了拿一句话得 import 一个采集器实现——Interface → Infrastructure 是反方向。
+ *
+ * 文案写死在这里还有一个安全上的好处：异常原文一个字都不可能被拼进产物（§22）。
+ */
+export type TelemetryErrorCode =
+  | "LLM_TIMEOUT"
+  | "LLM_REQUEST_FAILED"
+  | "LLM_EMPTY_RESPONSE"
+  | "VALIDATION_COMPONENT_FAILED"
+  | "REVIEW_COMPONENT_FAILED"
+  | "BEAT_VALIDATION_COMPONENT_FAILED"
+  | "COMMERCIAL_REVIEW_COMPONENT_FAILED"
+  | "GENERATION_FAILED"
+  | "BEAT_PLAN_REJECTED"
+  | "ARTIFACT_WRITE_FAILED"
+  | "RUN_FAILED";
+
+const ERROR_MESSAGES: Record<TelemetryErrorCode, string> = {
+  LLM_TIMEOUT: "模型调用超时",
+  LLM_REQUEST_FAILED: "模型调用失败（网络或服务端返回错误）",
+  LLM_EMPTY_RESPONSE: "模型返回内容为空",
+  VALIDATION_COMPONENT_FAILED: "正文校验组件自身失败",
+  REVIEW_COMPONENT_FAILED: "质量审阅组件自身失败",
+  BEAT_VALIDATION_COMPONENT_FAILED: "骨架校验组件自身失败",
+  COMMERCIAL_REVIEW_COMPONENT_FAILED: "商业可读性审阅组件自身失败",
+  GENERATION_FAILED: "正文生成失败",
+  BEAT_PLAN_REJECTED: "骨架结构校验未通过",
+  ARTIFACT_WRITE_FAILED: "产物写入失败",
+  RUN_FAILED: "Run 失败（未归类）",
+};
+
+/** 错误码 → 固定文案。未知码也有兜底，绝不把异常原文透出去。 */
+export function telemetryErrorMessage(code: string): string {
+  return ERROR_MESSAGES[code as TelemetryErrorCode] ?? "发生了未记录原因的失败";
+}
+
+export function isTelemetryErrorCode(value: unknown): value is TelemetryErrorCode {
+  return typeof value === "string" && value in ERROR_MESSAGES;
+}

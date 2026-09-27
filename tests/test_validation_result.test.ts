@@ -4,7 +4,7 @@ import {
   VALIDATION_SEVERITIES,
   validationPassed,
   validateValidationResult,
-} from "@/types/validation-result";
+} from "@/domain/validation-result";
 
 /**
  * §33 ValidationResult / ValidationIssue：只查结构，不重新判断规则是否合理。

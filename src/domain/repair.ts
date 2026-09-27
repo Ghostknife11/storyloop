@@ -8,8 +8,8 @@
  * 本文件不提供任何失败归因字段。
  */
 
-import type { ValidationResult } from "@/types/validation-result";
-import { validateValidationResult } from "@/types/validation-result";
+import type { ValidationResult } from "@/domain/validation-result";
+import { validateValidationResult } from "@/domain/validation-result";
 
 /** §6 支持的 Repair Issue Types：只有这六类，不要一次扩成几十种。 */
 export type RepairIssueType =

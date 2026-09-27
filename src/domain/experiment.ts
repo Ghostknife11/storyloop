@@ -19,11 +19,11 @@
  * 与 v1.0.0 冻结的 snake_case metadata 契约不混用。
  */
 
-import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
-import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
-import { validateRetryPolicy, type RetryPolicy } from "@/core/retry-policy";
-import type { ExperimentProvenance } from "@/types/run-manifest";
-import type { FailureCategory } from "@/types/failure-analysis";
+import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
+import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
+import { validateRetryPolicy, type RetryPolicy } from "@/domain/retry-policy";
+import type { ExperimentProvenance } from "@/domain/run-manifest";
+import type { FailureCategory } from "@/domain/failure-analysis";
 
 export type { ExperimentProvenance };
 

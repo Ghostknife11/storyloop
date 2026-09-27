@@ -7,8 +7,8 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { safeText } from "@/lib/safe-text";
-import { redactSecrets } from "@/lib/logger";
+import { safeText } from "@/domain/safe-text";
+import { redactSecrets } from "@/infrastructure/logging/logger";
 
 describe("safeText：绝对路径换成 <path>", () => {
   it("Windows 盘符路径", () => {

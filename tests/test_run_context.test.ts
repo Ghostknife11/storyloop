@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
-import {
-  createRunContext,
-  failRun,
-  generateRunId,
-  transitionStage,
-  type RunContext,
-} from "@/core/run-context";
+import { createRunContext, failRun, transitionStage, type RunContext } from "@/domain/run-context";
+// v2.0.0：run_id 生成移到 Infrastructure 的 id 端口（Domain 不碰 node:crypto）。
+import { generateRunId } from "@/infrastructure/id/run-id";
 
 /**
  * §8~§11/§27/§28/§64 RunContext：状态只表示 Run 走到哪里，
@@ -32,7 +28,7 @@ describe("RunContext（§9/§10/§64）", () => {
   });
 
   it("initial status valid：created，stage/error 为 null", () => {
-    const ctx = createRunContext("0.5.0");
+    const ctx = createRunContext("0.5.0", generateRunId());
     expect(ctx.run_id).toMatch(RUN_ID);
     expect(ctx.project_version).toBe("0.5.0");
     expect(ctx.status).toBe("created");
@@ -41,7 +37,7 @@ describe("RunContext（§9/§10/§64）", () => {
   });
 
   it("basic status transition works", () => {
-    const ctx = createRunContext("0.5.0");
+    const ctx = createRunContext("0.5.0", generateRunId());
     transitionStage(ctx, "planning", "planning");
     expect(ctx.status).toBe("planning");
     expect(ctx.current_stage).toBe("planning");
@@ -53,14 +49,14 @@ describe("RunContext（§9/§10/§64）", () => {
   });
 
   it("§18 reviewing 状态：Story 落盘之后的审阅阶段", () => {
-    const ctx = createRunContext("0.5.0");
+    const ctx = createRunContext("0.5.0", generateRunId());
     transitionStage(ctx, "reviewing", "reviewing");
     expect(ctx.status).toBe("reviewing");
     expect(ctx.current_stage).toBe("reviewing");
   });
 
   it("failed run records stage and error（§27/§28）", () => {
-    const ctx: RunContext = createRunContext("0.5.0");
+    const ctx: RunContext = createRunContext("0.5.0", generateRunId());
     transitionStage(ctx, "generating", "generating");
     failRun(ctx, "generating", "LLM API 返回 500");
     expect(ctx.status).toBe("failed");
@@ -70,7 +66,7 @@ describe("RunContext（§9/§10/§64）", () => {
 
   it("timestamps valid：ISO 字符串且接近当前时间", () => {
     const before = Date.now();
-    const ctx = createRunContext("0.5.0");
+    const ctx = createRunContext("0.5.0", generateRunId());
     const after = Date.now();
     const parsed = Date.parse(ctx.started_at);
     expect(Number.isNaN(parsed)).toBe(false);

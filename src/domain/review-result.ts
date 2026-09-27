@@ -4,7 +4,7 @@ import {
   DIMENSION_SCORE_MIN,
   QUALITY_DIMENSION_KEYS,
   type QualityDimensions,
-} from "@/types/quality-dimensions";
+} from "@/domain/quality-dimensions";
 
 export class ReviewValidationError extends Error {
   constructor(message: string) {

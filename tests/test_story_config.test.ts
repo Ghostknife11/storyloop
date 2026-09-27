@@ -3,7 +3,7 @@ import {
   STORY_CONFIG_VERSION,
   validateStoryConfig,
   UnsupportedConfigVersionError,
-} from "@/types/story-config";
+} from "@/domain/story-config";
 
 const valid = {
   config_version: "1",

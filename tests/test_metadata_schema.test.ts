@@ -2,13 +2,13 @@ import { mkdtempSync, existsSync, readdirSync, readFileSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { GenerationPipeline } from "@/core/pipeline";
-import { ArtifactStore } from "@/storage/artifact-store";
-import { DEFAULT_RETRY_POLICY } from "@/core/retry-policy";
-import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
-import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
-import type { ReviewResult } from "@/types/review-result";
-import type { ValidationResult } from "@/types/validation-result";
+import { GenerationPipeline } from "@/engine/pipeline";
+import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
+import { DEFAULT_RETRY_POLICY } from "@/engine/retry-policy";
+import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
+import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
+import type { ReviewResult } from "@/domain/review-result";
+import type { ValidationResult } from "@/domain/validation-result";
 import { repoVersion } from "./helpers/fixtures";
 
 /**

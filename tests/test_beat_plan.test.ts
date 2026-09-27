@@ -4,7 +4,7 @@ import {
   BeatPlanValidationError,
   validateBeatPlan,
   type BeatPlan,
-} from "@/types/beat-plan";
+} from "@/domain/beat-plan";
 
 /** §12 BeatPlan schema 校验：只查结构，不评价 Beat 质量（§55）。 */
 

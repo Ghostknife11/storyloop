@@ -14,15 +14,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach } from "vitest";
-import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
-import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
-import type { ReviewResult } from "@/types/review-result";
-import type { ValidationResult, ValidationIssueCode } from "@/types/validation-result";
-import type { BeatValidationResult } from "@/types/beat-validation";
-import type { CommercialReviewResult } from "@/types/commercial-review";
-import { LLMError, LLMTimeoutError } from "@/lib/llm";
-import { CommercialReviewer } from "@/lib/commercial-reviewer";
-import type { ApiErrorDetail } from "@/lib/api-error";
+import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
+import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
+import type { ReviewResult } from "@/domain/review-result";
+import type { ValidationResult, ValidationIssueCode } from "@/domain/validation-result";
+import type { BeatValidationResult } from "@/domain/beat-validation";
+import type { CommercialReviewResult } from "@/domain/commercial-review";
+import { LLMError, LLMTimeoutError } from "@/infrastructure/llm/openai-compatible-llm-client";
+import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
+import { ExperimentStore } from "@/infrastructure/storage/experiment-store";
+import { CommercialReviewer } from "@/engine/commercial-reviewer";
+import type { ApiErrorDetail } from "@/application/error-model";
+import type { Logger } from "@/ports/logger";
 
 // ---------------------------------------------------------------------------
 // 样例数据：中文内容，覆盖 §22 要求的 UTF-8 场景
@@ -130,7 +133,7 @@ export function commercialReviewerOf(commercial?: CommercialReviewResult): Comme
 // 统一错误响应解析（§11）
 // ---------------------------------------------------------------------------
 
-/** 仓库 VERSION 文件内容：project_version 的唯一真源（§42），与 src/lib/version.ts 同源。 */
+/** 仓库 VERSION 文件内容：project_version 的唯一真源（§42），与 src/infrastructure/config/version.ts 同源。 */
 export function repoVersion(): string {
   return readFileSync(join(repoRoot(), "VERSION"), "utf8").trim();
 }
@@ -207,4 +210,27 @@ export function withTmpDir(): string {
   currentTmp = mkdtempSync(join(tmpdir(), "storyloop-v090-"));
   process.chdir(currentTmp);
   return currentTmp;
+}
+
+/** §28 的静音替身：测试断言自己的东西，不要被工程日志刷屏。 */
+const SILENT_LOGGER: Logger = {
+  debug: () => {},
+  info: () => {},
+  warning: () => {},
+  error: () => {},
+};
+
+/**
+ * §43：分析层不再自己 new 存储，测试也必须把依赖显式交进去。
+ *
+ * 根目录沿用 `withTmpDir()` 的约定（相对路径 "runs"，在临时目录里解析），
+ * 所以实验数据落在 `<临时目录>/experiments`、Run 产物落在 `<临时目录>/runs`——
+ * 与 v1.x 默认值逐字节一致，只是现在由测试而不是分析层决定这件事。
+ */
+export function experimentDeps(): {
+  artifactStore: ArtifactStore;
+  experimentStore: ExperimentStore;
+  logger: Logger;
+} {
+  return { artifactStore: new ArtifactStore("runs"), experimentStore: new ExperimentStore("runs"), logger: SILENT_LOGGER };
 }
