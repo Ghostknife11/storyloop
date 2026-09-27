@@ -13,6 +13,84 @@ All notable changes to Storyloop.
 
 ---
 
+## [2.2.0] —— 2026-09-27
+
+2.2.0 在 2.0 平台架构上加 **Creator Workspace（创作者工作区）**：把散落各处的 Run 收进
+**项目**，把一次 Run 复制成一篇**可编辑、可导出的稿件**，并给每个项目一份**确定性**的健康
+结论。
+
+**没有任何破坏性变更**：Run 类路由、请求响应字段、CLI、错误码、`runs/` 下原有产物的布局
+与字段、界面全部与 2.1.0 逐字一致，2.0.0 及更早写的 Run 原样可读。变的都是新增：一棵与
+`runs/` 同级的产物树 `projects/`、十二条 `/api/projects/**` 路由、四个 `WORKSPACE_*`
+错误码、一个 Workspace 界面入口，以及 `run-manifest.json` 上一个可选的 `workspace.projectId`
+字段（v2.1.0 及更早写的 Run 没有它，那些 Run 不属于任何项目——不是错误，只是没有归属）。
+
+### Added
+
+- **Creator Workspace**：一个项目 = 若干 Run + 若干可编辑可导出的稿件
+- `projects/<id>/` 产物树：`project.json`、`documents/<docId>.json`、`revisions/<docId>/`、
+  `exports/index.json` 与导出文件本体（[docs/workspace.md](docs/workspace.md)）
+- **Run → Draft**：从一次 Run 复制出一篇独立稿件；之后怎么改都不回写 Run 的 `story.md`
+- **StoryDocument**：标题 / 正文 / 状态（draft / final）/ 来源 / `contentHash`，
+  `contentHash` 由服务端现算，请求体声明哈希一律 400
+- **DOCX / EPUB 导出**：源是稿件（不是 Run），文件名经 `safeExportFilename` 清洗，
+  下载走 `Content-Disposition`（RFC 5987 双轨）与账本里记下的文件名
+- **Creator Health**（`GET /api/projects/<id>/health`）：九个登记在册的信号码，
+  同一份磁盘事实两次请求逐字相同。**只报告，不建议、不打分、不排序、不驱动任何行为**
+- **工作区界面**：`/workspace` 项目列表 + `/workspace/<id>` 五个签
+  （Overview / Editor / Runs / Quality / Exports），导航从 Shell 进
+- **十二条工作区路由**（全部 additive）：`/api/projects`、`/api/projects/<id>`、
+  `/api/projects/<id>/documents`、`/api/projects/<id>/documents/<docId>`、
+  `/api/projects/<id>/exports`、`/api/projects/<id>/exports/<exportId>`、
+  `/api/projects/<id>/health`
+- **四个错误码**：`WORKSPACE_INVALID`（400）、`WORKSPACE_NOT_FOUND`（404）、
+  `WORKSPACE_CONFLICT`（409）、`WORKSPACE_WRITE_FAILED`（500）
+- **契约文档**：[docs/workspace.md](docs/workspace.md)（布局 / 路由 / 字段 / 信号码 /
+  五条边界）、[docs/api.md](docs/api.md) 的路由与错误码表、[docs/architecture.md](docs/architecture.md)
+  的组合根拆分与工作区安全边界
+- **新测试文件**：`test_workspace_document`、`test_workspace_project`、`test_workspace_export`、
+  `test_workspace_run_draft`、`test_workspace_health`、`test_workspace_export_case`、
+  `test_workspace_api`、`test_workspace_view`、`test_workspace_ui`、
+  `test_workspace_network_boundary`，全部只用替身与临时目录，不打任何真实付费 API
+
+### Changed
+
+- **组合根按能力拆成两个模块**：`@/composition`（生成管线）与 `@/composition/workspace`
+  （项目 / 稿件 / 导出 / 健康）。`index.ts` 仍 re-export workspace 符号，但十二条工作区路由
+  直接 import `@/composition/workspace`——那条路的依赖图里一个 HTTP 客户端都不存在
+- **浏览器数据层改按 HTTP 动词命名**（`fetchProjects` / `postProject` / `patchProject` /
+  `postDocumentFromRun` / `patchDocument` / `postExport`）。服务端用例仍用领域名词。
+  两侧共用函数名会让读代码的人和按名字认符号的静态分析都认错；`tests/test_architecture.test.ts`
+  有一条断言把两侧函数名集合钉成不相交
+- `/api/projects/<id>` 的 Run 归属改为每次请求现扫 `run-manifest.json`，`project.json` 里
+  不缓存第二份清单
+
+### Security
+
+- **工作区这一层一次外联都不发**：`tests/test_workspace_network_boundary.test.ts` 分两层守着——
+  静态层断言十二条路由的 import 闭包里没有 LLM 客户端、没有 URL 关卡、没有生成管线；
+  行为层把 `globalThis.fetch` 换成「一被调用就计数并抛错」的桩，照常打建稿 / 改名收藏 /
+  存稿 / 导出，计数必须为 0
+- **路径不许跑出项目目录**：所有路径拼接后必须仍落在 `projects/<id>/` 内，越界一律 400
+- **白名单外的键一律 400**，含 `apiKey` 这类凭据形状的字段名；API Key 仍然只从服务端
+  环境变量读，不进响应、不进产物
+- 一次安全扫描曾报出工作区路由「经 2 跳到达 ssrf」四条高危。逐条查过：**没有可利用的
+  SSRF**（工作区用例只依赖存储、导出、id 与埋点；唯一一处 fetch 在模型客户端，其 URL 来自
+  服务端 `LLM_BASE_URL` 并经 URL 关卡校验）。误报的结构性根因有两段，两段都修了：组合根
+  一个模块同时挂着管线与工作区；以及一处模块注释里写着长得像导入的字符串
+  （`from "@/infrastructure/llm/..."`），静态分析把它当成真的导入边走。改动与两条
+  变异检查记录在上面的测试文件注释里
+- 全仓其余边界（URL 关卡唯一实现、凭据隔离、文本净化、`process.env` 只在 Infrastructure
+  读取、工作区响应不含绝对路径）逐字保留
+
+### Fixed
+
+- 稿件保存的 `contentHash` 对不上时整篇都不落盘，不再留下「内容改了、哈希还是旧的」
+  这种自相矛盾的稿件
+- 项目与稿件 id 形状不合法一律 400，不存在一律 404，没有一条工作区路由会 500
+
+---
+
 ## [2.1.0] —— 2026-09-27
 
 2.1.0 在 StoryLoop 2.0 平台架构上升级质量系统：Beat Validator、故事质量 Reviewer 与

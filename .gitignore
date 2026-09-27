@@ -19,6 +19,9 @@
 # experiment definitions & results (v1.7.0: experiments/<experiment_id>/ 由 ExperimentStore 生成，不入库)
 /experiments/
 
+# creator workspace (v2.2.0: projects/<project_id>/ 含稿件正文与导出文件，由存储层生成，不入库)
+/projects/
+
 # build
 /dist/
 /build/
