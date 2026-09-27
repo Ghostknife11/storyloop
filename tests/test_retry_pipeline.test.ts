@@ -8,8 +8,10 @@ import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
 import type { RetryPolicy } from "@/engine/retry-policy";
 import { DEFAULT_RETRY_POLICY } from "@/engine/retry-policy";
-import type { ReviewResult } from "@/domain/review-result";
+import type { QualityReviewV2Result } from "@/domain/quality-review-v2";
+import { legacyReviewOf } from "@/domain/quality-review-v2";
 import type { ValidationResult } from "@/domain/validation-result";
+import { qualityReviewV2Of } from "./helpers/fixtures";
 
 /**
  * §19/§20/§45~§49/§53 重试 Pipeline：Evaluation → Decision → Automatic Retry。
@@ -44,8 +46,8 @@ const failed: ValidationResult = {
   issues: [{ code: "TOO_SHORT", severity: "error", message: "正文长度 12 明显短于目标字数（下限 750）。" }],
 };
 
-function review(score: number): ReviewResult {
-  return { score, summary: "总结。", strengths: ["强"], problems: ["弱"] };
+function review(score: number): QualityReviewV2Result {
+  return qualityReviewV2Of(score, ["弱"]);
 }
 
 function policy(patch: Partial<RetryPolicy> = {}): RetryPolicy {
@@ -109,7 +111,7 @@ describe("§46 Pipeline Test — First Attempt Accepted", () => {
       attempt_number: 1,
       story: STORY,
       validation: passed,
-      review: review(80),
+      review: legacyReviewOf(review(80)),
       accepted: true,
       retry_reason: null,
       error: null,

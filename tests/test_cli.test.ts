@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runCli, parseArgs, EXIT_OK, EXIT_RUNTIME, EXIT_USAGE } from "../scripts/generate-cli";
-import { withTmpDir } from "./helpers/fixtures";
+import { withTmpDir, qualityReviewV2Of } from "./helpers/fixtures";
 
 /**
  * §29/§30/§31/§32 CLI 收口：--help 可用、退出码 0/1/2、不重复业务逻辑。
@@ -420,12 +420,7 @@ describe("v1.4.1 --temperature 透传与提示", () => {
 
   it("review 收到 --temperature 时明确说它不生效，模型调用仍用固定 0.3", async () => {
     const { configPath, goodPath } = writeFiles();
-    const review = {
-      score: 88,
-      summary: "故事整体完整，主线清楚。",
-      strengths: ["冲突建立迅速"],
-      problems: ["节奏略拖"],
-    };
+    const review = qualityReviewV2Of(88, ["节奏略拖"]);
     const bodies = stubFetch(review);
     const c = collector();
     const code = await runCli(

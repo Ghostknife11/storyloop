@@ -34,8 +34,9 @@ import {
   SAMPLE_BEAT_VALIDATION,
   SAMPLE_COMMERCIAL_REVIEW,
   SAMPLE_CONFIG,
-  SAMPLE_REVIEW,
   SAMPLE_STORY,
+  REVIEW_REPLY,
+  qualityReviewV2Of,
   FakeLLM,
   repoRoot,
   withTmpDir,
@@ -74,14 +75,9 @@ const RUN_FILES = [
 const RUN_MANIFEST_FILE = "run-manifest.json";
 
 const PLAN_REPLY = JSON.stringify(SAMPLE_BEAT_PLAN);
-const GOOD_REVIEW = JSON.stringify(SAMPLE_REVIEW);
+const GOOD_REVIEW = REVIEW_REPLY;
 const COMMERCIAL_REPLY = JSON.stringify(SAMPLE_COMMERCIAL_REVIEW);
-const LOW_REVIEW = JSON.stringify({
-  score: 41,
-  summary: "正文冲突没有展开。",
-  strengths: ["开头有画面"],
-  problems: ["高潮缺失"],
-});
+const LOW_REVIEW = JSON.stringify(qualityReviewV2Of(41, ["高潮缺失"]));
 /** 修订后的正文：与 SAMPLE_STORY 同量级，且带着主角名字，否则重新校验当场就不过。 */
 const REPAIRED_STORY = `陈岚在雨夜找到了证人，${"雨水顺着屋檐砸在台阶上。".repeat(80)}`;
 
@@ -130,10 +126,20 @@ describe("v1.6.0 出身清单 — 形状与校验", () => {
       "repairer",
     ]);
     for (const snapshot of snapshots) {
-      expect(snapshot.version).toBe("1");
       expect(snapshot.version).toBe(PROMPT_VERSIONS[snapshot.role]);
       expect(snapshot.digest).toMatch(/^[0-9a-f]{64}$/);
     }
+  });
+
+  it("v2.1.0 只有 reviewer 升到 2：换了 v2 提示词，其余五个角色文案没动", () => {
+    expect(PROMPT_VERSIONS).toEqual({
+      planner: "1",
+      generator: "1",
+      "beat-validator": "1",
+      reviewer: "2",
+      "commercial-reviewer": "1",
+      repairer: "1",
+    });
   });
 
   it("prompt 摘要就是提示词原文的 sha256", () => {

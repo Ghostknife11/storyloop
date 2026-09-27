@@ -5,10 +5,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import { GET as getRunDetail } from "@/app/api/runs/[run_id]/route";
 import { GET as getRunAttemptDetail } from "@/app/api/runs/[run_id]/attempts/[attempt_number]/route";
-import type { ReviewResult } from "@/domain/review-result";
+import type { QualityReviewV2Result } from "@/domain/quality-review-v2";
+import { legacyReviewOf } from "@/domain/quality-review-v2";
 import type { ValidationResult } from "@/domain/validation-result";
 import type { QualityResult } from "@/domain/quality";
-import { SAMPLE_BEAT_VALIDATION, SAMPLE_COMMERCIAL_REVIEW, commercialReviewerOf } from "./helpers/fixtures";
+import { SAMPLE_BEAT_VALIDATION, SAMPLE_COMMERCIAL_REVIEW, commercialReviewerOf, qualityReviewV2Of } from "./helpers/fixtures";
 
 /**
  * v1.2.0 §51/§52 质量 API 契约：quality 是纯新增字段。
@@ -24,12 +25,26 @@ const FAILED: ValidationResult = {
   issues: [{ code: "MISSING_ENDING", severity: "error", message: "故事缺少明确结局。" }],
 };
 
-const review: ReviewResult = {
+const review: QualityReviewV2Result = {
   score: 74,
   summary: "故事整体完整，主线清楚，但中段推进略重复。",
-  strengths: ["开篇冲突建立迅速"],
-  problems: ["中段线索重复"],
-  suggestions: ["压缩重复线索，让中段事件承担新的推进功能。"],
+  dimensions: {
+    coherence: { score: 74, summary: "连贯。", strengths: ["开篇冲突建立迅速"], problems: [] },
+    narrative: { score: 74, summary: "叙事。", strengths: [], problems: ["中段线索重复"] },
+    character: { score: 74, summary: "人物。", strengths: [], problems: [] },
+    causality: { score: 74, summary: "因果。", strengths: [], problems: [] },
+  },
+  diagnostics: [
+    {
+      id: "quality-reviewer-1",
+      source: "quality-reviewer",
+      category: "narrative_stall",
+      severity: "warning",
+      target: "story",
+      message: "中段两场戏功能重复。",
+      suggestion: "压缩重复线索，让中段事件承担新的推进功能。",
+    },
+  ],
 };
 
 const realCwd = process.cwd();
@@ -69,7 +84,7 @@ const config = {
 
 async function start(overrides: {
   validations?: ValidationResult[];
-  reviews?: ReviewResult[];
+  reviews?: QualityReviewV2Result[];
   stories?: string[];
 } = {}) {
   const { startRun } = await import("@/application/generate-service");
@@ -119,7 +134,8 @@ describe("§51 POST /api/runs： quality 是 additive 字段", () => {
       "story", "validation", "validation_status",
     ]);
     expect(body.story).toBe(STORY);
-    expect(body.review).toEqual(review);
+    // §27：接口与落盘仍是 v1 形状的 ReviewResult，由 v2 结论摊平得到
+    expect(body.review).toEqual(legacyReviewOf(review));
     expect(body.validation).toEqual(PASSED);
     expect(body.artifacts).toMatchObject({ story: "story.md", quality: "quality.json" });
     // v1.5.0 §26/§28：商业结论独立存在，QualityResult 仍只有 Co/N/C/Ca 四个维度
@@ -228,7 +244,7 @@ describe("§25/§26 读回：quality.json 与内存装配一致", () => {
   it("attempt 级 quality.json 被删 → 该 attempt 临时装配，其余 attempt 不受影响", async () => {
     const dir = withTmpDir();
     const res = await start({
-      reviews: [{ ...review, score: 50 }, { ...review, score: 88 }],
+      reviews: [qualityReviewV2Of(50, ["中段线索重复"]), qualityReviewV2Of(88)],
     });
     const runId = String((res.json as unknown as Record<string, unknown>).run_id);
     rmSync(join(dir, "runs", runId, "attempts", "01", "quality.json"));

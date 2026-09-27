@@ -9,10 +9,12 @@ import { POST as postReview } from "@/app/api/review/route";
 import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
 import type { ReviewResult } from "@/domain/review-result";
+import type { QualityReviewV2Result } from "@/domain/quality-review-v2";
+import { legacyReviewOf } from "@/domain/quality-review-v2";
 import type { ValidationResult } from "@/domain/validation-result";
 import type { CommercialReviewResult } from "@/domain/commercial-review";
 import type { AttemptSummaryApi } from "@/interface/api";
-import { SAMPLE_COMMERCIAL_REVIEW, apiErrorOf } from "./helpers/fixtures";
+import { SAMPLE_COMMERCIAL_REVIEW, apiErrorOf, qualityReviewV2Of } from "./helpers/fixtures";
 
 /**
  * §31~§33/§46 HTTP 路由层：只验证「JSON 解析 → 委托 service → 响应形状」，
@@ -35,12 +37,21 @@ const plan: BeatPlan = validateBeatPlan({
   ],
 });
 
-const review: ReviewResult = {
-  score: 74,
-  summary: "故事整体完整，主线清楚，但中段推进略重复。",
-  strengths: ["开篇冲突建立迅速", "主角目标明确"],
-  problems: ["中段线索重复", "高潮转折略突然"],
-};
+const review: QualityReviewV2Result = qualityReviewV2Of(74, ["中段线索重复", "高潮转折略突然"]);
+
+/** 接口与落盘仍是 v1 形状（§27）：由 v2 结论摊平得到。 */
+const legacyReview: ReviewResult = legacyReviewOf(review);
+
+/** 四维统一改成 score：v2 的整体分由系统按维度聚合，改维度才改得了整体分。 */
+function reviewWithDimensions(score: number, summary?: string): string {
+  const raw = JSON.parse(JSON.stringify(review)) as {
+    dimensions: Record<string, { score: number }>;
+    summary: string;
+  };
+  for (const key of Object.keys(raw.dimensions)) raw.dimensions[key].score = score;
+  if (summary) raw.summary = summary;
+  return JSON.stringify(raw);
+}
 
 const RUN_ID = /^\d{8}_\d{6}_[a-z0-9]{6}$/;
 
@@ -138,7 +149,7 @@ describe("POST /api/runs（§32/§46）", () => {
     expect(body.status).toBe("completed");
     expect(String(body.story)).toContain("陈岚");
     // §27：成功响应包含 review
-    expect(body.review).toEqual(review);
+    expect(body.review).toEqual(legacyReview);
     expect(body.review_status).toBe("completed");
     // §26：成功响应同时包含 validation（硬性检查与审阅分开）
     expect(body.validation).toEqual({ passed: true, issues: [] });
@@ -210,7 +221,7 @@ describe("POST /api/runs — validation failed（§26/§42/§44）", () => {
     expect(validation.passed).toBe(false);
     expect(validation.issues.map((i) => i.code)).toContain("TOO_SHORT");
     // §39：Review 仍然执行
-    expect(body.review).toEqual(review);
+    expect(body.review).toEqual(legacyReview);
     expect(body.review_status).toBe("completed");
 
     const runDir = join(dir, "runs", String(body.run_id));
@@ -331,7 +342,7 @@ describe("POST /api/runs — review failure（§28/§34/§46）", () => {
 
   it("Review 分数越界（101）同样只算 Review 失败", async () => {
     const dir = withTmpDir();
-    stubLLM(JSON.stringify({ ...review, score: 101 }));
+    stubLLM(reviewWithDimensions(101));
     const res = await postRuns(post("/api/runs", { config }));
     expect(res.status).toBe(200);
     const body = await readJson(res);
@@ -350,7 +361,7 @@ describe("POST /api/runs/from-plan（§33）", () => {
     expect(res.status).toBe(200);
     const body = await readJson(res);
     expect(String(body.run_id)).toMatch(RUN_ID);
-    expect(body.review).toEqual(review);
+    expect(body.review).toEqual(legacyReview);
 
     const runDir = join(dir, "runs", String(body.run_id));
     const meta = JSON.parse(readFileSync(join(runDir, "metadata.json"), "utf8"));
@@ -419,7 +430,7 @@ describe("POST /api/review（§29/§46）", () => {
     stubLLM();
     const res = await postReview(post("/api/review", { config, story: "陈岚走进雨夜。" }));
     expect(res.status).toBe(200);
-    expect(await readJson(res)).toEqual(review);
+    expect(await readJson(res)).toEqual(legacyReview);
   });
 
   it("§30 带 run_id 时覆盖该 Run 的 review.json", async () => {
@@ -430,7 +441,7 @@ describe("POST /api/review（§29/§46）", () => {
     const runId = String((await readJson(runRes)).run_id);
 
     // 再手动审阅同一个正文，分数不同
-    stubLLM(JSON.stringify({ ...review, score: 88, summary: "重审后的总结。" }));
+    stubLLM(reviewWithDimensions(88, "重审后的总结。"));
     const res = await postReview(post("/api/review", { config, story: "正文——陈岚走进雨夜。", run_id: runId }));
     expect(res.status).toBe(200);
 

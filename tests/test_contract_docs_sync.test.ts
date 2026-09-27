@@ -17,7 +17,8 @@ import {
   SAMPLE_BEAT_VALIDATION,
   SAMPLE_COMMERCIAL_REVIEW,
   SAMPLE_CONFIG,
-  SAMPLE_REVIEW,
+  REVIEW_REPLY,
+  qualityReviewV2Of,
   SAMPLE_STORY,
   FakeLLM,
   repoRoot,
@@ -40,14 +41,9 @@ import {
  */
 
 const PLAN_REPLY = JSON.stringify(SAMPLE_BEAT_PLAN);
-const GOOD_REVIEW = JSON.stringify(SAMPLE_REVIEW);
+const GOOD_REVIEW = REVIEW_REPLY;
 const COMMERCIAL_REPLY = JSON.stringify(SAMPLE_COMMERCIAL_REVIEW);
-const LOW_REVIEW = JSON.stringify({
-  score: 41,
-  summary: "正文冲突没有展开。",
-  strengths: ["开头有画面"],
-  problems: ["高潮缺失"],
-});
+const LOW_REVIEW = JSON.stringify(qualityReviewV2Of(41, ["高潮缺失"]));
 
 function pipelineWith(
   llm: FakeLLM,

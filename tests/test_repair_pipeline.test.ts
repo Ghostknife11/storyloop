@@ -7,9 +7,11 @@ import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
 import { DEFAULT_RETRY_POLICY } from "@/engine/retry-policy";
 import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
-import type { ReviewResult } from "@/domain/review-result";
+import type { QualityReviewV2Result } from "@/domain/quality-review-v2";
+import { legacyReviewOf } from "@/domain/quality-review-v2";
 import type { ValidationResult } from "@/domain/validation-result";
 import type { RepairRequest, RepairResult } from "@/domain/repair";
+import { qualityReviewV2Of } from "./helpers/fixtures";
 
 /**
  * §45~§48/§51 Pipeline Repair-before-Retry：Retry 与 Repair 分开（§2）。
@@ -48,8 +50,8 @@ const EMPTY: ValidationResult = {
   issues: [{ code: "EMPTY_CONTENT", severity: "error", message: "正文为空，没有可校验的内容。" }],
 };
 
-function review(score: number, problems: string[] = ["中段线索重复"]): ReviewResult {
-  return { score, summary: "总结。", strengths: ["强"], problems };
+function review(score: number, problems: string[] = ["中段线索重复"]): QualityReviewV2Result {
+  return qualityReviewV2Of(score, problems);
 }
 
 const realCwd = process.cwd();
@@ -88,7 +90,7 @@ function scriptedValidator(results: ValidationResult[]) {
   return { validate: async () => results[Math.min(i++, results.length - 1)] };
 }
 
-function scriptedReviewer(results: ReviewResult[]) {
+function scriptedReviewer(results: QualityReviewV2Result[]) {
   let i = 0;
   return { review: async () => results[Math.min(i++, results.length - 1)] };
 }
@@ -206,12 +208,12 @@ describe("§45 Pipeline Test — Repair Success", () => {
     expect(readArtifactJson(dir, result.run_id, "attempts/01/validation.json")).toEqual(
       MISSING_ENDING,
     );
-    expect(readArtifactJson(dir, result.run_id, "attempts/01/review.json")).toEqual(review(63));
+    expect(readArtifactJson(dir, result.run_id, "attempts/01/review.json")).toEqual(legacyReviewOf(review(63)));
     expect(readArtifactJson(dir, result.run_id, "attempts/01/repairs/01/validation.json")).toEqual(
       PASSED,
     );
     expect(readArtifactJson(dir, result.run_id, "attempts/01/repairs/01/review.json")).toEqual(
-      review(74),
+      legacyReviewOf(review(74)),
     );
     expect(readArtifactJson(dir, result.run_id, "attempts/01/repairs/01/request.json")).toEqual({
       repair_number: 1,

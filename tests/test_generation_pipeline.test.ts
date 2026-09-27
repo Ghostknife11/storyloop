@@ -11,7 +11,8 @@ import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
 import type { ReviewResult } from "@/domain/review-result";
 import type { ValidationResult } from "@/domain/validation-result";
-import { repoVersion } from "./helpers/fixtures";
+import { legacyReviewOf, type QualityReviewV2Result } from "@/domain/quality-review-v2";
+import { qualityReviewV2Of, repoVersion } from "./helpers/fixtures";
 
 /**
  * §3/§5~§7/§16~§30/§38~§40/§43~§45/§59~§62 GenerationPipeline。
@@ -36,12 +37,8 @@ const plan: BeatPlan = validateBeatPlan({
   ],
 });
 
-const review: ReviewResult = {
-  score: 74,
-  summary: "故事整体完整，主线清楚，但中段推进略重复。",
-  strengths: ["开篇冲突建立迅速", "主角目标明确"],
-  problems: ["中段线索重复", "高潮转折略突然"],
-};
+const reviewV2: QualityReviewV2Result = qualityReviewV2Of(74, ["中段线索重复", "高潮转折略突然"]);
+const review: ReviewResult = legacyReviewOf(reviewV2);
 
 /** target_words=5000 时长度下限为 750：这里远超下限，含主角名、以句号结尾，可通过全部硬规则。 */
 const STORY = `陈岚推开派出所的玻璃门，${"雨水顺着屋檐砸在台阶上。".repeat(80)}`;
@@ -86,7 +83,7 @@ function fakeValidator(out: ValidationResult, calls: ValidateCall[] = []) {
   };
 }
 
-function fakeReviewer(out: ReviewResult, calls: ReviewCall[] = []) {
+function fakeReviewer(out: QualityReviewV2Result, calls: ReviewCall[] = []) {
   return {
     review: async (c: StoryConfig, story: string, temperature = 0.3) => {
       calls.push({ config: c, story, temperature });
@@ -128,7 +125,7 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
       { plan: async () => { order.push("plan"); return plan; } } as never,
       { generate: async () => { order.push("generate"); return STORY; } } as never,
       { validate: async () => { order.push("validate"); return passed; } } as never,
-      { review: async () => { order.push("review"); return review; } } as never,
+      { review: async () => { order.push("review"); return reviewV2; } } as never,
       store,
     ).withFailureAnalyzer(failureAnalyzerFor(store));
 
@@ -192,7 +189,7 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
       fakePlanner(plan) as never,
       fakeGenerator(STORY) as never,
       fakeValidator(passed) as never,
-      fakeReviewer(review) as never,
+      fakeReviewer(reviewV2) as never,
       new ArtifactStore(),
     );
     const result = await pipeline.run(config);
@@ -223,7 +220,7 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
       fakePlanner(plan) as never,
       fakeGenerator(STORY) as never,
       { validate: async () => { events.push("validate"); return passed; } } as never,
-      { review: async () => { events.push("review"); return review; } } as never,
+      { review: async () => { events.push("review"); return reviewV2; } } as never,
       store,
     );
     await pipeline.run(config);
@@ -235,7 +232,7 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
     withTmpDir();
     const pipeline = new GenerationPipeline(
       fakePlanner(plan) as never, fakeGenerator(STORY) as never,
-      fakeValidator(passed) as never, fakeReviewer(review) as never, new ArtifactStore(),
+      fakeValidator(passed) as never, fakeReviewer(reviewV2) as never, new ArtifactStore(),
     );
     const result = await pipeline.run(config);
     expect(Object.keys(result).sort()).toEqual([
@@ -292,7 +289,7 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
       fakePlanner(plan, planCalls) as never,
       fakeGenerator(STORY, genCalls) as never,
       fakeValidator(passed) as never,
-      fakeReviewer(review, reviewCalls) as never,
+      fakeReviewer(reviewV2, reviewCalls) as never,
       new ArtifactStore(),
     );
     await pipeline.run(config);
@@ -318,7 +315,7 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
       fakePlanner(plan) as never,
       fakeGenerator(STORY) as never,
       fakeValidator(passed, validateCalls) as never,
-      fakeReviewer(review, reviewCalls) as never,
+      fakeReviewer(reviewV2, reviewCalls) as never,
       new ArtifactStore(),
     );
     await pipeline.run(config);
@@ -332,7 +329,7 @@ describe("GenerationPipeline — successful full run（§43/§45/§59）", () =>
     const dir = withTmpDir();
     const pipeline = new GenerationPipeline(
       fakePlanner(plan) as never, fakeGenerator(STORY) as never,
-      fakeValidator(passed) as never, fakeReviewer(review) as never, new ArtifactStore(),
+      fakeValidator(passed) as never, fakeReviewer(reviewV2) as never, new ArtifactStore(),
     );
     const result = await pipeline.run(config, { model: "gpt-4o-mini" });
     expect(readMeta(dir, result.run_id).model).toBe("gpt-4o-mini");
@@ -350,7 +347,7 @@ describe("GenerationPipeline — runWithPlan（§29 Manual Run）", () => {
     };
     const pipeline = new GenerationPipeline(
       planner as never, fakeGenerator(STORY, genCalls) as never,
-      fakeValidator(passed) as never, fakeReviewer(review) as never, new ArtifactStore(),
+      fakeValidator(passed) as never, fakeReviewer(reviewV2) as never, new ArtifactStore(),
     );
 
     const result = await pipeline.runWithPlan(config, plan);
@@ -366,7 +363,7 @@ describe("GenerationPipeline — runWithPlan（§29 Manual Run）", () => {
     const dir = withTmpDir();
     const pipeline = new GenerationPipeline(
       fakePlanner(plan) as never, fakeGenerator(STORY) as never,
-      fakeValidator(passed) as never, fakeReviewer(review) as never, new ArtifactStore(),
+      fakeValidator(passed) as never, fakeReviewer(reviewV2) as never, new ArtifactStore(),
     );
     const result = await pipeline.runWithPlan(config, plan);
     expect(result.artifacts.story).toBe("story.md");
@@ -384,7 +381,7 @@ describe("GenerationPipeline — planning failure（§18/§60）", () => {
       { plan: async () => { throw new Error("Planner 输出不是合法 JSON"); } } as never,
       fakeGenerator(STORY) as never,
       fakeValidator(passed) as never,
-      fakeReviewer(review) as never,
+      fakeReviewer(reviewV2) as never,
       new ArtifactStore(),
     );
 
@@ -415,7 +412,7 @@ describe("GenerationPipeline — generation failure（§19/§61）", () => {
       fakePlanner(plan) as never,
       { generate: async () => { throw new Error("LLM API 返回 500"); } } as never,
       fakeValidator(passed) as never,
-      fakeReviewer(review) as never,
+      fakeReviewer(reviewV2) as never,
       new ArtifactStore(),
     );
 
@@ -440,7 +437,7 @@ describe("GenerationPipeline — persistence failure（§20/§62）", () => {
     const dir = withTmpDir();
     const pipeline = new GenerationPipeline(
       fakePlanner(plan) as never, fakeGenerator(STORY) as never,
-      fakeValidator(passed) as never, fakeReviewer(review) as never, new FailingStore(),
+      fakeValidator(passed) as never, fakeReviewer(reviewV2) as never, new FailingStore(),
     );
 
     const err = await pipeline.run(config).catch((e: unknown) => e);
@@ -505,7 +502,7 @@ describe("GenerationPipeline — review failure（§16/§44）", () => {
     }
     const pipeline = new GenerationPipeline(
       fakePlanner(plan) as never, fakeGenerator(STORY) as never,
-      fakeValidator(passed) as never, fakeReviewer(review) as never, new FailingReviewStore(),
+      fakeValidator(passed) as never, fakeReviewer(reviewV2) as never, new FailingReviewStore(),
     );
 
     const result = await pipeline.run(config);
@@ -533,7 +530,7 @@ describe("GenerationPipeline — review failure（§16/§44）", () => {
 
   it("§69 不存在 PASS/FAIL 阈值：低分也只是普通 completed，且不影响 validation", async () => {
     withTmpDir();
-    const lowScore = fakeReviewer({ ...review, score: 3 });
+    const lowScore = fakeReviewer(qualityReviewV2Of(3));
     const pipeline = new GenerationPipeline(
       fakePlanner(plan) as never, fakeGenerator(STORY) as never,
       fakeValidator(passed) as never, lowScore as never, new ArtifactStore(),
@@ -567,7 +564,7 @@ describe("GenerationPipeline — validation stage（§17/§38/§39）", () => {
       { plan: async () => { events.push("plan"); return plan; } } as never,
       { generate: async () => { events.push("generate"); return STORY; } } as never,
       { validate: async () => { events.push("validate"); return passed; } } as never,
-      { review: async () => { events.push("review"); return review; } } as never,
+      { review: async () => { events.push("review"); return reviewV2; } } as never,
       store,
     );
     await pipeline.run(config);
@@ -584,7 +581,7 @@ describe("GenerationPipeline — validation stage（§17/§38/§39）", () => {
       fakePlanner(plan) as never,
       fakeGenerator("太短", genCalls) as never,
       fakeValidator(failed) as never,
-      fakeReviewer(review, reviewCalls) as never,
+      fakeReviewer(reviewV2, reviewCalls) as never,
       new ArtifactStore(),
     );
 
@@ -623,7 +620,7 @@ describe("GenerationPipeline — validation stage（§17/§38/§39）", () => {
       fakePlanner(plan) as never,
       fakeGenerator("太短", genCalls) as never,
       fakeValidator(failed) as never,
-      fakeReviewer(review) as never,
+      fakeReviewer(reviewV2) as never,
       new ArtifactStore(),
       { ...DEFAULT_RETRY_POLICY, max_attempts: 3, retry_on_validation_failure: false },
     );
@@ -649,7 +646,7 @@ describe("GenerationPipeline — validation stage（§17/§38/§39）", () => {
       fakePlanner(plan) as never,
       fakeGenerator("") as never,
       fakeValidator(emptyFailed) as never,
-      fakeReviewer(review, reviewCalls) as never,
+      fakeReviewer(reviewV2, reviewCalls) as never,
       new ArtifactStore(),
     );
 
@@ -674,7 +671,7 @@ describe("GenerationPipeline — validation stage（§17/§38/§39）", () => {
       fakePlanner(plan) as never,
       fakeGenerator(STORY) as never,
       { validate: async () => { throw new Error("Validator 内部规则崩溃"); } } as never,
-      fakeReviewer(review, reviewCalls) as never,
+      fakeReviewer(reviewV2, reviewCalls) as never,
       new ArtifactStore(),
     );
 
@@ -703,7 +700,7 @@ describe("GenerationPipeline — validation stage（§17/§38/§39）", () => {
       fakePlanner(plan) as never,
       fakeGenerator(STORY) as never,
       fakeValidator(failed) as never,
-      fakeReviewer({ ...review, score: 0 }) as never,
+      fakeReviewer(qualityReviewV2Of(0)) as never,
       new ArtifactStore(),
     );
     const result = await pipeline.run(config);
@@ -715,7 +712,7 @@ describe("GenerationPipeline — validation stage（§17/§38/§39）", () => {
       fakePlanner(plan) as never,
       fakeGenerator(STORY) as never,
       fakeValidator(passed) as never,
-      fakeReviewer({ ...review, score: 100 }) as never,
+      fakeReviewer(qualityReviewV2Of(100)) as never,
       new ArtifactStore(),
     );
     const r2 = await second.run(config);
@@ -728,7 +725,7 @@ describe("GenerationPipeline — validation stage（§17/§38/§39）", () => {
       fakePlanner(plan) as never,
       fakeGenerator("只有一句话。") as never,
       new StoryValidator(),
-      fakeReviewer(review) as never,
+      fakeReviewer(reviewV2) as never,
       new ArtifactStore(),
     );
     const result = await pipeline.run(config);

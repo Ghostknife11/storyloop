@@ -8,7 +8,8 @@ import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
 import type { LLMClient } from "@/infrastructure/llm/openai-compatible-llm-client";
 
 /**
- * §42 BasicReviewer：StoryConfig + Story → Review Prompt → Mock LLM → ReviewResult。
+ * v2.1.0 §7-§12 BasicReviewer：StoryConfig + Story → Review Prompt → Mock LLM
+ * → QualityReviewV2Result（四维 + 结构化诊断）。
  * LLM 一律用注入的假客户端，绝不调用真实收费模型。
  */
 
@@ -37,15 +38,20 @@ function fakeLLM(out: string, calls: Call[] = []) {
   } as unknown as LLMClient;
 }
 
+/** 四维同分（74）的 v2 回复：确定性均分正好等于 74。 */
 const reviewJson = JSON.stringify({
-  score: 74,
+  dimensions: {
+    coherence: { score: 74, summary: "设定一致。", strengths: ["时间线只有一夜"], problems: [] },
+    narrative: { score: 74, summary: "起承转合完整。", strengths: ["结构完整"], problems: ["中段线索重复"] },
+    character: { score: 74, summary: "主角目标清晰。", strengths: ["目标从第一段立住"], problems: [] },
+    causality: { score: 74, summary: "主线因果成立。", strengths: ["因果链完整"], problems: [] },
+  },
+  diagnostics: [],
   summary: "故事整体完整，主线清楚。",
-  strengths: ["开篇冲突建立迅速"],
-  problems: ["中段线索重复"],
 });
 
-describe("BasicReviewer（§12/§42）", () => {
-  it("StoryConfig + Story → Review Prompt → Mock LLM → ReviewResult", async () => {
+describe("BasicReviewer（v2.1.0 §7-§12）", () => {
+  it("StoryConfig + Story → Review Prompt → QualityReviewV2Result", async () => {
     const calls: Call[] = [];
     const reviewer = new BasicReviewer(fakeLLM(reviewJson, calls));
 
@@ -53,8 +59,13 @@ describe("BasicReviewer（§12/§42）", () => {
     expect(review).toEqual({
       score: 74,
       summary: "故事整体完整，主线清楚。",
-      strengths: ["开篇冲突建立迅速"],
-      problems: ["中段线索重复"],
+      dimensions: {
+        coherence: { score: 74, summary: "设定一致。", strengths: ["时间线只有一夜"], problems: [] },
+        narrative: { score: 74, summary: "起承转合完整。", strengths: ["结构完整"], problems: ["中段线索重复"] },
+        character: { score: 74, summary: "主角目标清晰。", strengths: ["目标从第一段立住"], problems: [] },
+        causality: { score: 74, summary: "主线因果成立。", strengths: ["因果链完整"], problems: [] },
+      },
+      diagnostics: [],
     });
 
     expect(calls).toHaveLength(1);
@@ -63,6 +74,70 @@ describe("BasicReviewer（§12/§42）", () => {
     expect(calls[0].prompt).toContain("唯一证人在出庭前一天突然消失。");
     expect(calls[0].prompt).toContain(story);
     expect(calls[0].prompt).toContain("陈岚");
+  });
+
+  it("§10 整体分由系统按四维均分确定性计算，模型自报的 score 被忽略", async () => {
+    const reply = JSON.stringify({
+      ...JSON.parse(reviewJson),
+      score: 99,
+    });
+    const reviewer = new BasicReviewer(fakeLLM(reply));
+    await expect(reviewer.review(config, story)).resolves.toMatchObject({ score: 74 });
+  });
+
+  it("§12 诊断按统一 schema 校验：类别必须登记在册", async () => {
+    const reply = JSON.stringify({
+      ...JSON.parse(reviewJson),
+      diagnostics: [
+        { category: "不存在的类别", severity: "warning", target: "story", message: "随便说说" },
+      ],
+    });
+    const reviewer = new BasicReviewer(fakeLLM(reply));
+    await expect(reviewer.review(config, story)).rejects.toThrow(ReviewParseError);
+  });
+
+  it("§12 诊断缺 message → 拒绝，不静默补空串", async () => {
+    const reply = JSON.stringify({
+      ...JSON.parse(reviewJson),
+      diagnostics: [{ category: "narrative_stall", severity: "warning", target: "story" }],
+    });
+    const reviewer = new BasicReviewer(fakeLLM(reply));
+    await expect(reviewer.review(config, story)).rejects.toThrow(ReviewParseError);
+  });
+
+  it("§12 诊断补齐来源与稳定 id（quality-reviewer-N）", async () => {
+    const reply = JSON.stringify({
+      ...JSON.parse(reviewJson),
+      diagnostics: [
+        {
+          category: "character_inconsistency",
+          severity: "warning",
+          target: "character",
+          message: "高潮处主角放弃追捕，前文没有她动摇的铺垫。",
+          suggestion: "在中段补一次主角对证人的私下询问。",
+        },
+      ],
+    });
+    const reviewer = new BasicReviewer(fakeLLM(reply));
+    const review = await reviewer.review(config, story);
+    expect(review.diagnostics).toEqual([
+      {
+        id: "quality-reviewer-1",
+        source: "quality-reviewer",
+        category: "character_inconsistency",
+        severity: "warning",
+        target: "character",
+        message: "高潮处主角放弃追捕，前文没有她动摇的铺垫。",
+        suggestion: "在中段补一次主角对证人的私下询问。",
+      },
+    ]);
+  });
+
+  it("§9 维度缺 strengths / problems → 拒绝", async () => {
+    const broken = JSON.parse(reviewJson) as Record<string, unknown>;
+    (broken.dimensions as Record<string, unknown>).coherence = { score: 74, summary: "设定一致。" };
+    const reviewer = new BasicReviewer(fakeLLM(JSON.stringify(broken)));
+    await expect(reviewer.review(config, story)).rejects.toThrow(ReviewParseError);
   });
 
   it("§26 Reviewer 使用内部较低温度（0.2 ~ 0.5），不跟随生成温度", async () => {
@@ -89,7 +164,7 @@ describe("BasicReviewer（§12/§42）", () => {
     const reviewer = new BasicReviewer(fakeLLM(reviewJson, calls));
     await reviewer.review(config, story);
     expect(calls[0].system).toContain("审阅");
-    expect(calls[0].system).toContain("只输出 JSON");
+    expect(calls[0].system).toContain("只按指定 JSON 输出");
   });
 
   it("markdown code fence 输出也能解析（§15 轻量清理）", async () => {
@@ -105,7 +180,7 @@ describe("BasicReviewer（§12/§42）", () => {
   it("§4 Reviewer 只返回评价，不修改正文：返回值里没有 story 字段", async () => {
     const reviewer = new BasicReviewer(fakeLLM(reviewJson));
     const review = (await reviewer.review(config, story)) as unknown as Record<string, unknown>;
-    expect(Object.keys(review).sort()).toEqual(["problems", "score", "strengths", "summary"]);
+    expect(Object.keys(review).sort()).toEqual(["diagnostics", "dimensions", "score", "summary"]);
   });
 
   it("模板缺失时报错清晰（含模板路径）", () => {

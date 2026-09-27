@@ -10,6 +10,7 @@ import { LLMError } from "@/infrastructure/llm/openai-compatible-llm-client";
 import {
   experimentDeps,
   withTmpDir,
+  qualityReviewV2Of,
   SAMPLE_BEAT_PLAN,
 } from "./helpers/fixtures";
 import type { StoryConfig } from "@/domain/story-config";
@@ -39,20 +40,9 @@ const BEAT_VALIDATION = JSON.stringify({
   summary: "骨架结构完整：开场、高潮都有。",
 });
 
-/** 结构审阅：总分即维度分，四维 90/90/90/90 → overall 90。 */
+/** 结构审阅：四维同分，确定性均分正好等于 score。 */
 function review(score: number): string {
-  return JSON.stringify({
-    score,
-    summary: "总结。",
-    strengths: ["强"],
-    problems: ["弱"],
-    dimensions: {
-      coherence: { score, summary: "连贯。" },
-      narrative: { score, summary: "叙事。" },
-      character: { score, summary: "人物。" },
-      causality: { score, summary: "因果。" },
-    },
-  });
+  return JSON.stringify(qualityReviewV2Of(score, ["弱"]));
 }
 
 /** 商业可读性：四个维度同分，score 由其聚合覆盖（70 > min_review_score，不触发重试）。 */

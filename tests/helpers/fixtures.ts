@@ -17,6 +17,11 @@ import { afterEach } from "vitest";
 import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
 import type { ReviewResult } from "@/domain/review-result";
+import {
+  legacyReviewOf,
+  validateQualityReviewV2Result,
+  type QualityReviewV2Result,
+} from "@/domain/quality-review-v2";
 import type { ValidationResult, ValidationIssueCode } from "@/domain/validation-result";
 import type { BeatValidationResult } from "@/domain/beat-validation";
 import type { CommercialReviewResult } from "@/domain/commercial-review";
@@ -58,12 +63,86 @@ export const SAMPLE_BEAT_PLAN: BeatPlan = validateBeatPlan({
 /** 远超长度下限、含主角名、以句号结尾：可通过全部硬规则。 */
 export const SAMPLE_STORY = `陈岚推开派出所的玻璃门，${"雨水顺着屋檐砸在台阶上。".repeat(80)}`;
 
-export const SAMPLE_REVIEW: ReviewResult = {
-  score: 82,
-  summary: "节奏紧凑，悬念保持到尾。",
-  strengths: ["开场三分钟失踪写得干净"],
-  problems: [],
-};
+/**
+ * v2.1.0 Quality Reviewer v2 的样例输出——这是「模型回复」的那一份
+ * （四维各自带 strengths / problems，外加一条结构化诊断）。
+ * 四维 (84 + 78 + 80 + 76) / 4 = 79.5，落盘的 score 就是这个确定性均分。
+ */
+export const SAMPLE_QUALITY_REVIEW_V2: QualityReviewV2Result = validateQualityReviewV2Result({
+  dimensions: {
+    coherence: {
+      score: 84,
+      summary: "设定前后一致，称呼与时间线没有跑偏。",
+      strengths: ["时间线只有一夜，顺序清楚"],
+      problems: [],
+    },
+    narrative: {
+      score: 78,
+      summary: "起承转合完整，中段排查过程拖了两轮。",
+      strengths: ["起承转合完整"],
+      problems: ["中段两场戏功能重复"],
+    },
+    character: {
+      score: 80,
+      summary: "主角目标清晰，高潮处的退让动机交代不足。",
+      strengths: ["主角目标从第一段就立住"],
+      problems: ["高潮处退让缺少动机铺垫"],
+    },
+    causality: {
+      score: 76,
+      summary: "主线因果成立，配角的反水缺少铺垫。",
+      strengths: ["主线因果成立"],
+      problems: ["配角反水没有前文支撑"],
+    },
+  },
+  diagnostics: [
+    {
+      category: "character_inconsistency",
+      severity: "warning",
+      target: "character",
+      message: "高潮处主角放弃追捕，前文没有她动摇的铺垫。",
+      suggestion: "在中段补一次主角对证人的私下询问，让放弃有来处。",
+    },
+  ],
+  summary: "故事整体完整，主线清楚，但中段推进略重复。",
+});
+
+/**
+ * v1.x 形状的审阅结论：由上面的 v2 样例经 legacyReviewOf 摊平得到。
+ * 凡是要断言 review.json 内容或 /api/review 响应的测试，都用这一个——
+ * 它正是 Pipeline 与服务层真正落盘 / 返回的那一份。
+ */
+export const SAMPLE_REVIEW: ReviewResult = legacyReviewOf(SAMPLE_QUALITY_REVIEW_V2);
+
+/** FakeLLM 的审阅回复（v2 JSON）。 */
+export const REVIEW_REPLY = JSON.stringify(SAMPLE_QUALITY_REVIEW_V2);
+
+/**
+ * v2.1.0：四维同分的 v2 审阅结论。均分正好等于 score，
+ * 于是「按整体分驱动重试」一类旧测试的分数语义一个数都不用改。
+ */
+export function qualityReviewV2Of(
+  score: number,
+  problems: string[] = [],
+  suggestions: string[] = [],
+): QualityReviewV2Result {
+  const summary = "总结。";
+  const dimensions = {} as QualityReviewV2Result["dimensions"];
+  for (const key of ["coherence", "narrative", "character", "causality"] as const) {
+    dimensions[key] = { score, summary, strengths: ["强"], problems };
+  }
+  return validateQualityReviewV2Result({
+    dimensions,
+    diagnostics: suggestions.map((suggestion) => ({
+      category: "narrative_stall",
+      severity: "warning",
+      target: "story",
+      message: suggestion,
+      suggestion,
+    })),
+    summary,
+  });
+}
 
 export const SAMPLE_VALIDATION: ValidationResult = { passed: true, issues: [] };
 

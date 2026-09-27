@@ -9,9 +9,9 @@ import { GET as getRun } from "@/app/api/runs/[run_id]/route";
 import { GET as getRunAttempt } from "@/app/api/runs/[run_id]/attempts/[attempt_number]/route";
 import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
-import type { ReviewResult } from "@/domain/review-result";
+import type { QualityReviewV2Result } from "@/domain/quality-review-v2";
 import type { ValidationResult } from "@/domain/validation-result";
-import { apiErrorOf, commercialReviewerOf, SAMPLE_BEAT_VALIDATION } from "./helpers/fixtures";
+import { apiErrorOf, commercialReviewerOf, qualityReviewV2Of, SAMPLE_BEAT_VALIDATION } from "./helpers/fixtures";
 
 /**
  * §37~§39/§51 Retry API：请求体带 retry_policy、响应带 Attempt 摘要、
@@ -40,12 +40,7 @@ const STORY = `陈岚推开派出所的玻璃门，${"雨水顺着屋檐砸在�
 
 const passed: ValidationResult = { passed: true, issues: [] };
 
-const review: ReviewResult = {
-  score: 74,
-  summary: "故事整体完整，主线清楚，但中段推进略重复。",
-  strengths: ["开篇冲突建立迅速", "主角目标明确"],
-  problems: ["中段线索重复", "高潮转折略突然"],
-};
+const review: QualityReviewV2Result = qualityReviewV2Of(74, ["中段线索重复", "高潮转折略突然"]);
 
 const RUN_ID = /^\d{8}_\d{6}_[a-z0-9]{6}$/;
 
@@ -78,7 +73,7 @@ function scriptedValidator(results: ValidationResult[]) {
   return { validate: async () => results[Math.min(i++, results.length - 1)] };
 }
 
-function scriptedReviewer(results: ReviewResult[]) {
+function scriptedReviewer(results: QualityReviewV2Result[]) {
   let i = 0;
   return { review: async () => results[Math.min(i++, results.length - 1)] };
 }
@@ -93,7 +88,7 @@ async function runWith(
   body: unknown,
   stories: string[],
   validations: ValidationResult[],
-  reviews: ReviewResult[],
+  reviews: QualityReviewV2Result[],
 ) {
   const { startRun } = await import("@/application/generate-service");
   return startRun(body, {
@@ -114,7 +109,7 @@ describe("POST /api/runs — retry policy（§37/§51）", () => {
       { config, retry_policy: { max_attempts: 3, min_review_score: 70, retry_on_validation_failure: true } },
       [STORY, "第二次：还是不合格的正文", "第三次：仍然不合格"],
       [passed, passed, passed],
-      [{ ...review, score: 40 }, { ...review, score: 50 }, { ...review, score: 60 }],
+      [qualityReviewV2Of(40), qualityReviewV2Of(50), qualityReviewV2Of(60)],
     );
     expect(r.status).toBe(200);
     const body = r.json as unknown as Record<string, unknown>;
@@ -154,7 +149,7 @@ describe("POST /api/runs — retry policy（§37/§51）", () => {
       { config, retry_policy: { max_attempts: 2, min_review_score: 80 } },
       [STORY],
       [passed],
-      [{ ...review, score: 74 }],
+      [review],
     );
     const saved = JSON.parse(
       readFileSync(join(dir, "runs", String((r.json as unknown as { run_id: string }).run_id), "config.json"), "utf8"),
@@ -175,7 +170,7 @@ describe("POST /api/runs — retry policy（§37/§51）", () => {
       { config, retry_policy: { max_attempts: 2, min_review_score: 70 } },
       [STORY, `第二次：${STORY}`],
       [passed, passed],
-      [{ ...review, score: 61 }, { ...review, score: 88 }],
+      [qualityReviewV2Of(61, ["中段线索重复"]), qualityReviewV2Of(88)],
     );
     const body = r.json as unknown as {
       attempt_count: number;
@@ -226,7 +221,7 @@ describe("GET /api/runs/{run_id}（§39）", () => {
       { config, retry_policy: { max_attempts: 2, min_review_score: 70 } },
       [STORY, `第二次：${STORY}`],
       [passed, passed],
-      [{ ...review, score: 61 }, { ...review, score: 88 }],
+      [qualityReviewV2Of(61, ["中段线索重复"]), qualityReviewV2Of(88)],
     );
     const runId = String((created.json as { run_id: string }).run_id);
     expect(runId).toMatch(RUN_ID);
@@ -275,7 +270,7 @@ describe("GET /api/runs/{run_id}/attempts/{attempt_number}（§39）", () => {
       { config, retry_policy: { max_attempts: 2, min_review_score: 70 } },
       [STORY, `第二次：${STORY}`],
       [passed, passed],
-      [{ ...review, score: 61 }, { ...review, score: 88 }],
+      [qualityReviewV2Of(61, ["中段线索重复"]), qualityReviewV2Of(88)],
     );
     const runId = String((created.json as { run_id: string }).run_id);
 
@@ -304,7 +299,7 @@ describe("GET /api/runs/{run_id}/attempts/{attempt_number}（§39）", () => {
 
   it("attempt_number 不存在 → 404；非法编号 → 400", async () => {
     withTmpDir();
-    const created = await runWith({ config }, [STORY], [passed], [{ ...review, score: 88 }]);
+    const created = await runWith({ config }, [STORY], [passed], [qualityReviewV2Of(88)]);
     const runId = String((created.json as { run_id: string }).run_id);
     const missing = await getRunAttempt({} as never, {
       params: Promise.resolve({ run_id: runId, attempt_number: "7" }),
@@ -325,11 +320,12 @@ describe("GET /api/runs/{run_id}/attempts/{attempt_number}（§39）", () => {
 describe("v1.4.1 读回容错：坏结论文件不让接口 500", () => {
   it("attempt 的 review.json 缺一个维度 → 200，review 为 null", async () => {
     const dir = withTmpDir();
-    const created = await runWith({ config }, [STORY], [passed], [{ ...review, score: 88 }]);
+    const created = await runWith({ config }, [STORY], [passed], [qualityReviewV2Of(88)]);
     const runId = String((created.json as { run_id: string }).run_id);
     writeFileSync(
       join(dir, "runs", runId, "attempts", "01", "review.json"),
-      JSON.stringify({ ...review, dimensions: { coherence: { score: 80, summary: "连贯。" } } }),
+      // v1 形状的坏文件：只有一维，读路径必须容错成 null，而不是 500
+      JSON.stringify({ score: 88, summary: "总结。", strengths: ["强"], problems: [], dimensions: { coherence: { score: 80, summary: "连贯。" } } }),
       "utf8",
     );
 
@@ -348,7 +344,7 @@ describe("v1.4.1 读回容错：坏结论文件不让接口 500", () => {
 
   it("运行根目录的 validation.json 是半份 JSON → 200，validation 为 null", async () => {
     const dir = withTmpDir();
-    const created = await runWith({ config }, [STORY], [passed], [{ ...review, score: 88 }]);
+    const created = await runWith({ config }, [STORY], [passed], [qualityReviewV2Of(88)]);
     const runId = String((created.json as { run_id: string }).run_id);
     writeFileSync(join(dir, "runs", runId, "validation.json"), '{"passed": true,', "utf8");
 
@@ -365,7 +361,7 @@ describe("§41/§42 CLI 上报用的响应字段", () => {
       { config, retry_policy: { max_attempts: 2, min_review_score: 70 } },
       [STORY, `第二次：${STORY}`],
       [passed, passed],
-      [{ ...review, score: 64 }, { ...review, score: 75 }],
+      [qualityReviewV2Of(64), qualityReviewV2Of(75)],
     );
     const body = r.json as unknown as { attempts: Array<Record<string, unknown>>; quality_status: string; selected_attempt: number };
     const lines = (body.attempts as Array<Record<string, unknown>>).map((a) =>

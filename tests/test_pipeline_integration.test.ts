@@ -19,6 +19,8 @@ import {
   SAMPLE_CONFIG,
   SAMPLE_REVIEW,
   SAMPLE_STORY,
+  REVIEW_REPLY,
+  qualityReviewV2Of,
   repoVersion,
 } from "./helpers/fixtures";
 
@@ -34,13 +36,11 @@ import {
  */
 
 const PLAN_REPLY = JSON.stringify(SAMPLE_BEAT_PLAN);
-const GOOD_REVIEW_REPLY = JSON.stringify(SAMPLE_REVIEW);
-const LOW_REVIEW_REPLY = JSON.stringify({
-  score: 41,
-  summary: "正文太短，冲突没有展开。",
-  strengths: ["开头有画面"],
-  problems: ["长度远低于目标", "高潮缺失"],
-});
+const GOOD_REVIEW_REPLY = REVIEW_REPLY;
+const LOW_REVIEW_REPLY = JSON.stringify(
+  // v2.1.0：四维同分的低分结论——均分正好是 41，重试与阈值的语义不变
+  qualityReviewV2Of(41, ["长度远低于目标", "高潮缺失"]),
+);
 
 /** 长度下限（target_words=5000 → max(300, 750) = 750）之下的正文：触发 TOO_SHORT。 */
 const SHORT_STORY = "陈岚走进派出所，然后又走了。";
@@ -347,7 +347,7 @@ describe("§51 Repair Path：Attempt 1 失败 → Repair → Revalidate → Re-r
     const attemptDir = join(dir, "runs", result.run_id, "attempts", "01");
     expect(readFileSync(join(attemptDir, "repairs", "01", "story.md"), "utf8")).toContain("陈岚推开派出所的玻璃门");
     expect(readFileSync(join(attemptDir, "repairs", "01", "validation.json"), "utf8")).toContain('"passed": true');
-    expect(readFileSync(join(attemptDir, "repairs", "01", "review.json"), "utf8")).toContain("82");
+    expect(readFileSync(join(attemptDir, "repairs", "01", "review.json"), "utf8")).toContain('"score": 79.5');
     expect(readFileSync(join(attemptDir, "initial_story.md"), "utf8")).toContain(SHORT_STORY);
     expect(readFileSync(join(attemptDir, "story.md"), "utf8")).toContain("陈岚推开派出所的玻璃门");
     expect(readFileSync(join(attemptDir, "story.md"), "utf8")).not.toContain(SHORT_STORY);

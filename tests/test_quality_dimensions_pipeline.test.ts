@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { GenerationPipeline } from "@/engine/pipeline";
@@ -21,13 +21,14 @@ import {
 } from "./helpers/fixtures";
 
 /**
- * v1.3.0 §39 多维度审阅在真实管道里的落点。
+ * v1.3.0 §39 多维度审阅在真实管道里的落点，v2.1.0 起 Reviewer 输出 v2 结论
+ * （四维各带 strengths/problems + 结构化诊断），管道在边界处摊平成 v1 ReviewResult。
  *
  * Reviewer 换成会返回四维评分的假客户端，其余全是真组件。重点验证四件事：
  *   1. 维度一路带到 quality.json，overall_score 就是四维均分（§18/§38）
  *   2. 重试门槛比的是均分，不是任何一个维度（§40）
  *   3. 修订后重新审阅得到新的维度，快照取修订后那一份（§35）
- *   4. 没有维度时（旧格式）行为与 v1.2.x 逐字一致（§37）
+ *   4. 没有四维的旧格式一律解析失败，不再有「没有维度」这条退路（§37）
  */
 
 const PLAN_REPLY = JSON.stringify(SAMPLE_BEAT_PLAN);
@@ -48,23 +49,39 @@ const LOW_DIMENSIONS: QualityDimensions = {
 
 /** 均分：(84+80+81+83)/4 = 82 */
 const HIGH_REVIEW = JSON.stringify({
-  score: 82,
-  dimensions: HIGH_DIMENSIONS,
+  dimensions: {
+    coherence: { score: 84, summary: "设定与称呼前后一致。", strengths: ["称呼统一"], problems: [] },
+    narrative: { score: 80, summary: "结构完整，中段略慢。", strengths: ["起承转合完整"], problems: [] },
+    character: { score: 81, summary: "主角目标清楚，高潮处动机交代到位。", strengths: ["主角目标清楚"], problems: [] },
+    causality: { score: 83, summary: "事件推进都有前因。", strengths: ["主线因果清楚"], problems: [] },
+  },
+  diagnostics: [
+    {
+      category: "narrative_stall",
+      severity: "info",
+      target: "middle",
+      message: "中段两场戏推进节奏略有停滞",
+      suggestion: "压缩重复线索，让中段事件承担新的推进功能。",
+    },
+  ],
   summary: "节奏紧凑，悬念保持到尾。",
-  strengths: ["开场三分钟失踪写得干净"],
-  problems: [],
-  suggestions: ["压缩重复线索，让中段事件承担新的推进功能。"],
 });
 
 /** 均分：(62+59+63+56)/4 = 60 */
 const LOW_REVIEW = JSON.stringify({
-  score: 60,
-  dimensions: LOW_DIMENSIONS,
+  dimensions: {
+    coherence: { score: 62, summary: "后段称呼前后不一致。", strengths: [], problems: ["后段称呼前后不一致"] },
+    narrative: { score: 59, summary: "起承转合缺高潮。", strengths: [], problems: ["高潮缺失"] },
+    character: { score: 63, summary: "主角中途换了目标。", strengths: [], problems: [] },
+    causality: { score: 56, summary: "配角的反水没有铺垫。", strengths: [], problems: [] },
+  },
+  diagnostics: [
+    { category: "weak_climax", severity: "error", target: "ending", message: "高潮冲突没有展开" },
+  ],
   summary: "高潮冲突没有展开。",
-  strengths: ["开篇有画面感"],
-  problems: ["高潮缺失"],
 });
 
+/** v2.1.0 起不再接受的旧格式：只有顶层 score / strengths / problems，没有四维。 */
 const LEGACY_HIGH_REVIEW = JSON.stringify({
   score: 82,
   summary: "节奏紧凑，悬念保持到尾。",
@@ -128,14 +145,22 @@ describe("§39 Happy Path：维度一路带到快照与 metadata", () => {
     expect(readJson(join(runDir, "review.json")).score).toBe(82);
   });
 
-  it("没有维度的旧格式审阅：行为与 v1.2.x 一致，快照里没有 dimensions 键", async () => {
+  it("旧格式（没有维度）一律按解析失败处理：不写 review.json，快照也没有分数", async () => {
     const dir = withTmpDir();
     const llm = new FakeLLM([PLAN_REPLY, SAMPLE_STORY, LEGACY_HIGH_REVIEW]);
-    const result = await pipelineWith(llm, new ArtifactStore()).run(SAMPLE_CONFIG);
+    const result = await pipelineWith(llm, new ArtifactStore(), {
+      ...DEFAULT_RETRY_POLICY,
+      enable_repair: false,
+    }).run(SAMPLE_CONFIG);
     const runDir = join(dir, "runs", result.run_id);
 
+    expect(result.review_status).toBe("failed");
+    expect(existsSync(join(runDir, "review.json"))).toBe(false);
+
+    // §37：解析失败就什么都没有，不补一个 0 分也不偷偷退回没有维度的旧路径
     const onDisk = qualityAt(join(runDir, "quality.json"));
-    expect(onDisk.overall_score).toBe(82);
+    expect(onDisk.overall_score).toBeNull();
+    expect(onDisk.summary).toBeNull();
     expect(onDisk).not.toHaveProperty("dimensions");
     expect(Object.keys(onDisk).sort()).toEqual([
       "accepted", "issues", "overall_score", "suggestions", "summary", "validation_passed",

@@ -23,8 +23,9 @@ import {
   SAMPLE_BEAT_PLAN,
   SAMPLE_COMMERCIAL_REVIEW,
   SAMPLE_CONFIG,
-  SAMPLE_REVIEW,
   SAMPLE_STORY,
+  REVIEW_REPLY,
+  qualityReviewV2Of,
   experimentDeps,
   withTmpDir,
 } from "./helpers/fixtures";
@@ -42,19 +43,17 @@ import type { RunTelemetry } from "@/domain/telemetry";
  */
 
 const PLAN_REPLY = JSON.stringify(SAMPLE_BEAT_PLAN);
-const GOOD_REVIEW_REPLY = JSON.stringify(SAMPLE_REVIEW);
+const GOOD_REVIEW_REPLY = REVIEW_REPLY;
 const COMMERCIAL_REPLY = JSON.stringify(SAMPLE_COMMERCIAL_REVIEW);
 const BEAT_VALIDATION_REPLY = JSON.stringify({
   passed: true,
   issues: [],
   summary: "骨架结构完整：开场、冲突升级、高潮、收束都有，顺序与状态一致。",
 });
-const LOW_REVIEW_REPLY = JSON.stringify({
-  score: 41,
-  summary: "正文太短，冲突没有展开。",
-  strengths: ["开头有画面"],
-  problems: ["长度远低于目标", "高潮缺失"],
-});
+const LOW_REVIEW_REPLY = JSON.stringify(
+  // v2.1.0：四维同分的低分结论——均分正好是 41
+  qualityReviewV2Of(41, ["长度远低于目标", "高潮缺失"]),
+);
 
 /** 长度下限（target_words=5000 → max(300, 750) = 750）之下的正文：触发 TOO_SHORT。 */
 const SHORT_STORY = "陈岚走进派出所，然后又走了。";

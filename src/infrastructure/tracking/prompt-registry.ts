@@ -38,12 +38,16 @@ const PROMPT_FILES: Record<PromptRole, string> = {
 /**
  * 各提示词的版本号。v1.6.0 首次登记，六个都从 1 开始；
  * 之后每次改动对应角色的文案就在这里 +1（摘要会同步变，两者互相印证）。
+ *
+ * v2.1.0：reviewer 换成 Quality Reviewer v2——四维各带 strengths / problems、
+ * 新增结构化 diagnostics、评分锚点写进文案，整体分改由系统按四维均分计算。
+ * 其余五个角色的文案这一版没动。
  */
 export const PROMPT_VERSIONS: Record<PromptRole, string> = {
   planner: "1",
   generator: "1",
   "beat-validator": "1",
-  reviewer: "1",
+  reviewer: "2",
   "commercial-reviewer": "1",
   repairer: "1",
 };

@@ -5,6 +5,7 @@ import type {
   BeatValidationStatus,
 } from "@/domain/beat-validation";
 import { reviewOverallScore, type ReviewResult, type ReviewStatus } from "@/domain/review-result";
+import { legacyReviewOf } from "@/domain/quality-review-v2";
 import type { ValidationResult, ValidationStatus } from "@/domain/validation-result";
 import type { RunContext, RunStatus } from "@/domain/run-context";
 import { createRunContext, transitionStage, failRun } from "@/domain/run-context";
@@ -1100,7 +1101,11 @@ export class GenerationPipeline {
         }),
       );
       try {
-        review = await this.reviewer.review(config, story);
+        // v2.1.0：Reviewer 现在输出 QualityReviewV2Result（四维 + 结构化诊断）。
+        // 落盘与判定用的仍是 v1.x 的 ReviewResult——由 legacyReviewOf 在边界处摊平，
+        // 于是 review.json、RetryPolicy、QualityAssembler 的口径一个字都没变（TASK §27/§28）。
+        const reviewed = await this.reviewer.review(config, story);
+        review = legacyReviewOf(reviewed);
         this.putCheck(rid, attemptNumber, repairNumber, "review.json", review);
         reviewStatus = "completed";
       } catch (e) {

@@ -9,11 +9,11 @@ import { GET as getRunAttempt } from "@/app/api/runs/[run_id]/attempts/[attempt_
 import { repairStory, startRun, type RunOk } from "@/application/generate-service";
 import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
-import type { ReviewResult } from "@/domain/review-result";
+import type { QualityReviewV2Result } from "@/domain/quality-review-v2";
 import type { ValidationResult } from "@/domain/validation-result";
 import type { RepairIssueType, RepairRequest, RepairResult } from "@/domain/repair";
 import { LLMError } from "@/infrastructure/llm/openai-compatible-llm-client";
-import { apiErrorOf, commercialReviewerOf, SAMPLE_BEAT_VALIDATION } from "./helpers/fixtures";
+import { apiErrorOf, commercialReviewerOf, qualityReviewV2Of, SAMPLE_BEAT_VALIDATION } from "./helpers/fixtures";
 
 /**
  * §38/§40/§68 Repair API：POST /api/repair 的手动修订契约 +
@@ -45,12 +45,7 @@ const missingEnding: ValidationResult = {
   passed: false,
   issues: [{ code: "MISSING_ENDING", severity: "error", message: "故事缺少明确结局。" }],
 };
-const review: ReviewResult = {
-  score: 61,
-  summary: "故事整体完整，主线清楚，但中段推进略重复。",
-  strengths: ["开篇冲突建立迅速"],
-  problems: ["中段线索重复"],
-};
+const review: QualityReviewV2Result = qualityReviewV2Of(61, ["中段线索重复"]);
 
 const realCwd = process.cwd();
 let tmp: string | null = null;
@@ -104,7 +99,7 @@ async function runWith(
   retryPolicy: unknown,
   stories: string[],
   validations: ValidationResult[],
-  reviews: ReviewResult[],
+  reviews: QualityReviewV2Result[],
   repairer: ReturnType<typeof scriptedRepairer>,
 ) {
     let g = 0;
@@ -328,7 +323,7 @@ describe("§40 Run 响应与详情里的修复摘要", () => {
       { max_attempts: 2, min_review_score: 70, enable_repair: true, max_repairs_per_attempt: 1 },
       [STORY],
       [missingEnding, passed],
-      [review, { ...review, score: 82 }],
+      [review, qualityReviewV2Of(82)],
       rep,
     );
     const runId = String((created.json as RunOk).run_id);
@@ -351,7 +346,7 @@ describe("§40 Run 响应与详情里的修复摘要", () => {
       { max_attempts: 1, min_review_score: 70, enable_repair: true, max_repairs_per_attempt: 1 },
       [STORY],
       [missingEnding, passed],
-      [review, { ...review, score: 82 }],
+      [review, qualityReviewV2Of(82)],
       rep,
     );
     const runId = String((created.json as RunOk).run_id);

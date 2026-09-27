@@ -49,7 +49,8 @@ import {
   SAMPLE_BEAT_VALIDATION,
   SAMPLE_COMMERCIAL_REVIEW,
   SAMPLE_CONFIG,
-  SAMPLE_REVIEW,
+  SAMPLE_QUALITY_REVIEW_V2,
+  REVIEW_REPLY,
   SAMPLE_STORY,
   SAMPLE_VALIDATION,
   FakeLLM,
@@ -348,21 +349,21 @@ describe("v1.0.0 API 冻结 — 单步入口", () => {
     expect((await jsonOf(res)).error).toMatchObject({ code: "CONFIG_INVALID" });
   });
 
-  it("POST /api/review 成功返回 score/summary/strengths/problems 四字段", async () => {
+  it("POST /api/review 成功返回 score/summary/strengths/problems/dimensions 字段", async () => {
     withTmpDir();
     const { status, json } = await reviewStory(
       { config: SAMPLE_CONFIG, story: SAMPLE_STORY },
-      { reviewer: new BasicReviewer(new FakeLLM([JSON.stringify(SAMPLE_REVIEW)]) as never) },
+      { reviewer: new BasicReviewer(new FakeLLM([REVIEW_REPLY]) as never) },
     );
     expect(status).toBe(200);
-    expect(Object.keys(json as object).sort()).toEqual(["problems", "score", "strengths", "summary"]);
+    expect(Object.keys(json as object).sort()).toEqual(["dimensions", "problems", "score", "strengths", "suggestions", "summary"]);
   });
 
   it("POST /api/review 缺 story 直返 400，且不调用 Reviewer", async () => {
     withTmpDir();
     let called = 0;
     const { status, json } = await reviewStory({ config: SAMPLE_CONFIG }, {
-      reviewer: { review: async () => { called += 1; return SAMPLE_REVIEW; } } as never,
+      reviewer: { review: async () => { called += 1; return SAMPLE_QUALITY_REVIEW_V2; } } as never,
     });
     expect(status).toBe(400);
     expect((json as { error: { message: string } }).error.message).toContain("story is required");
@@ -404,7 +405,7 @@ describe("v1.0.0 API 冻结 — 单步入口", () => {
     // retry_policy 只被三个 run 路由读取，其它路由静默忽略
     const { status } = await reviewStory(
       { config: SAMPLE_CONFIG, story: SAMPLE_STORY, retry_policy: { max_attempts: 99 } },
-      { reviewer: new BasicReviewer(new FakeLLM([JSON.stringify(SAMPLE_REVIEW)]) as never) },
+      { reviewer: new BasicReviewer(new FakeLLM([REVIEW_REPLY]) as never) },
     );
     expect(status).toBe(200);
 
@@ -418,7 +419,7 @@ describe("v1.0.0 API 冻结 — Run 入口", () => {
     withTmpDir();
     const { status, json } = await startRun(
       { config: SAMPLE_CONFIG },
-      runDeps(new FakeLLM([JSON.stringify(SAMPLE_BEAT_PLAN), SAMPLE_STORY, JSON.stringify(SAMPLE_REVIEW)])),
+      runDeps(new FakeLLM([JSON.stringify(SAMPLE_BEAT_PLAN), SAMPLE_STORY, REVIEW_REPLY])),
     );
     expect(status).toBe(200);
     const run = json as unknown as Record<string, unknown>;
@@ -457,7 +458,7 @@ describe("v1.0.0 API 冻结 — Run 入口", () => {
     withTmpDir();
     const ok = await startRun(
       { config: SAMPLE_CONFIG, retry_policy: { max_attempts: 5, min_review_score: 100, max_repairs_per_attempt: 0 } },
-      runDeps(new FakeLLM([JSON.stringify(SAMPLE_BEAT_PLAN), SAMPLE_STORY, JSON.stringify(SAMPLE_REVIEW)])),
+      runDeps(new FakeLLM([JSON.stringify(SAMPLE_BEAT_PLAN), SAMPLE_STORY, REVIEW_REPLY])),
     );
     expect(ok.status).toBe(200);
     const run = ok.json as unknown as Record<string, unknown>;
@@ -492,7 +493,7 @@ describe("v1.0.0 API 冻结 — Run 入口", () => {
     withTmpDir();
     const created = await startRun(
       { config: SAMPLE_CONFIG },
-      runDeps(new FakeLLM([JSON.stringify(SAMPLE_BEAT_PLAN), SAMPLE_STORY, JSON.stringify(SAMPLE_REVIEW)])),
+      runDeps(new FakeLLM([JSON.stringify(SAMPLE_BEAT_PLAN), SAMPLE_STORY, REVIEW_REPLY])),
     );
     const runId = (created.json as { run_id: string }).run_id;
     const res = await getRunDetail(get(`api/runs/${runId}`), { params: Promise.resolve({ run_id: runId }) } as never);
@@ -562,7 +563,7 @@ describe("v1.0.0 API 冻结 — Run 入口", () => {
     withTmpDir();
     const created = await startRun(
       { config: SAMPLE_CONFIG },
-      runDeps(new FakeLLM([JSON.stringify(SAMPLE_BEAT_PLAN), SAMPLE_STORY, JSON.stringify(SAMPLE_REVIEW)])),
+      runDeps(new FakeLLM([JSON.stringify(SAMPLE_BEAT_PLAN), SAMPLE_STORY, REVIEW_REPLY])),
     );
     const runId = (created.json as { run_id: string }).run_id;
     const res = await getRunAttemptDetail(get(`api/runs/${runId}/attempts/1`), {
@@ -604,7 +605,7 @@ describe("v1.0.0 API 冻结 — Run 入口", () => {
 
     const created = await startRun(
       { config: SAMPLE_CONFIG },
-      runDeps(new FakeLLM([JSON.stringify(SAMPLE_BEAT_PLAN), SAMPLE_STORY, JSON.stringify(SAMPLE_REVIEW)])),
+      runDeps(new FakeLLM([JSON.stringify(SAMPLE_BEAT_PLAN), SAMPLE_STORY, REVIEW_REPLY])),
     );
     const runId = (created.json as { run_id: string }).run_id;
     const attempt = await getRunAttempt(runId, 99, new ArtifactStore());

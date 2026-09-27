@@ -11,7 +11,7 @@ import { FailureAnalyzer } from "@/analysis/failure-analyzer";
 import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
 import type { BeatValidationResult } from "@/domain/beat-validation";
-import type { ReviewResult } from "@/domain/review-result";
+import type { QualityReviewV2Result } from "@/domain/quality-review-v2";
 import type { ValidationResult } from "@/domain/validation-result";
 import type { CommercialReviewResult } from "@/domain/commercial-review";
 import type { RepairRequest, RepairResult } from "@/domain/repair";
@@ -52,11 +52,16 @@ const plan: BeatPlan = validateBeatPlan({
   ],
 });
 
-const review: ReviewResult = {
+const reviewV2: QualityReviewV2Result = {
   score: 74,
   summary: "故事整体完整，主线清楚。",
-  strengths: ["开篇冲突建立迅速"],
-  problems: ["中段线索重复"],
+  dimensions: {
+    coherence: { score: 74, summary: "连贯。", strengths: ["强"], problems: [] },
+    narrative: { score: 74, summary: "叙事。", strengths: ["强"], problems: [] },
+    character: { score: 74, summary: "人物。", strengths: ["强"], problems: [] },
+    causality: { score: 74, summary: "因果。", strengths: ["强"], problems: [] },
+  },
+  diagnostics: [],
 };
 
 const STORY = `陈岚推开派出所的玻璃门，${"雨水顺着屋檐砸在台阶上。".repeat(80)}`;
@@ -107,7 +112,7 @@ function withTmpDir(): string {
 interface Components {
   generator: { generate: () => Promise<string> };
   validator: { validate: () => Promise<ValidationResult> };
-  reviewer: { review: () => Promise<ReviewResult> };
+  reviewer: { review: () => Promise<QualityReviewV2Result> };
   beatValidator?: { validate: () => Promise<BeatValidationResult> };
   commercialReviewer?: { review: () => Promise<CommercialReviewResult> };
   repairer?: { repair: (r: RepairRequest) => Promise<RepairResult> };
@@ -162,7 +167,7 @@ function happy(patch: Partial<Components> = {}): Components {
   return {
     generator: { generate: async () => STORY },
     validator: { validate: async () => OK },
-    reviewer: { review: async () => review },
+    reviewer: { review: async () => reviewV2 },
     ...patch,
   };
 }

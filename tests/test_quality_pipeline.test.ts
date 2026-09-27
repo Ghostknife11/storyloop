@@ -11,6 +11,7 @@ import { BasicReviewer } from "@/engine/basic-reviewer";
 import { StoryRepairer } from "@/engine/story-repairer";
 import { RepairStrategy } from "@/engine/repair-strategy";
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "@/engine/retry-policy";
+import type { QualityReviewV2Result } from "@/domain/quality-review-v2";
 import type { ReviewResult } from "@/domain/review-result";
 import type { ValidationResult } from "@/domain/validation-result";
 import { qualityResultOf, type QualityResult } from "@/domain/quality";
@@ -34,18 +35,37 @@ import {
  */
 
 const PLAN_REPLY = JSON.stringify(SAMPLE_BEAT_PLAN);
+/** v2.1.0 Reviewer v2 回复：四维均分 (84+82+80+82)/4 = 82，问题都在诊断里。 */
 const GOOD_REVIEW = JSON.stringify({
-  score: 82,
+  dimensions: {
+    coherence: { score: 84, summary: "设定与称呼前后一致。", strengths: ["称呼统一"], problems: [] },
+    narrative: { score: 82, summary: "起承转合完整，节奏紧凑。", strengths: ["开场三分钟失踪写得干净"], problems: [] },
+    character: { score: 80, summary: "主角目标清晰，动机一贯。", strengths: ["主角目标明确"], problems: [] },
+    causality: { score: 82, summary: "事件推进都有前因。", strengths: ["主线因果成立"], problems: [] },
+  },
+  diagnostics: [
+    {
+      category: "repetition",
+      severity: "info",
+      target: "middle",
+      message: "中段两场戏功能略有重复",
+      suggestion: "压缩重复线索，让中段事件承担新的推进功能。",
+    },
+  ],
   summary: "节奏紧凑，悬念保持到尾。",
-  strengths: ["开场三分钟失踪写得干净"],
-  problems: [],
-  suggestions: ["压缩重复线索，让中段事件承担新的推进功能。"],
 });
+/** 四维均分 (40+42+41+41)/4 = 41，且叙事维度带一条「高潮缺失」。 */
 const LOW_REVIEW = JSON.stringify({
-  score: 41,
+  dimensions: {
+    coherence: { score: 40, summary: "后段称呼前后不一致。", strengths: [], problems: ["高潮缺失"] },
+    narrative: { score: 42, summary: "起承转合缺高潮。", strengths: [], problems: [] },
+    character: { score: 41, summary: "主角中途换了目标。", strengths: [], problems: [] },
+    causality: { score: 41, summary: "配角的反水没有铺垫。", strengths: [], problems: [] },
+  },
+  diagnostics: [
+    { category: "weak_climax", severity: "error", target: "ending", message: "高潮冲突没有展开" },
+  ],
   summary: "高潮冲突没有展开。",
-  strengths: ["开篇有画面感"],
-  problems: ["高潮缺失"],
 });
 
 function pipelineWith(
@@ -91,10 +111,12 @@ describe("§54 Happy Path：一次装配，两份落盘", () => {
     expect(qualityAt(join(runDir, "quality.json"))).toEqual(result.quality);
     expect(qualityAt(join(runDir, "attempts", "01", "quality.json"))).toEqual(result.quality);
 
-    // UTF-8 JSON，键集固定（没有维度时与 v1.2.0 逐字一致）；与其它产物同一套两空格缩进
+    // UTF-8 JSON，键集固定（v2.1.0 起维度恒存在：review.json 摊平时总带四维）；
+    // 与其它产物同一套两空格缩进
     expect(readFileSync(join(runDir, "quality.json"), "utf8")).toBe(JSON.stringify(result.quality, null, 2));
     expect(Object.keys(result.quality).sort()).toEqual([
-      "accepted", "issues", "overall_score", "suggestions", "summary", "validation_passed",
+      "accepted", "dimensions", "issues", "overall_score", "suggestions", "summary",
+      "validation_passed",
     ]);
 
     // metadata 与快照同口径（§28/§29：不复用 quality_status）
@@ -231,7 +253,7 @@ describe("§7/§12 组件自身失败时不伪造结论", () => {
   it("Reviewer 抛异常：overall_score = null、summary = null，Run 仍 completed", async () => {
     const dir = withTmpDir();
     const llm = new FakeLLM([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW]);
-    const broken = { review: (): ReviewResult => { throw new Error("reviewer boom"); } };
+    const broken = { review: (): QualityReviewV2Result => { throw new Error("reviewer boom"); } };
     const result = await pipelineWith(llm, new ArtifactStore(), {
       ...DEFAULT_RETRY_POLICY,
       enable_repair: false,

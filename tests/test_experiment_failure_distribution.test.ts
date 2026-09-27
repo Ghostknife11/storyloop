@@ -10,7 +10,7 @@ import { LLMError, LLMRequestError } from "@/infrastructure/llm/openai-compatibl
 import { summarizeExperiment } from "@/analysis/experiment-summary";
 import { failureDistributionText, resultRowsOf } from "@/interface/experiment-view";
 import type { ExperimentDetailApi } from "@/interface/api";
-import { SAMPLE_BEAT_PLAN, experimentDeps, withTmpDir } from "./helpers/fixtures";
+import { SAMPLE_BEAT_PLAN, experimentDeps, qualityReviewV2Of, withTmpDir } from "./helpers/fixtures";
 import type { StoryConfig } from "@/domain/story-config";
 
 /**
@@ -41,20 +41,9 @@ const BEAT_VALIDATION = JSON.stringify({
   summary: "骨架结构完整：开场、高潮都有。",
 });
 
-/** 结构审阅：总分即维度分，四维 90/90/90/90 → overall 90。 */
+/** 结构审阅：四维同分，确定性均分正好等于 score。 */
 function review(score: number): string {
-  return JSON.stringify({
-    score,
-    summary: "总结。",
-    strengths: ["强"],
-    problems: ["弱"],
-    dimensions: {
-      coherence: { score, summary: "连贯。" },
-      narrative: { score, summary: "叙事。" },
-      character: { score, summary: "人物。" },
-      causality: { score, summary: "因果。" },
-    },
-  });
+  return JSON.stringify(qualityReviewV2Of(score, ["弱"]));
 }
 
 function commercial(score: number): string {

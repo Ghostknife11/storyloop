@@ -16,6 +16,7 @@ import {
   SAMPLE_BEAT_PLAN,
   SAMPLE_CONFIG,
   SAMPLE_STORY,
+  qualityReviewV2Of,
   FakeLLM,
   withTmpDir,
 } from "./helpers/fixtures";
@@ -36,18 +37,8 @@ import {
  */
 
 const PLAN_REPLY = JSON.stringify(SAMPLE_BEAT_PLAN);
-const GOOD_REVIEW = JSON.stringify({
-  score: 82,
-  summary: "节奏紧凑，悬念保持到尾。",
-  strengths: ["开场三分钟失踪写得干净"],
-  problems: [],
-});
-const LOW_REVIEW = JSON.stringify({
-  score: 41,
-  summary: "正文冲突没有展开。",
-  strengths: ["开头有画面"],
-  problems: ["高潮缺失"],
-});
+const GOOD_REVIEW = JSON.stringify(qualityReviewV2Of(82));
+const LOW_REVIEW = JSON.stringify(qualityReviewV2Of(41, ["高潮缺失"]));
 
 const COMMERCIAL_HIGH = JSON.stringify({
   score: 88,

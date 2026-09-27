@@ -12,7 +12,8 @@ import type { ReviewResult } from "@/domain/review-result";
 import type { ValidationResult } from "@/domain/validation-result";
 import type { RepairRequest, RepairResult } from "@/domain/repair";
 import type { FailureAnalysisResult, FailureEvidence } from "@/domain/failure-analysis";
-import { repoRoot } from "./helpers/fixtures";
+import { legacyReviewOf, type QualityReviewV2Result } from "@/domain/quality-review-v2";
+import { qualityReviewV2Of, repoRoot } from "./helpers/fixtures";
 
 /**
  * v1.9.0 §48/§51：失败分析这份产物自己站不站得住。
@@ -43,12 +44,8 @@ const plan: BeatPlan = validateBeatPlan({
   ],
 });
 
-const review: ReviewResult = {
-  score: 74,
-  summary: "故事整体完整，主线清楚。",
-  strengths: ["开篇冲突建立迅速"],
-  problems: ["中段线索重复"],
-};
+const reviewV2: QualityReviewV2Result = qualityReviewV2Of(74, ["中段线索重复"]);
+const review: ReviewResult = legacyReviewOf(reviewV2);
 
 const STORY = `陈岚推开派出所的玻璃门，${"雨水顺着屋檐砸在台阶上。".repeat(80)}`;
 const REPAIRED = `修订后：${STORY}`;
@@ -78,7 +75,7 @@ function withTmpDir(): string {
 function pipelineOf(
   gen: { generate: () => Promise<string> },
   val: { validate: () => Promise<ValidationResult> },
-  rev: { review: () => Promise<ReviewResult> },
+  rev: { review: () => Promise<QualityReviewV2Result> },
   policy = DEFAULT_RETRY_POLICY,
   rep?: { repair: (r: RepairRequest) => Promise<RepairResult> },
 ) {
@@ -110,6 +107,16 @@ function fieldExists(runDir: string, evidence: FailureEvidence): boolean {
   const path = join(runDir, evidence.sourceArtifact);
   if (!existsSync(path)) return false;
   const artifact = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+  // §36 薄弱维度：质量结论四维里的某一维分数（分析器不重新评分，只引用）
+  if (
+    evidence.sourceArtifact === "quality.json" &&
+    evidence.sourceField.startsWith("dimensions.") &&
+    evidence.sourceField.endsWith(".score")
+  ) {
+    const key = evidence.sourceField.slice("dimensions.".length, -".score".length);
+    const dimensions = artifact.dimensions as Record<string, { score?: unknown }> | undefined;
+    return typeof dimensions?.[key]?.score === "number";
+  }
   switch (`${evidence.sourceArtifact}:${evidence.sourceField}`) {
     case "metadata.json:attempt_count":
       return typeof artifact.attempt_count === "number";
@@ -140,7 +147,7 @@ describe("v1.9.0 §48 证据指向真实存在的文件与字段", () => {
     const result = await pipelineOf(
       { generate: async () => STORY },
       { validate: async () => TOO_SHORT },
-      { review: async () => review },
+      { review: async () => reviewV2 },
     ).run(config);
     const runDir = join(dir, "runs", result.run_id);
     const analysis = analysisOf(dir, result.run_id);
@@ -171,7 +178,7 @@ describe("v1.9.0 §48 证据指向真实存在的文件与字段", () => {
     const result = await pipelineOf(
       { generate: async () => STORY },
       { validate: async () => TOO_SHORT },
-      { review: async () => review },
+      { review: async () => reviewV2 },
     ).run(config);
     const analysis = analysisOf(dir, result.run_id);
 
@@ -189,7 +196,7 @@ describe("v1.9.0 §48 证据指向真实存在的文件与字段", () => {
     const result = await pipelineOf(
       { generate: async () => STORY },
       { validate: async () => TOO_SHORT },
-      { review: async () => review },
+      { review: async () => reviewV2 },
       { ...DEFAULT_RETRY_POLICY, max_attempts: 1, max_repairs_per_attempt: 1 },
       {
         repair: async (request: RepairRequest): Promise<RepairResult> => ({
@@ -240,7 +247,7 @@ describe("v1.9.0 §51 落盘的分析里没有凭据", () => {
           },
         },
         { validate: async () => ({ passed: true, issues: [] }) },
-        { review: async () => review },
+        { review: async () => reviewV2 },
       ).run(config);
       throw new Error("这次 Run 本该失败");
     } catch (e) {
@@ -271,7 +278,7 @@ describe("v1.9.0 §29 分析自己出错不许拖垮一次成功的 Run", () => 
     const result = await pipelineOf(
       { generate: async () => STORY },
       { validate: async () => ({ passed: true, issues: [] }) },
-      { review: async () => review },
+      { review: async () => reviewV2 },
     ).run(config);
 
     expect(result.status).toBe("completed");
@@ -295,7 +302,7 @@ describe("v1.9.0 §29 分析自己出错不许拖垮一次成功的 Run", () => 
     const result = await pipelineOf(
       { generate: async () => STORY },
       { validate: async () => ({ passed: true, issues: [] }) },
-      { review: async () => review },
+      { review: async () => reviewV2 },
     ).run(config);
     expect(result.status).toBe("completed");
     expect(result.review).toEqual(review);

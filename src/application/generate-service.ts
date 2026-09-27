@@ -19,6 +19,7 @@ import { appSettings } from "@/infrastructure/config/app-config";
 import { errorBody, toApiError, type ApiErrorBody } from "@/application/error-model";
 import { failureAnalyzerFor } from "@/analysis/failure-analysis-service";
 import { reviewOverallScore, type ReviewResult } from "@/domain/review-result";
+import { legacyReviewOf } from "@/domain/quality-review-v2";
 import type { ValidationResult } from "@/domain/validation-result";
 import type { RepairDetail, RepairIssueType, RepairResult, RepairSummary } from "@/domain/repair";
 import {
@@ -418,6 +419,11 @@ export async function reviewStory(body: unknown, deps: RunDeps = {}): Promise<Re
     );
     const review = await reviewer.review(config, story);
 
+    // §27：v2.1.0 起 Reviewer 输出 QualityReviewV2Result（四维 + 结构化诊断），
+    // 但 /api/review 的响应与 review.json 仍是 v1.x 的 ReviewResult 形状——
+    // 在边界处摊平回去，旧客户端读到的字段一个不少。
+    const legacy = legacyReviewOf(review);
+
     // §30：re-review 覆盖当前 review.json（run_id 越界由 ArtifactStore 拦截）
     const runId = typeof raw.run_id === "string" ? raw.run_id.trim() : "";
     if (runId) {
@@ -435,10 +441,10 @@ export async function reviewStory(body: unknown, deps: RunDeps = {}): Promise<Re
           json: errorBody("RUN_NOT_FOUND", `run_id 不存在：${runId}（只能覆盖已存在 Run 的 review.json）`),
         };
       }
-      store.putReview(runId, review);
+      store.putReview(runId, legacy);
     }
 
-    return { status: 200, json: review };
+    return { status: 200, json: legacy };
   } catch (e) {
     const err = toApiError(e);
     logger.error(`review failed (${err.code})`, e);

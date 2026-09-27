@@ -7,9 +7,9 @@ import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
 import { DEFAULT_RETRY_POLICY } from "@/engine/retry-policy";
 import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
 import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
-import type { ReviewResult } from "@/domain/review-result";
+import type { QualityReviewV2Result } from "@/domain/quality-review-v2";
 import type { ValidationResult } from "@/domain/validation-result";
-import { repoVersion } from "./helpers/fixtures";
+import { qualityReviewV2Of, repoVersion } from "./helpers/fixtures";
 
 /**
  * §23/§24/§25 Metadata Schema 收口：run / attempt / repair 三层 metadata 的必备字段、
@@ -42,8 +42,8 @@ const MISSING_ENDING: ValidationResult = {
   issues: [{ code: "MISSING_ENDING", severity: "error", message: "故事缺少明确结局。" }],
 };
 
-function review(score: number): ReviewResult {
-  return { score, summary: "总结。", strengths: ["强"], problems: ["中段线索重复"] };
+function review(score: number): QualityReviewV2Result {
+  return qualityReviewV2Of(score, ["中段线索重复"]);
 }
 
 const realCwd = process.cwd();
@@ -68,7 +68,7 @@ function scriptedValidator(results: ValidationResult[]) {
   return { validate: async () => results[Math.min(i++, results.length - 1)] };
 }
 
-function scriptedReviewer(results: ReviewResult[]) {
+function scriptedReviewer(results: QualityReviewV2Result[]) {
   let i = 0;
   return { review: async () => results[Math.min(i++, results.length - 1)] };
 }

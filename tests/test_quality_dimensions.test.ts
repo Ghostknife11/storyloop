@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { QualityAssembler } from "@/engine/quality-assembler";
 import { DEFAULT_RETRY_POLICY, decideRetry } from "@/engine/retry-policy";
-import { parseReviewResult } from "@/engine/review-parser";
+import { parseQualityReviewV2Result } from "@/engine/review-parser";
 import {
   reviewOverallScore,
   validateQualityDimensions,
@@ -52,6 +52,27 @@ const LEGACY_JSON = JSON.stringify({
   summary: "故事整体完整，主线清楚。",
   strengths: ["开篇冲突建立迅速"],
   problems: ["中段线索重复"],
+});
+
+/** v2.1.0 Reviewer v2 的输出：每个维度带 strengths / problems，外加结构化诊断。 */
+const V2_REVIEW_JSON = JSON.stringify({
+  score: 99,
+  dimensions: {
+    coherence: { score: 80, summary: "设定、称呼、时间线前后一致。", strengths: ["称呼统一"], problems: [] },
+    narrative: { score: 76, summary: "起承转合完整，中段节奏偏慢。", strengths: ["结构完整"], problems: ["中段线索重复"] },
+    character: { score: 72, summary: "主角目标清晰，高潮处退让动机交代不足。", strengths: ["目标明确"], problems: [] },
+    causality: { score: 66, summary: "主线因果成立，配角的反水缺少铺垫。", strengths: [], problems: ["配角反水缺少铺垫"] },
+  },
+  diagnostics: [
+    {
+      category: "repetition",
+      severity: "warning",
+      target: "middle",
+      message: "中段两场戏功能重复",
+      suggestion: "压缩重复线索，并让中段事件承担新的推进功能。",
+    },
+  ],
+  summary: "故事整体完整，主线清楚，但中段推进略重复。",
 });
 
 function assemblerInput(review: ReviewResult | null, accepted = true) {
@@ -197,39 +218,54 @@ function zeroHundred(): Record<string, unknown> {
   };
 }
 
-describe("v1.3.0 Review 解析路径（§30/§41）", () => {
-  it("带四维的 JSON → ReviewResult.dimensions", () => {
-    expect(parseReviewResult(REVIEW_JSON).dimensions).toEqual(DIMENSIONS);
+describe("v2.1.0 Quality Reviewer v2 解析路径（§30/§41）", () => {
+  it("带四维 + strengths/problems + 诊断的 JSON → QualityReviewV2Result", () => {
+    const parsed = parseQualityReviewV2Result(V2_REVIEW_JSON);
+    expect(parsed.score).toBe(73.5);
+    expect(parsed.diagnostics).toHaveLength(1);
+    expect(parsed.diagnostics[0].category).toBe("repetition");
+    expect(parsed.diagnostics[0].source).toBe("quality-reviewer");
+    for (const key of QUALITY_DIMENSION_KEYS) {
+      expect(parsed.dimensions[key].strengths.length + parsed.dimensions[key].problems.length)
+        .toBeGreaterThan(0);
+    }
   });
 
   it("markdown code fence + 首尾空白：轻量清理后照常解析", () => {
-    const r = parseReviewResult(`\n\`\`\`json\n${REVIEW_JSON}\n\`\`\`\n`);
-    expect(r.dimensions).toEqual(DIMENSIONS);
+    const r = parseQualityReviewV2Result(`\n\`\`\`json\n${V2_REVIEW_JSON}\n\`\`\`\n`);
     expect(r.score).toBe(73.5);
+    expect(r.diagnostics).toHaveLength(1);
   });
 
-  it("维度缺一个 → ReviewParseError（不降级成没有维度）", () => {
-    const raw = JSON.parse(REVIEW_JSON) as Record<string, unknown>;
+  it("维度缺一个 → ReviewParseError（不降级成三维结论）", () => {
+    const raw = JSON.parse(V2_REVIEW_JSON) as Record<string, unknown>;
     const partial = { ...(raw.dimensions as Record<string, unknown>) };
     delete partial.character;
-    expect(() => parseReviewResult(JSON.stringify({ ...raw, dimensions: partial })))
-      .toThrow(/dimensions\.character/);
+    expect(() => parseQualityReviewV2Result(JSON.stringify({ ...raw, dimensions: partial })))
+      .toThrow(/dimensions\.character 缺失或不是对象/);
   });
 
   it("维度分越界 / 多维度 → ReviewParseError", () => {
-    const raw = JSON.parse(REVIEW_JSON) as Record<string, unknown>;
+    const raw = JSON.parse(V2_REVIEW_JSON) as Record<string, unknown>;
     const bad = { ...(raw.dimensions as Record<string, unknown>) };
-    bad.coherence = { score: 140, summary: "超分" };
-    expect(() => parseReviewResult(JSON.stringify({ ...raw, dimensions: bad })))
-      .toThrow(/dimensions\.coherence\.score/);
+    bad.coherence = { score: 140, summary: "超分", strengths: [], problems: [] };
+    expect(() => parseQualityReviewV2Result(JSON.stringify({ ...raw, dimensions: bad })))
+      .toThrow(/dimensions\.coherence\.score 必须在 0 ~ 100/);
 
-    const extra = { ...(raw.dimensions as Record<string, unknown>), tension: { score: 90, summary: "x" } };
-    expect(() => parseReviewResult(JSON.stringify({ ...raw, dimensions: extra })))
+    const extra = {
+      ...(raw.dimensions as Record<string, unknown>),
+      tension: { score: 90, summary: "x", strengths: [], problems: [] },
+    };
+    expect(() => parseQualityReviewV2Result(JSON.stringify({ ...raw, dimensions: extra })))
       .toThrow(/未知维度 tension/);
   });
 
-  it("旧格式（没有维度）仍然解析成功", () => {
-    expect(parseReviewResult(LEGACY_JSON).dimensions).toBeUndefined();
+  it("§10 模型自报的整体分被忽略：score 99 也按四维均分 73.5 落", () => {
+    expect(parseQualityReviewV2Result(V2_REVIEW_JSON).score).toBe(73.5);
+  });
+
+  it("旧格式（没有维度）不再解析成功：v2 四个维度一个都不能少", () => {
+    expect(() => parseQualityReviewV2Result(LEGACY_JSON)).toThrow(/dimensions 必须是/);
   });
 });
 
@@ -375,7 +411,7 @@ describe("v1.3.0 重试门槛只认整体分（§19/§23/§40）", () => {
 });
 
 describe("v1.3.0 维度是评价输出，不是行动依据（§24/§26/§28）", () => {
-  it("提示词只要求四个基础维度，不出现商业 / 35 维 / 严重度字样", () => {
+  it("提示词只要求四个基础维度，不出现商业口径与更远期的字段", () => {
     const prompt = readFileSync(join(repoRoot(), "prompts", "reviewer.txt"), "utf8");
     for (const key of QUALITY_DIMENSION_KEYS) expect(prompt).toContain(key);
     expect(prompt).toContain("连贯性");
@@ -384,7 +420,9 @@ describe("v1.3.0 维度是评价输出，不是行动依据（§24/§26/§28）"
     expect(prompt).toMatch(/连贯性管「前后对得上」，因果管「推得动」/);
     // 明确禁止商业口径与更远期的字段
     expect(prompt).toContain("不要用商业价值");
-    for (const forbidden of ["severity", "confidence", "evidence", "attribution"]) {
+    // severity 是 diagnostics 的合法字段（§6 三档语义），但不许出现置信度 / 证据 / 归因
+    expect(prompt).toContain("severity");
+    for (const forbidden of ["confidence", "evidence", "attribution", "35 维"]) {
       expect(prompt.toLowerCase()).not.toContain(forbidden);
     }
     // 不允许模型自己扩维度
