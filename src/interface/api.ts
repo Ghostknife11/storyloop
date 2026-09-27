@@ -969,3 +969,294 @@ function filenameOfDisposition(header: string | null): string {
   }
   return "";
 }
+
+// ---------------------------------------------------------------------------
+// v2.3.0 Benchmark Platform（TASK §83/§84）
+//
+// 名字一律带 Benchmark / Suite 前缀：这里已经有 createExperiment / startRun /
+// postExport 三个「开始一件事」的入口，再来一个 run() 就没人知道它在跑什么了。
+// 界面上也只做「跑一次测量」这一件事，没有「优化」「自适应」这类本版本没有的按钮。
+// ---------------------------------------------------------------------------
+
+/** §83 列表项：一份 Suite 的一个版本。 */
+export interface BenchmarkSuiteItemApi {
+  id: string;
+  version: string;
+  name: string;
+  description?: string;
+  caseCount: number;
+  repetitions: number;
+  plannedSamples: number;
+  suiteDigest: string;
+  createdAt: string;
+  source: {
+    origin: "original" | "public-domain" | "licensed" | "user-provided";
+    license: string;
+    note?: string;
+  };
+}
+
+/** §83 一份 Suite 全文（题面 + 协议 + 来源）。 */
+export interface BenchmarkSuiteApi {
+  schemaVersion: string;
+  id: string;
+  version: string;
+  name: string;
+  description?: string;
+  cases: ReadonlyArray<{
+    id: string;
+    title: string;
+    genre: string;
+    storyConfig: StoryConfig;
+    beatPlanMode: "regenerate" | "fixed";
+    beatPlanRef?: string;
+    tags?: string[];
+    source?: string;
+  }>;
+  protocol: {
+    repetitions: number;
+    plannerMode: "normal" | "fixed-plan";
+    acceptedMetrics: string[];
+    failureHandling: "include" | "exclude-with-count";
+    passThreshold?: number;
+  };
+  source: BenchmarkSuiteItemApi["source"];
+  createdAt: string;
+}
+
+/** §83 执行列表项：概览与聚合，不带样本明细。 */
+export interface BenchmarkExecutionItemApi {
+  id: string;
+  suiteId: string;
+  suiteVersion: string;
+  suiteName: string | null;
+  status: "pending" | "running" | "completed" | "partial" | "failed";
+  label: string | null;
+  projectVersion: string;
+  commit: string | null;
+  startedAt: string;
+  completedAt: string | null;
+  plannedSamples: number;
+  completedSamples: number;
+  failedSamples: number;
+  aggregate: BenchmarkAggregateApi | null;
+  isBaseline: boolean;
+}
+
+/** §22 一条样本：身份 + 二十二个指标 + 失败原因。没有正文、没有提示词。 */
+export interface BenchmarkSampleApi {
+  caseId: string;
+  repetition: number;
+  runId: string | null;
+  status: "completed" | "failed";
+  metrics: Record<string, number | null>;
+  failure: string | null;
+  startedAt: string;
+  completedAt: string;
+}
+
+/** §31 一个指标的汇总：样本数 + 均值 + 极值。 */
+export interface BenchmarkMetricSummaryApi {
+  count: number;
+  mean: number;
+  min: number;
+  max: number;
+}
+
+export interface BenchmarkGroupResultApi {
+  caseCount: number;
+  sampleCount: number;
+  completedSamples: number;
+  failedSamples: number;
+  metrics: Record<string, BenchmarkMetricSummaryApi>;
+}
+
+export interface BenchmarkAggregateApi {
+  totalSamples: number;
+  completedSamples: number;
+  failedSamples: number;
+  metrics: Record<string, BenchmarkMetricSummaryApi>;
+  byGenre?: Record<string, BenchmarkGroupResultApi>;
+  byTag?: Record<string, BenchmarkGroupResultApi>;
+  failureCategories: Record<string, number>;
+  failureStages: Record<string, number>;
+  pass: { threshold: number; passed: number; failed: number; unmeasured: number } | null;
+}
+
+/** §83 执行详情：执行 + 引用的 Suite + 可选的比较。 */
+export interface BenchmarkExecutionDetailApi {
+  execution: {
+    schemaVersion: string;
+    id: string;
+    suiteId: string;
+    suiteVersion: string;
+    status: BenchmarkExecutionItemApi["status"];    snapshot: {
+      suiteId: string;
+      suiteVersion: string;
+      suiteDigest: string;
+      protocol: BenchmarkSuiteApi["protocol"];
+      protocolDigest: string;
+      projectVersion: string;
+      commit: string | null;
+      models: Record<string, { provider?: string; model: string; baseUrlClass: string }> | null;
+      prompts: Array<{ role: string; version: string; digest?: string }> | null;
+      parameters: Record<string, unknown> | null;
+      caseIds: string[];
+      repetitions: number;
+      plannedSamples: number;
+      label: string | null;
+      startedAt: string;
+    };
+    samples: BenchmarkSampleApi[];
+    aggregate: BenchmarkAggregateApi | null;
+    startedAt: string;
+    completedAt: string | null;
+  };
+  suite: BenchmarkSuiteApi | null;
+  comparison: BenchmarkComparisonApi | null;
+  /** §93 这次执行是否被标为基线。只是会话期标签，不影响任何数字。 */
+  isBaseline: boolean;
+}
+
+/** §59 比较的一行：两侧均值、差值与相对差值。 */
+export interface BenchmarkComparisonApi {
+  base: { benchmarkId: string; suiteId: string; suiteVersion: string; projectVersion: string; startedAt: string };
+  target: { benchmarkId: string; suiteId: string; suiteVersion: string; projectVersion: string; startedAt: string };
+  rows: Array<{
+    metric: string;
+    label: string;
+    unit: string;
+    baseMean: number | null;
+    targetMean: number | null;
+    baseCount: number;
+    targetCount: number;
+    delta: number | null;
+    deltaPercent: number | null;
+  }>;
+  failureRate: { baseMean: number | null; targetMean: number | null; delta: number | null; deltaPercent: number | null };
+  caveat: string;
+}
+
+/** §91 历史图上的一个点。 */
+export interface BenchmarkHistoryPointApi {
+  id: string;
+  label: string | null;
+  suiteId: string;
+  suiteVersion: string;
+  status: BenchmarkExecutionItemApi["status"];
+  startedAt: string;
+  projectVersion: string;
+  commit: string | null;
+  overallQuality: number | null;
+  commercialOverall: number | null;
+  failureRate: number | null;
+  durationMs: number | null;
+}
+
+/** GET /api/benchmarks/suites：Suite 列表。 */
+export async function fetchBenchmarkSuites(): Promise<BenchmarkSuiteItemApi[]> {
+  const data = (await requestJson("/api/benchmarks/suites", undefined, "读取 Benchmark Suite 失败")) as {
+    suites?: unknown;
+  };
+  return Array.isArray(data.suites) ? (data.suites as BenchmarkSuiteItemApi[]) : [];
+}
+
+/** GET /api/benchmarks/suites/<id>：一份 Suite 全文；version 省略取最新一版。 */
+export async function fetchBenchmarkSuite(suiteId: string, suiteVersion?: string): Promise<BenchmarkSuiteApi> {
+  const query = suiteVersion ? `?version=${encodeURIComponent(suiteVersion)}` : "";
+  return (await requestJson(
+    `/api/benchmarks/suites/${encodeURIComponent(suiteId)}${query}`,
+    undefined,
+    "读取 Suite 失败",
+  )) as BenchmarkSuiteApi;
+}
+
+/**
+ * POST /api/benchmarks/executions：跑完一次执行。
+ *
+ * `allowLargeBenchmark` 是界面上唯一一个「我确认要多花钱」的开关：样本数超过 30
+ * 而不勾它，服务端当场 409，一个 LLM 请求都不发（TASK §42）。
+ */
+export async function startBenchmarkRun(payload: {
+  suiteId: string;
+  suiteVersion?: string;
+  label?: string;
+  allowLargeBenchmark?: boolean;
+}): Promise<BenchmarkExecutionDetailApi["execution"]> {
+  return (await requestJson(
+    "/api/benchmarks/executions",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+    "执行 Benchmark 失败",
+  )) as BenchmarkExecutionDetailApi["execution"];
+}
+
+/** GET /api/benchmarks/executions：执行列表；suiteId 给了就只看那一份。 */
+export async function fetchBenchmarkExecutions(suiteId?: string): Promise<BenchmarkExecutionItemApi[]> {
+  const query = suiteId ? `?suiteId=${encodeURIComponent(suiteId)}` : "";
+  const data = (await requestJson(`/api/benchmarks/executions${query}`, undefined, "读取执行列表失败")) as {
+    executions?: unknown;
+  };
+  return Array.isArray(data.executions) ? (data.executions as BenchmarkExecutionItemApi[]) : [];
+}
+
+/** GET /api/benchmarks/executions/<id>：详情；compareWith 给了就顺带返回逐指标比较。 */
+export async function fetchBenchmarkExecution(
+  benchmarkId: string,
+  compareWith?: string | null,
+): Promise<BenchmarkExecutionDetailApi> {
+  const query = compareWith ? `?compare=${encodeURIComponent(compareWith)}` : "";
+  return (await requestJson(
+    `/api/benchmarks/executions/${encodeURIComponent(benchmarkId)}${query}`,
+    undefined,
+    "读取执行详情失败",
+  )) as BenchmarkExecutionDetailApi;
+}
+
+/** GET /api/benchmarks/history：历史图取数（只有真实保存过的执行才进得来）。 */
+export async function fetchBenchmarkHistory(suiteId?: string): Promise<BenchmarkHistoryPointApi[]> {
+  const query = suiteId ? `?suiteId=${encodeURIComponent(suiteId)}` : "";
+  const data = (await requestJson(`/api/benchmarks/history${query}`, undefined, "读取历史失败")) as {
+    points?: unknown;
+  };
+  return Array.isArray(data.points) ? (data.points as BenchmarkHistoryPointApi[]) : [];
+}
+
+/** §93 标记 / 取消标记 Baseline：会话期标签，刷新就忘，所以按钮上写得明明白白。 */
+export async function postBenchmarkBaseline(benchmarkId: string, isBaseline: boolean): Promise<boolean> {
+  const data = (await requestJson(
+    `/api/benchmarks/executions/${encodeURIComponent(benchmarkId)}/baseline`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ isBaseline }),
+    },
+    "标记基线失败",
+  )) as { isBaseline?: unknown };
+  return data.isBaseline === true;
+}
+
+/** §64 GET /api/benchmarks/executions/<id>/export：把 JSON / CSV 取回来交给浏览器下载。 */
+export async function downloadBenchmarkExport(
+  benchmarkId: string,
+  format: "json" | "csv",
+  fallbackName: string,
+): Promise<void> {
+  const res = await requestBinary(
+    `/api/benchmarks/executions/${encodeURIComponent(benchmarkId)}/export?format=${format}`,
+    "下载 Benchmark 导出失败",
+  );
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filenameOfDisposition(res.headers.get("content-disposition")) || fallbackName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // 立刻 revoke 会让个别浏览器取消下载，所以延后一次事件循环
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}

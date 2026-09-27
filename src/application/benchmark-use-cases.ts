@@ -240,6 +240,13 @@ export interface BenchmarkExecutionDetail {
   suite: BenchmarkSuite | null;
   /** 请求带了 compare=<baseId> 时才有：与另一次执行的逐指标比较。 */
   comparison: BenchmarkComparison | null;
+  /**
+   * §93 这一次执行是不是被标成了 baseline。
+   *
+   * 挂在视图上而不是执行上：执行落盘后不可改（§37），而「哪一次算基线」
+   * 是运行期标签。界面上据此显示「本次会话的基线」，不做成永久状态。
+   */
+  isBaseline: boolean;
 }
 
 /** GET /api/benchmarks/executions/:id：执行三件套 + 可选的与基线比较。 */
@@ -259,7 +266,7 @@ export async function getBenchmarkExecution(
       comparison = compareBenchmarkExecutions(base, execution);
     }
   }
-  return { execution, suite, comparison };
+  return { execution, suite, comparison, isBaseline: isBenchmarkBaseline(benchmarkId) };
 }
 
 /** §91 历史图的取数：把若干次执行的关键数字摊平成点序列。 */

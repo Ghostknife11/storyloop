@@ -12,6 +12,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   FlaskConical,
   FolderOpen,
+  Gauge,
   Info,
   PenLine,
   Settings,
@@ -31,6 +32,9 @@ const NAV = [
   // v2.2.0：项目工作区。一个项目 = 一堆 Run + 若干可编辑可导出的稿件；
   // 没有「推荐 / 优化 / 协作」这类本版本没有的能力，导航里也就不必留位置
   { href: "/workspace", label: "Workspace", description: "项目与稿件", icon: FolderOpen },
+  // v2.3.0：Benchmark 平台。它只测量、不控制——导航里也只有「测量」这一件事，
+  // 没有「优化」「自适应」这类本版本没有的能力（TASK §81/§82）
+  { href: "/benchmarks", label: "Benchmarks", description: "固定套件与执行历史", icon: Gauge },
   { href: "/settings", label: "Settings", description: "模型与参数", icon: Settings },
   { href: "/about", label: "About", description: "版本与许可", icon: Info },
 ];

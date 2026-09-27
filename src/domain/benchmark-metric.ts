@@ -34,6 +34,20 @@ export type BenchmarkMetricSource =
   | "failure-analysis"
   | "run-metadata";
 
+/**
+ * 指标分组：界面（仪表盘分页 / 图表分区）与文档按同一份分组摆数字。
+ * 分组只决定「摆在哪」，不参与任何计算，也不引入新指标。
+ */
+export type BenchmarkMetricGroup = "quality" | "commercial" | "reliability" | "failure" | "efficiency";
+
+export const BENCHMARK_METRIC_GROUP_LABELS: Record<BenchmarkMetricGroup, string> = {
+  quality: "质量",
+  commercial: "商业",
+  reliability: "可靠性",
+  failure: "失败",
+  efficiency: "效率",
+};
+
 export interface BenchmarkMetricDefinition {
   key: string;
   /** 中文标签：仪表盘、对比表、CSV 说明共用。 */
@@ -45,6 +59,7 @@ export interface BenchmarkMetricDefinition {
   source: BenchmarkMetricSource;
   /** 这个指标是什么意思——文档与 UI 的 tooltip 用同一句。 */
   definition: string;
+  group: BenchmarkMetricGroup;
 }
 
 /**
@@ -63,6 +78,7 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     missingValue: "null",
     source: "quality-stack",
     definition: "四维质量分的确定性均分（Co/N/C/Ca），取自样本自己的 Quality Stack 结论",
+    group: "quality",
   },
   {
     key: "coherence",
@@ -72,6 +88,7 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     missingValue: "null",
     source: "quality-stack",
     definition: "设定、称呼、时间线前后是否一致",
+    group: "quality",
   },
   {
     key: "narrative",
@@ -81,6 +98,7 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     missingValue: "null",
     source: "quality-stack",
     definition: "叙事结构与节奏：起承转合是否完整、详略是否得当",
+    group: "quality",
   },
   {
     key: "character",
@@ -90,6 +108,7 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     missingValue: "null",
     source: "quality-stack",
     definition: "人物一致性与动机：言行是否符合其目标与处境",
+    group: "quality",
   },
   {
     key: "causality",
@@ -99,6 +118,7 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     missingValue: "null",
     source: "quality-stack",
     definition: "因果链：事件推进是否有清楚的前因后果",
+    group: "quality",
   },
   // ---- 商业可读性：同样只读已有结论 ----
   {
@@ -109,6 +129,7 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     missingValue: "null",
     source: "quality-stack",
     definition: "四个商业维度（H/P/E/Pf）的确定性均分",
+    group: "commercial",
   },
   {
     key: "hook",
@@ -118,6 +139,7 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     missingValue: "null",
     source: "quality-stack",
     definition: "开局钩子的强度",
+    group: "commercial",
   },
   {
     key: "pacing",
@@ -127,6 +149,7 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     missingValue: "null",
     source: "quality-stack",
     definition: "叙事节奏与信息密度",
+    group: "commercial",
   },
   {
     key: "engagement",
@@ -136,6 +159,7 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     missingValue: "null",
     source: "quality-stack",
     definition: "读者代入与追更意愿",
+    group: "commercial",
   },
   {
     key: "payoff",
@@ -145,6 +169,7 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     missingValue: "null",
     source: "quality-stack",
     definition: "承诺与兑现的完成度",
+    group: "commercial",
   },
   // ---- 可靠性：全部由 Run 元数据与结构校验结论确定性算出 ----
   {
@@ -155,6 +180,7 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     missingValue: "null",
     source: "run-metadata",
     definition: "跑出正文校验结论的样本里通过的比例；一步都没跑到的样本不计入分母",
+    group: "reliability",
   },
   {
     key: "beat_validation_pass_rate",
@@ -164,6 +190,7 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     missingValue: "null",
     source: "run-metadata",
     definition: "跑了骨架校验的样本里通过的比例；没接 BeatValidator 的部署一次都没跑，整体为 null",
+    group: "reliability",
   },
   {
     key: "acceptance_rate",
@@ -173,6 +200,7 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     missingValue: "null",
     source: "run-metadata",
     definition: "入选 Attempt 占已发生 Attempt 的比例：重试越多，这个数越低",
+    group: "reliability",
   },
   {
     key: "retry_count",
@@ -182,6 +210,7 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     missingValue: "null",
     source: "telemetry",
     definition: "每条样本的平均重试次数，取自该样本的 telemetry.json",
+    group: "reliability",
   },
   {
     key: "repair_count",
@@ -191,6 +220,7 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     missingValue: "null",
     source: "telemetry",
     definition: "每条样本的平均修订次数，取自该样本的 telemetry.json",
+    group: "reliability",
   },
   // ---- 失败：只读 Failure Analysis 已经分好的类（§78）----
   {
@@ -201,6 +231,7 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     missingValue: "null",
     source: "run-metadata",
     definition: "整条样本失败的比例（样本失败 = 这条 Run 没跑成）",
+    group: "failure",
   },
   // ---- 效率：只读 Telemetry（§77）----
   {
@@ -211,6 +242,7 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     missingValue: "null",
     source: "telemetry",
     definition: "每条样本的 Run 级耗时均值",
+    group: "efficiency",
   },
   {
     key: "llm_calls",
@@ -220,6 +252,7 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     missingValue: "null",
     source: "telemetry",
     definition: "每条样本的逻辑模型调用次数均值（传输重试算在同一次里）",
+    group: "efficiency",
   },
   {
     key: "input_tokens",
@@ -229,6 +262,7 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     missingValue: "null",
     source: "telemetry",
     definition: "只对 Provider 真给了 usage 的调用求和后求平均；一次都没给就是 null",
+    group: "efficiency",
   },
   {
     key: "output_tokens",
@@ -238,6 +272,7 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     missingValue: "null",
     source: "telemetry",
     definition: "同上，只对已知值求平均",
+    group: "efficiency",
   },
   {
     key: "total_tokens",
@@ -247,6 +282,7 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     missingValue: "null",
     source: "telemetry",
     definition: "同上，只对已知值求平均",
+    group: "efficiency",
   },
   {
     key: "cost_amount",
@@ -256,12 +292,12 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     missingValue: "null",
     source: "telemetry",
     definition: "只有 Provider 返回金额与币种时才可能有值；没有可靠的费用数据就不显示，不估算（§43）",
+    group: "efficiency",
   },
 ] as const satisfies readonly BenchmarkMetricDefinition[];
 
 export type BenchmarkMetricKey = (typeof BENCHMARK_METRIC_DEFINITIONS)[number]["key"];
 
-/** 全部指标键，顺序即呈现顺序。 */
 export const BENCHMARK_METRIC_KEYS: readonly BenchmarkMetricKey[] = BENCHMARK_METRIC_DEFINITIONS.map(
   (definition) => definition.key,
 );
@@ -285,6 +321,19 @@ export function benchmarkMetricKeys(): Set<string> {
 
 /** 全量：Suite 不显式声明时（例如内部工具）可以按这份默认清单认。 */
 export const DEFAULT_ACCEPTED_METRICS: readonly BenchmarkMetricKey[] = BENCHMARK_METRIC_KEYS;
+
+/**
+ * 按注册表顺序分组（质量 → 商业 → 可靠性 → 失败 → 效率）。
+ * 组内顺序就是注册表顺序：界面绝不按数值重排，重排本身就成了排名。
+ */
+export function benchmarkMetricGroups(): { group: BenchmarkMetricGroup; label: string; metrics: BenchmarkMetricDefinition[] }[] {
+  const order: BenchmarkMetricGroup[] = ["quality", "commercial", "reliability", "failure", "efficiency"];
+  return order.map((group) => ({
+    group,
+    label: BENCHMARK_METRIC_GROUP_LABELS[group],
+    metrics: BENCHMARK_METRIC_DEFINITIONS.filter((definition) => definition.group === group),
+  }));
+}
 
 /** 一条样本的指标值：每个声明的键都在，没有数据的就是 null（绝不缺键、绝不补 0）。 */
 export type BenchmarkMetricValues = Record<BenchmarkMetricKey, number | null>;
