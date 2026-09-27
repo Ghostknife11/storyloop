@@ -14,14 +14,14 @@
  *     让 ARTIFACT_WRITE_FAILED 等分支在主链路上成了死码。
  */
 
-import { PipelineError } from "@/core/pipeline";
-import { LLMError, LLMTimeoutError } from "@/lib/llm";
-import { safeText } from "@/lib/safe-text";
+import { PipelineError } from "@/domain/errors";
+import { LLMError, LLMTimeoutError } from "@/domain/llm-errors";
+import { safeText } from "@/domain/safe-text";
 import {
   ExperimentNotFoundError,
   ExperimentStateError,
   ExperimentValidationError,
-} from "@/types/experiment";
+} from "@/domain/experiment";
 
 /** §11 稳定错误码。新增错误必须复用这里的码，不允许每个路由自造字符串。 */
 export const API_ERROR_CODES = [

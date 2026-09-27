@@ -4,13 +4,13 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import { GET as getExperiment } from "@/app/api/experiments/[experiment_id]/route";
-import { runExperimentById } from "@/lib/experiment-service";
-import { ExperimentStore } from "@/storage/experiment-store";
-import { ExperimentStateError } from "@/types/experiment";
+import { runExperimentById } from "@/application/experiment-use-cases";
+import { ExperimentStore } from "@/infrastructure/storage/experiment-store";
+import { ExperimentStateError } from "@/domain/experiment";
 import { SAMPLE_BEAT_PLAN } from "./helpers/fixtures";
-import type { LLMClient } from "@/lib/llm";
-import type { ExperimentDefinition } from "@/types/experiment";
-import type { StoryConfig } from "@/types/story-config";
+import type { LLMClient } from "@/infrastructure/llm/openai-compatible-llm-client";
+import type { ExperimentDefinition } from "@/domain/experiment";
+import type { StoryConfig } from "@/domain/story-config";
 
 /**
  * v1.7.1 补的两道闸门：id 不像目录名 → 404；同一实验同时只跑一条链。

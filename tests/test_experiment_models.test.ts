@@ -9,7 +9,7 @@ import {
   totalRunCount,
   validateExperimentDefinition,
   type ExperimentDefinition,
-} from "@/types/experiment";
+} from "@/domain/experiment";
 import { SAMPLE_BEAT_PLAN, SAMPLE_CONFIG } from "./helpers/fixtures";
 
 /**

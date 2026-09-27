@@ -1,78 +1,82 @@
 import { join } from "node:path";
-import { clientFromEnv, LLMClient } from "@/lib/llm";
-import { assertPublicBaseUrl } from "@/lib/url-guard";
-import { validateStoryConfig } from "@/types/story-config";
-import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
-import { BeatPlanner } from "@/lib/beat-planner";
-import { StoryGenerator } from "@/lib/story-generator";
-import { StoryValidator } from "@/lib/story-validator";
-import { BasicReviewer } from "@/lib/basic-reviewer";
-import { CommercialReviewer } from "@/lib/commercial-reviewer";
-import { BeatValidator } from "@/lib/beat-validator";
-import { StoryRepairer } from "@/lib/story-repairer";
-import { RepairStrategy } from "@/core/repair-strategy";
-import { GenerationPipeline, type GenerationResult } from "@/core/pipeline";
-import type { RunManifest } from "@/types/run-manifest";
-import { ArtifactStore } from "@/storage/artifact-store";
-import { logger } from "@/lib/logger";
-import { appSettings } from "@/lib/app-config";
-import { errorBody, toApiError, type ApiErrorBody } from "@/lib/api-error";
-import { reviewOverallScore, type ReviewResult } from "@/types/review-result";
-import type { ValidationResult } from "@/types/validation-result";
-import type { RepairDetail, RepairIssueType, RepairResult, RepairSummary } from "@/types/repair";
+import { clientFromEnv, LLMClient } from "@/infrastructure/llm/openai-compatible-llm-client";
+import { assertPublicBaseUrl } from "@/infrastructure/security/url-guard";
+import { validateStoryConfig } from "@/domain/story-config";
+import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
+import { BeatPlanner } from "@/engine/beat-planner";
+import { StoryGenerator } from "@/engine/story-generator";
+import { StoryValidator } from "@/engine/story-validator";
+import { BasicReviewer } from "@/engine/basic-reviewer";
+import { CommercialReviewer } from "@/engine/commercial-reviewer";
+import { BeatValidator } from "@/engine/beat-validator";
+import { StoryRepairer } from "@/engine/story-repairer";
+import { RepairStrategy } from "@/engine/repair-strategy";
+import { GenerationPipeline, type GenerationResult } from "@/engine/pipeline";
+import type { RunManifest } from "@/domain/run-manifest";
+import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
+import { logger } from "@/infrastructure/logging/logger";
+import { appSettings } from "@/infrastructure/config/app-config";
+import { errorBody, toApiError, type ApiErrorBody } from "@/application/error-model";
+import { failureAnalyzerFor } from "@/analysis/failure-analysis-service";
+import { reviewOverallScore, type ReviewResult } from "@/domain/review-result";
+import type { ValidationResult } from "@/domain/validation-result";
+import type { RepairDetail, RepairIssueType, RepairResult, RepairSummary } from "@/domain/repair";
 import {
   repairDetail,
   repairRequestOf,
   repairSummary,
   validateRepairIssueType,
   validateRepairRecord,
-} from "@/types/repair";
+} from "@/domain/repair";
 import {
   DEFAULT_RETRY_POLICY,
   RETRY_REASONS,
   validateRetryPolicy,
   type RetryPolicy,
   type RetryReason,
-} from "@/core/retry-policy";
+} from "@/engine/retry-policy";
 import {
   attemptSummary,
   validateAttemptNumber,
   type AttemptSummary,
-} from "@/core/generation-attempt";
-import { QualityAssembler } from "@/core/quality-assembler";
-import { qualityResultOf, type QualityResult } from "@/types/quality";
-import { TelemetryCollector } from "@/core/telemetry-collector";
-import type { RunTelemetry } from "@/types/telemetry";
-import type { QualityStatus } from "@/core/pipeline";
-import { projectVersion as readProjectVersion } from "@/lib/version";
-import type { BeatValidationResult } from "@/types/beat-validation";
+} from "@/engine/generation-attempt";
+import { QualityAssembler } from "@/engine/quality-assembler";
+import { qualityResultOf, type QualityResult } from "@/domain/quality";
+import { TelemetryCollector } from "@/infrastructure/telemetry/telemetry-collector";
+import type { RunTelemetry } from "@/domain/telemetry";
+import type { QualityStatus } from "@/engine/pipeline";
+import { projectVersion as readProjectVersion } from "@/infrastructure/config/version";
+import type { BeatValidationResult } from "@/domain/beat-validation";
 import type {
   CommercialReviewResult,
   CommercialReviewStatus,
-} from "@/types/commercial-review";
-import type { FailureAnalysisResult } from "@/types/failure-analysis";
+} from "@/domain/commercial-review";
+import type { FailureAnalysisResult } from "@/domain/failure-analysis";
 
-export { ConfigValidationError, UnsupportedConfigVersionError } from "@/types/story-config";
-export { LLMError } from "@/lib/llm";
-export { BeatParseError } from "@/lib/beat-parser";
-export { BeatPlanValidationError } from "@/types/beat-plan";
-export { ReviewValidationError } from "@/types/review-result";
-export { ReviewParseError } from "@/lib/review-parser";
-export { ValidationValidationError } from "@/types/validation-result";
-export { RepairValidationError } from "@/types/repair";
-export { BeatValidationValidationError } from "@/types/beat-validation";
-export { BeatValidationParseError } from "@/lib/beat-validation-parser";
-export { CommercialReviewValidationError } from "@/types/commercial-review";
-export { CommercialReviewParseError } from "@/lib/commercial-review-parser";
+export { ConfigValidationError, UnsupportedConfigVersionError } from "@/domain/story-config";
+export { LLMError } from "@/infrastructure/llm/openai-compatible-llm-client";
+export { BeatParseError } from "@/engine/beat-parser";
+export { BeatPlanValidationError } from "@/domain/beat-plan";
+export { ReviewValidationError } from "@/domain/review-result";
+export { ReviewParseError } from "@/engine/review-parser";
+export { ValidationValidationError } from "@/domain/validation-result";
+export { RepairValidationError } from "@/domain/repair";
+export { BeatValidationValidationError } from "@/domain/beat-validation";
+export { BeatValidationParseError } from "@/engine/beat-validation-parser";
+export { CommercialReviewValidationError } from "@/domain/commercial-review";
+export { CommercialReviewParseError } from "@/engine/commercial-review-parser";
 
 /** 模块加载时锁定项目根，避免测试 chdir 后模板路径漂移。 */
 const PROJECT_ROOT = process.cwd();
 
-export interface GenerateRuntime {
-  model?: string;
-  baseUrl?: string;
-  temperature?: number;
-}
+/**
+ * 单次请求的运行时覆盖（非敏感项）。契约在 Domain（§18/§72：Engine 也要用它，
+ * 放在 Application 会把 Engine → Application 的边逼出来，和这里的 Application → Engine
+ * 合成环）。这里 re-export 一次，让既有的 `from "@/application/generate-service"`
+ * 导入继续可用。
+ */
+export type { GenerateRuntime } from "@/domain/run-config";
+import type { GenerateRuntime } from "@/domain/run-config";
 
 /** §26 兼容：旧请求 {title, prompt} → premise + 默认 target_words。 */
 function normalizeLegacy(raw: Record<string, unknown>): Record<string, unknown> {
@@ -197,23 +201,15 @@ export type RunError = ApiErrorBody;
 
 export type RunResult = { status: number; json: RunOk | RunError };
 
-/** §5 依赖注入：测试用 Mock LLM / 假 Planner / 假 Validator / 假 Reviewer，绝不打真实付费 API。 */
-export interface RunDeps {
-  llm?: LLMClient;
-  planner?: BeatPlanner;
-  generator?: StoryGenerator;
-  validator?: StoryValidator;
-  reviewer?: BasicReviewer;
-  repairer?: StoryRepairer;
-  repairStrategy?: RepairStrategy;
-  /** v1.4.0 §5：不注入就没有 BeatPlan 结构校验这一步。 */
-  beatValidator?: BeatValidator;
-  /** v1.5.0 TASK §5：不注入就没有商业可读性审阅这一步，其余流程与 v1.4.0 一致。 */
-  commercialReviewer?: CommercialReviewer;
-  artifactStore?: ArtifactStore;
-  /** v1.8.0：测试可注入自己的采集器；不注入就由 buildPipeline 新建一个。 */
-  telemetry?: TelemetryCollector;
-}
+/**
+ * 用例的依赖注入形状 = Engine 的可注入部件（§5/§72）。
+ *
+ * 契约本体在 src/engine/pipeline-components.ts：Analysis 的实验执行器也要按
+ * 这份依赖跑同一条生成路径，而它不该 import Application。这里按旧名 RunDeps
+ * 再导出一次，让既有的 `from "@/application/generate-service"` 导入继续可用。
+ */
+export type { PipelineComponents as RunDeps } from "@/engine/pipeline-components";
+import type { PipelineComponents as RunDeps, PipelineFactory } from "@/engine/pipeline-components";
 
 /**
  * §23 组装 GenerationPipeline。runs/ 根在调用时解析（而非模块加载时），
@@ -257,11 +253,15 @@ export async function buildPipeline(runtime: GenerateRuntime, deps: RunDeps = {}
     llm,
     join(PROJECT_ROOT, "prompts", "commercial_reviewer.txt"),
   );
+  // v2.0.0 §29/§72：失败分析器是 Analysis 层的实现，Engine 只看得见端口。
+  // 装配点在这里（组合根），于是 Engine → Analysis 那条边消失，
+  // 与 Analysis（实验执行器）→ Application → Engine 那条环一起断掉。
+  const failureAnalyzer = failureAnalyzerFor(artifactStore);
   return new GenerationPipeline(
     planner, generator, validator, reviewer, artifactStore, DEFAULT_RETRY_POLICY,
     repairer, repairStrategy, new QualityAssembler(), readProjectVersion(), beatValidator,
     commercialReviewer, telemetry,
-  );
+  ).withFailureAnalyzer(failureAnalyzer);
 }
 
 function runOkOf(result: GenerationResult): RunOk {
