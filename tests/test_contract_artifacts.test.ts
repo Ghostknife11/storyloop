@@ -1,22 +1,23 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { GenerationPipeline } from "@/core/pipeline";
-import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "@/core/retry-policy";
-import { ArtifactStore } from "@/storage/artifact-store";
-import { BeatPlanner } from "@/lib/beat-planner";
-import { StoryGenerator } from "@/lib/story-generator";
-import { StoryValidator } from "@/lib/story-validator";
-import { BasicReviewer } from "@/lib/basic-reviewer";
-import { StoryRepairer } from "@/lib/story-repairer";
-import { RepairStrategy } from "@/core/repair-strategy";
-import { BeatValidator } from "@/lib/beat-validator";
-import { CommercialReviewer } from "@/lib/commercial-reviewer";
-import { QualityAssembler } from "@/core/quality-assembler";
-import { validateStoryConfig } from "@/types/story-config";
-import { validateBeatValidationResult } from "@/types/beat-validation";
-import { validateCommercialReviewResult, commercialOverallScore } from "@/types/commercial-review";
-import { validateRunTelemetry } from "@/types/telemetry";
+import { GenerationPipeline } from "@/engine/pipeline";
+import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "@/engine/retry-policy";
+import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
+import { BeatPlanner } from "@/engine/beat-planner";
+import { StoryGenerator } from "@/engine/story-generator";
+import { StoryValidator } from "@/engine/story-validator";
+import { BasicReviewer } from "@/engine/basic-reviewer";
+import { StoryRepairer } from "@/engine/story-repairer";
+import { RepairStrategy } from "@/engine/repair-strategy";
+import { BeatValidator } from "@/engine/beat-validator";
+import { CommercialReviewer } from "@/engine/commercial-reviewer";
+import { QualityAssembler } from "@/engine/quality-assembler";
+import { failureAnalyzerFor } from "@/analysis/failure-analysis-service";
+import { validateStoryConfig } from "@/domain/story-config";
+import { validateBeatValidationResult } from "@/domain/beat-validation";
+import { validateCommercialReviewResult, commercialOverallScore } from "@/domain/commercial-review";
+import { validateRunTelemetry } from "@/domain/telemetry";
 import {
   MISSING_ENDING,
   SAMPLE_BEAT_PLAN,
@@ -49,8 +50,11 @@ const LOW_REVIEW = JSON.stringify({ score: 41, summary: "正文冲突没有展�
  *  v1.5.0 追加 commercial-review.json（商业可读性审阅结论）；
  *  v1.6.0 追加 run-manifest.json（这次 Run 的出身清单，与 metadata.json 并列）；
  *  v1.8.0 追加 telemetry.json（执行过程：阶段耗时 / LLM 调用 / usage）；
- *  v1.9.0 追加 failure-analysis.json（对上面这些事实做的确定性失败分类）。 */
-const RUN_FILES = [
+ *  v1.9.0 追加 failure-analysis.json（对上面这些事实做的确定性失败分类）。
+ *
+ * 导出给 tests/test_compat_v1_runs.test.ts 用：v2.0.0 的兼容门禁要拿**同一份**
+ * 冻结清单和现行的落盘结果对账，避免两份清单各说各话。 */
+export const RUN_FILES = [
   "beat-validation.json",
   "beats.json",
   "commercial-review.json",
@@ -145,7 +149,7 @@ function pipelineWith(llm: FakeLLM, store: ArtifactStore, retryPolicy?: RetryPol
     undefined,
     beatValidator,
     commercialReviewer,
-  );
+  ).withFailureAnalyzer(failureAnalyzerFor(store));
 }
 
 function runOf(dir: string, runId: string) {

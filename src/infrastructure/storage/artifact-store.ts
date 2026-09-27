@@ -1,31 +1,34 @@
 import { copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync, renameSync, existsSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
-import type { StoryConfig } from "@/types/story-config";
-import type { BeatPlan } from "@/types/beat-plan";
-import { reviewResultOf, type ReviewResult } from "@/types/review-result";
-import { validationResultOf, type ValidationResult } from "@/types/validation-result";
-import { qualityResultOf, type QualityResult } from "@/types/quality";
-import { beatValidationResultOf, type BeatValidationResult } from "@/types/beat-validation";
+import type { StoryConfig } from "@/domain/story-config";
+import type { BeatPlan } from "@/domain/beat-plan";
+import { reviewResultOf, type ReviewResult } from "@/domain/review-result";
+import { validationResultOf, type ValidationResult } from "@/domain/validation-result";
+import { qualityResultOf, type QualityResult } from "@/domain/quality";
+import { beatValidationResultOf, type BeatValidationResult } from "@/domain/beat-validation";
 import {
   commercialReviewResultOf,
   type CommercialReviewResult,
-} from "@/types/commercial-review";
-import { attemptDirectoryName } from "@/core/generation-attempt";
+} from "@/domain/commercial-review";
+import { attemptDirectoryName } from "@/engine/generation-attempt";
 import {
   repairDirectoryName,
   type RepairMetadata,
   type RepairRequestRecord,
-} from "@/types/repair";
-import type { RunManifest } from "@/types/run-manifest";
-import { runManifestOf } from "@/types/run-manifest";
-import type { RunTelemetry } from "@/types/telemetry";
-import { runTelemetryOf, validateRunTelemetry } from "@/types/telemetry";
-import type { FailureAnalysisResult } from "@/types/failure-analysis";
-import { failureAnalysisOf, validateFailureAnalysis } from "@/types/failure-analysis";
+} from "@/domain/repair";
+import type { RunManifest } from "@/domain/run-manifest";
+import { runManifestOf } from "@/domain/run-manifest";
+import type { RunTelemetry } from "@/domain/telemetry";
+import { runTelemetryOf, validateRunTelemetry } from "@/domain/telemetry";
+import type { FailureAnalysisResult } from "@/domain/failure-analysis";
+import { failureAnalysisOf, validateFailureAnalysis } from "@/domain/failure-analysis";
+import type { ArtifactStore as ArtifactStorePort } from "@/ports/artifact-store";
 
 /**
- * §13/§22 ArtifactStore：只负责创建目录、保存 JSON / Markdown / Metadata、返回路径。
+ * §13/§22 ArtifactStore 的文件系统实现（v2.0.0：Infrastructure / Storage）。
+ * 只负责创建目录、保存 JSON / Markdown / Metadata、返回路径。
  * 不得调用 LLM、分析内容、决定 Pipeline 流程。§22 File System Only。
+ * 端口形状见 src/ports/artifact-store.ts，本类是它的**唯一**生产实现。
  * v0.7.0 新增 Attempt 级产物（§23）与 promote（§28）：不改变既有方法的语义。
  * v0.8.0 新增 Repair 级产物（§29-§32）与 initial_story.md（§30）：同样是纯追加。
  * v1.2.0 新增 quality.json（§20/§21）并把它加入 promote 清单（§57）：同样是纯追加，
@@ -81,7 +84,7 @@ function failureCodeOf(cause: unknown): string {
   return parts.length > 0 ? parts.join(" ") : "未知原因";
 }
 
-export class ArtifactStore {
+export class FileArtifactStore implements ArtifactStorePort {
   private runsRoot: string;
 
   /** runsRoot：Run 目录的根。缺省为 <cwd>/runs（§15）。 */
@@ -578,3 +581,12 @@ export class ArtifactStore {
     return path;
   }
 }
+
+/**
+ * v1.x 导入兼容。`ArtifactStore` 这个名字在 2.0.0 里属于**端口**
+ * （src/ports/artifact-store.ts）；这里把两个名字空间都留出来：
+ * 值空间是本实现（`new ArtifactStore(runsRoot)` 继续可用），
+ * 类型空间是端口接口（`: ArtifactStore` 现在表达的是「按端口说话」）。
+ */
+export const ArtifactStore = FileArtifactStore;
+export type ArtifactStore = ArtifactStorePort;

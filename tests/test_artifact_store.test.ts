@@ -2,11 +2,11 @@ import { mkdirSync, mkdtempSync, existsSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ArtifactStore, ArtifactWriteError } from "@/storage/artifact-store";
-import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
-import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
-import type { ReviewResult } from "@/types/review-result";
-import type { ValidationResult } from "@/types/validation-result";
+import { ArtifactStore, ArtifactWriteError } from "@/infrastructure/storage/artifact-store";
+import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
+import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
+import type { ReviewResult } from "@/domain/review-result";
+import type { ValidationResult } from "@/domain/validation-result";
 
 /**
  * §13/§14/§21/§22/§50/§63 ArtifactStore：只负责落盘，

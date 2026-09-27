@@ -6,7 +6,8 @@ import {
   type ExperimentDefinition,
   type ExperimentResult,
   type ExperimentRunIndex,
-} from "@/types/experiment";
+} from "@/domain/experiment";
+import type { ExperimentRepository } from "@/ports/experiment-store";
 
 /**
  * v1.7.0 实验存储：只管 experiments/<id>/ 下三个 JSON 的读写。
@@ -51,7 +52,7 @@ function failureCodeOf(cause: unknown): string {
   return parts.length > 0 ? parts.join(" ") : "未知原因";
 }
 
-export class ExperimentStore {
+export class ExperimentStore implements ExperimentRepository {
   private experimentsRoot: string;
 
   /**
