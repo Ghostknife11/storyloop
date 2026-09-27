@@ -13,6 +13,74 @@ All notable changes to Storyloop.
 
 ---
 
+## [2.0.0] —— 2026-09-27
+
+2.0.0 是 StoryLoop 第一个架构大版本：把 1.x 累积出来的生成、验证、审阅、修订、实验、
+追踪、观测与失败分析能力重构成稳定、模块化、可扩展的平台架构。
+
+**没有任何用户可见行为变化**：HTTP API、请求响应字段、CLI 参数、错误码、`runs/` 下的
+产物布局与字段、界面全部与 1.9.1 逐字一致。1.0.0 以来写的产物原样可读，不需要迁移，
+也不需要转换层。改变的是仓库内部的依赖方向——谁可以 import 谁。
+
+### Added
+
+- **Six-layer platform architecture**：Domain / Application / Engine / Analysis /
+  Infrastructure / Interface 六层职责明确，依赖方向单向
+  （Interface → Composition → Application → Engine / Analysis → Domain；
+  Infrastructure 实现 Ports 声明的接口）
+- **Explicit Domain, Application, Engine, Analysis, Infrastructure, and Interface
+  boundaries**：每层只做自己那件事，横切能力（配置、日志、遥测、哈希、URL 关卡）
+  收进 Infrastructure
+- **Application use-case layer**（`src/application`）：编排 + 公共门面
+  `StoryLoopService`（plan / generate / generateFromPlan / previewPrompt / validate /
+  validateBeats / review / reviewCommercial / repair / createExperiment /
+  listExperiments / getExperiment / runExperiment / getRun / version）
+- **Infrastructure ports and adapters**（`src/ports` + `src/infrastructure`）：
+  `LLMClient` / `RunRepository` / `ArtifactStore` / `ExperimentRepository` / `Logger` /
+  `ProviderProbe` / `FailureAnalyzer` 七个端口与它们的实现
+- **Central composition root**（`src/composition`）：全仓唯一 `new` 出具体实现的地方，
+  用法就是 `createDependencies()` + `createStoryLoopApplication()` 两步
+- **Repository abstractions for runs, experiments, and artifacts**：三个小端口各说各话，
+  没有 `GenericRepository<T>`
+- **Stable public domain/DTO boundaries**：`src/domain` 只放契约与纯函数，
+  请求响应 DTO 与领域模型分离
+- **Architecture dependency tests**（`tests/test_architecture.test.ts`）：静态扫 import，
+  守住六层允许 / 禁止依赖表与「无循环依赖」
+- **Platform architecture documentation**（`docs/architecture.md`）
+- **健康与能力接口**（`GET /api/health`）：版本、status、三个真查出来的布尔，
+  不含任何凭据
+- **Service facade `version()`**：`/api/version` 经门面读出版本号，不再各自硬编码
+
+### Changed
+
+- **Pipeline orchestration is moved behind application use cases**：`GenerationPipeline`
+  与编排逻辑留在 Engine，用例层只做「取输入 → 调管道 → 转结果」
+- **LLM, filesystem, config, prompt, hashing, and security integrations are isolated
+  behind infrastructure adapters**：`OpenAICompatibleLLMClient`、`ArtifactStore`、
+  `ExperimentStore`、`app-config`、Prompt Registry、digest、url-guard 各自归位
+- **API and CLI entry points are reduced to thin interface adapters**：路由只解析 /
+  校验 DTO / 调用用例 / 映射结果 / 返回响应；CLI 同样只从组合根拿用例与存储
+- **Existing experiment, telemetry, and failure-analysis capabilities are reorganized
+  behind explicit analysis boundaries**：`ExperimentRunner` 依赖实验与产物仓储端口，
+  凭据探针经 `ProviderProbe` 注入；失败分析依赖结构化证据
+- **Legacy v1.x run artifacts remain readable through compatibility handling**：
+  run-manifest / telemetry / failure-analysis 的 `schemaVersion` 仍是 `"1"`，
+  旧 Run 的缺字段按「没有这个键」处理，不补零、不猜测
+
+### Security
+
+- The v1.1 request-body `baseUrl` public-address guard remains the **single**
+  infrastructure security boundary for LLM endpoint overrides
+  (`src/infrastructure/security/url-guard.ts`，`assertPublicBaseUrl` 全仓一份定义，
+  由架构测试盯着）
+- Secret-safe serialization remains enforced across manifests, telemetry, failure
+  analysis, experiments, API responses, and logs：密钥只从服务端环境读一次，
+  不落盘、不进响应、不进日志
+- `process.env` 的读取被收敛到 `src/infrastructure/**`：`src/app`、`scripts/` 与界面层
+  一处都不再直接读环境变量
+- 密钥隔离与地址关卡都有专门的回归测试
+  （`tests/test_compat_v1_runs.test.ts` / `tests/test_url_guard.test.ts`）
+
 ## [1.9.1] —— 2026-09-26
 
 1.9.1 是 1.8.0 / 1.9.0 的补丁：把这两版发布后逐行读代码查出来的十处真问题修掉，

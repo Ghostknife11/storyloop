@@ -5,11 +5,18 @@
 > A stable pipeline-based AI short-story generator: beat planning, hard validation, basic review,
 > deterministic automatic retry, targeted repair, and a unified quality snapshot.
 >
-> **v1.2.0 开始建立统一质量工程层。** v1.0.0 冻结了生成契约，v1.1.x 收紧了地址关卡，
-> v1.2.0 做的是把散落在 `validation.json` / `review.json` / `metadata.json` / API 响应里的
-> 质量结论收口成一份 `QualityResult`：不调用模型、不产生新分数、没有多维、没有 PASS/FAIL 阈值——
-> 它读的三样东西在 v1.2.0 之前就全都在产物里了。全部改动 additive：既有字段、路由、
-> 错误码、CLI 参数与产物布局一个都没动。
+> **v2.0.0 起它是一个平台化架构。** StoryLoop 2.0 turns the 1.x generation pipeline into a
+> modular story-generation platform. Generation, quality, experimentation, observability,
+> failure analysis, infrastructure, and interfaces now live behind explicit architectural
+> boundaries while preserving existing user-facing capabilities.
+>
+> StoryLoop 2.0 不再只是不断扩张的生成 Pipeline，而是正式进入平台化架构：生成、质量、实验、
+> 观测、失败分析、基础设施与接口层拥有明确边界，为后续更复杂能力提供稳定承载层。
+>
+> 这一版不改任何用户可见行为：HTTP API、请求响应字段、CLI、错误码、`runs/` 下的产物布局与
+> 字段、界面全部与 1.9.1 逐字一致；1.0.0 以来写的产物原样可读，不需要迁移。改的是仓库内部
+> 的依赖方向——六层职责、一个组合根、端口与适配器，见
+> [docs/architecture.md](docs/architecture.md)。
 
 ## 快速开始
 
@@ -96,6 +103,14 @@ StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts
   实验详情页另有一组失败类别分布
 - **现代 Web UI**：六阶段进度、Attempt 计数、修订明细、Validation / Review / Commercial
   Review / Run Provenance / 可观测性 / 失败分析面板、实验列表与实验详情、Run ID 与产物清单
+- **Modular Platform Architecture（平台化架构，v2.0.0）**：上面每一种能力都落在明确的层里——
+  Stable Domain Contracts（领域契约与纯规则）、Application Use Cases（用例编排与公共门面）、
+  Engine（生成 / 校验 / 审阅 / 修订 / 管道）、Analysis（实验汇总与失败分类）、
+  Ports / Adapters（端口与适配器：`LLMClient` / `RunRepository` / `ArtifactStore` /
+  `ExperimentRepository` / `Logger`）、Composition Root（组合根，全仓唯一装配点）。
+  依赖方向由 Architecture Boundary Tests 静态扫 import 把守，另有 Cycle Detection
+  保证没有循环依赖；v1.x 的 Run 产物通过 Legacy Run Compatibility 原样可读，不需要迁移。
+  架构说明见 [docs/architecture.md](docs/architecture.md)
 - **OpenAI-compatible LLM**：OpenAI / DeepSeek / 硅基流动 / 任意兼容端点
 - **可编辑 Prompt 模板**：`prompts/*.txt` 直接改，重启生效
 - **稳定 CLI**：`run` / `plan` / `review` / `validate` / `repair` 五个命令，与 API 共用同一套逻辑
@@ -143,6 +158,50 @@ StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts
 > 后端没有任何为未实现能力预留的隐藏接口——没有的功能就没有入口。
 
 ## 架构
+
+**v2.0.0 起是六层平台架构**，依赖方向单向，由 `tests/test_architecture.test.ts` 静态扫
+import 把守（含循环依赖检测）。完整说明见 [docs/architecture.md](docs/architecture.md)：
+
+```
+Interface (src/interface · src/app · src/components · scripts)
+   │  解析 · 渲染 · 路由适配，不写业务规则
+   ▼
+Composition Root (src/composition)
+   │  全仓唯一 new 出具体实现的地方
+   ▼
+Application (src/application)
+   │  用例编排 · 公共门面 StoryLoopService · DTO ↔ Domain
+   ├──────────────► Engine (src/engine)      ── 规划 / 生成 / 校验 / 审阅 / 修订 / 管道
+   └──────────────► Analysis (src/analysis)  ── 实验汇总 / 失败分类（对已有证据做推断）
+                          │
+                          ▼
+                     Domain (src/domain)     ── 契约与纯函数：模型、规则、RetryPolicy、序列化
+                          ▲
+Ports (src/ports) ◄───────┴─────── Infrastructure (src/infrastructure)
+  LLMClient · RunRepository ·             LLM 客户端 · 文件存储 · 配置 · 日志 · 遥测 ·
+  ArtifactStore · ExperimentRepository ·  哈希 · Prompt 注册表 · URL 关卡
+  Logger · ProviderProbe · FailureAnalyzer
+```
+
+一个 Run 在层间的走法：路由 / CLI 只负责解析与渲染 → 组合根把装好的用例交出来 →
+用例层转 DTO → Engine 的 `GenerationPipeline` 推进 Run（判定全部来自 Domain 的
+确定性规则）→ 沿途结论通过 Ports 交给 Infrastructure 落盘 → Analysis 事后读盘做汇总与分类。
+
+### Composition Root（组合根）
+
+```ts
+import { createDependencies, createStoryLoopApplication } from "@/composition";
+
+const deps = createDependencies({ runsDir: "runs" });   // 基础设施实例在这里落地
+const app  = createStoryLoopApplication(deps);          // 用例在这里绑成应用
+const { status, json } = await app.service.generate(body);
+```
+
+`createStoryLoop(options)` 是这两步的合并写法，路由与 CLI 用的就是它。
+下图的每条边都是「调别人」而不是「被别人调」——Infrastructure 实现 Ports 声明的接口，
+Domain 谁都能用，Domain 不知道任何一层的存在。
+
+### 一次 Run 的来龙去脉（v2.0.0 视角）
 
 ```
 ┌──────────────────────────────────────────┐
@@ -463,7 +522,7 @@ Validator 自身异常只作废「校验不通过」这一格判据，不会把�
 | | Transport Retry | GenerationAttempt Retry |
 |---|---|---|
 | 重试什么 | 同一次 HTTP 请求原样重发 | 带着同一份 StoryConfig / BeatPlan 整篇重新生成 |
-| 发生在哪 | `src/lib/llm.ts` 内部 | `GenerationPipeline` + `RetryPolicy` |
+| 发生在哪 | `src/infrastructure/llm/openai-compatible-llm-client.ts` 内部 | `GenerationPipeline` + `RetryPolicy` |
 | 触发条件 | timeout / 429 / 临时 5xx（500 / 502 / 503 / 504） | 生成失败且还有次数、校验不通过且策略允许、审阅总分低于阈值 |
 | 上限 | 硬上限 2 次，即一次 LLM 调用最多 3 个请求 | `max_attempts`（默认 2，含第一次生成） |
 
@@ -732,7 +791,7 @@ v1.4.0 起 Storyloop 只回答「哪一步失败了」，v1.9.0 把这件事往�
 六项能力（Failure Signals 与 Evidence Linking 是同一枚硬币的两面：信号是判断，证据是依据）：
 
 - **Structured Failure Categories**：类别是固定清单，不是自由文本；清单见
-  `src/types/failure-analysis.ts` 的 `FAILURE_CATEGORIES`。
+  `src/domain/failure-analysis.ts` 的 `FAILURE_CATEGORIES`。
 - **Failure Signals**：每条信号都有稳定 code、来源与严重度（`RETRY_LIMIT_REACHED`、
   `UNRECOGNIZED_FAILURE_CODE` 这类），不写自由发挥的措辞。
 - **Evidence Linking**：没有证据就没有类别。每条信号都带 `evidence`，指向具体产物与字段
@@ -826,7 +885,7 @@ HTTP 状态码仍然是 200（这是一次成功的业务结果，不是错误�
 | `INTERNAL_ERROR` | 500 | 未预期异常；message 固定为「服务器内部错误」 |
 
 用户错误一律 4xx，运行时错误 5xx。响应里永远不出现堆栈与服务器绝对路径：异常文本会先过
-`src/lib/safe-text.ts`（绝对路径替换为 `<path>`、凭据打码），堆栈只进服务端日志。
+`src/domain/safe-text.ts`（绝对路径替换为 `<path>`、凭据打码），堆栈只进服务端日志。
 curl 示例与逐字段说明见 [docs/api.md](docs/api.md)。
 
 ## CLI
@@ -873,7 +932,7 @@ storygen repair    对已有正文定点修订一次
 | `LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR`；无法识别的值回落到 `INFO` |
 | `RUNS_DIR` | `runs` | Run 产物根目录（相对仓库根或绝对路径） |
 
-**API Key 只存在于服务端**：`LLM_API_KEY` 只在 `src/lib/llm.ts` 里从服务端环境读取一次，
+**API Key 只存在于服务端**：`LLM_API_KEY` 只在 `src/infrastructure/llm/openai-compatible-llm-client.ts` 里从服务端环境读取一次，
 不进请求覆盖、不进任何返回值、不进任何产物、不进浏览器。`.env` 已被 `.gitignore` 忽略，
 仓库里只有空模板 `.env.example`。
 
@@ -919,9 +978,24 @@ mapped / NAT64 地址按内嵌的那个地址判
 - **没有鉴权、限流、批量与流式**：API 没有用户体系，也没有 SSE / WebSocket
 - **`target_words` 是目标不是保证**：实际输出长度受模型能力与上下文窗口影响
 - **只支持 OpenAI-compatible 端点**：没有 Provider Registry / Model Router / Fallback
+- **v2.0.0 没有换框架、没有上新能力**：分层是为了让后续能力有地方长，不是新增智能——
+  这一版没有多模态、没有外部知识库、没有检索增强，也没有把任何未实现能力预埋成接口
 
 ## 升级说明
 
+v2.0.0 是**第一个架构大版本**，**不需要改任何代码、也不需要迁移任何产物**：HTTP API、
+请求响应字段、CLI、错误码、`runs/` 下的产物布局与字段、界面全部与 1.9.1 逐字一致，
+1.0.0 以来写的产物原样可读。改的是仓库内部的依赖方向——六层职责（Domain / Application /
+Engine / Analysis / Infrastructure / Interface）、一个组合根、端口与适配器、稳定的领域契约。
+要紧的只有一条：**把本项目当库 import 的用法要改路径**——配置序列化搬到
+`src/domain/story-config.ts`、提供方清单搬到 `src/domain/provider.ts`、脱敏规则搬到
+`src/domain/safe-text.ts`（旧路径都留了 re-export）；想自己装配应用就用组合根的
+`createDependencies` + `createStoryLoopApplication`。架构说明见
+[docs/architecture.md](docs/architecture.md)，逐条差异见 [docs/upgrade.md](docs/upgrade.md)。
+回滚到 1.9.1 的代价为零：产物逐字节同构，回滚后只是少了组合根与架构测试。
+回归测试是 `tests/test_architecture.test.ts`（六层边界 + 无循环依赖）、
+`tests/test_compat_v1_runs.test.ts`（v1.x 产物落盘形状与读回、URL 关卡、密钥隔离）与
+`tests/test_composition_integration.test.ts`（组合根装配 + 门面方法面 + 健康探测）。
 v1.9.1 是 1.9.0 / 1.8.0 的补丁，**不需要改任何代码**：没有新文件、新字段、新路由、新错误码，
 产物字段集与 1.9.0 逐字一致。它修十处实现问题——崩过的步骤在遥测里不再冒充 `completed`、
 产物晋升失败时失败阶段指得对了、Run 级 `durationMs` 取整到毫秒、读不动产物时不再整套 500、
@@ -1129,7 +1203,19 @@ v1.9.0 的失败分析另有八个测试文件（同样只用假组件）：
 `test_client_bundle_boundary`（源码级守卫：客户端可达的任何文件不许 import node 内置模块，
 `failure-rules.ts` 不得再拖进浏览器包）。
 
-全部测试合计 **87 个文件 / 1325 条**，全部只调用真实 LLM 之外的桩：
+v2.0.0 的平台架构另有三个测试文件：
+`test_architecture`（静态扫 import：六层允许 / 禁止依赖表、Domain 不许碰 Node 与
+`next`/`react`、路由必须从组合根取用例、`assertPublicBaseUrl` 只许一份定义、
+三个仓储端口存在且没有 `GenericRepository<T>`、Engine → Infrastructure 白名单、
+无循环依赖）、`test_compat_v1_runs`（走组合根真跑一次 Run：落盘文件名就是 v1.x 冻结的
+那 12 个加 `attempts/`，`schemaVersion` 仍是 `"1"`，换一个全新的 `ArtifactStore` /
+`ExperimentStore` 读得回来、`/api/runs/<id>` 与界面面板照常渲染、磁盘上多一个不认识的键
+不致命、请求体 `baseUrl` 关卡在发请求前就拒掉且密钥不进响应不进产物）、
+`test_composition_integration`（`createDependencies` + `createStoryLoopApplication`
+两步装配、门面每个用例方法都能取到、`/api/health` 与 `/api/version` 只回真假布尔与版本号）。
+全部用 `FakeLLM`，不打任何真实付费 API。
+
+全部测试合计 **91 个文件 / 1402 条**，全部只调用真实 LLM 之外的桩：
 LLM 由注入的桩对象或 `FakeLLM` 替代（`tests/helpers/fixtures.ts`），
 `fetch` 也被桩掉。重试相关断言同样只用桩，从不触发真实模型调用。
 URL 校验的用例用注入的假解析器跑，不真的查 DNS，也不碰任何真实主机。
@@ -1155,17 +1241,18 @@ URL 校验的用例用注入的假解析器跑，不真的查 DNS，也不碰任
 | [docs/upgrade.md](docs/upgrade.md) | 从 0.9.x / 1.0.0 升级到当前版本 |
 | [docs/compatibility.md](docs/compatibility.md) | 兼容性策略与扩展方式 |
 | [docs/experiments.md](docs/experiments.md) | 受控实验契约（v1.7.0） |
+| [docs/architecture.md](docs/architecture.md) | 平台架构契约（v2.0.0）：六层职责、依赖方向、组合根、端口与适配器、Run 生命周期、产物归属与安全边界 |
 | [examples/example_run/](examples/example_run/) | 一次完整 Run 的合成样例产物 |
 | [configs/example_story.json](configs/example_story.json) | 覆盖全部可选字段的示例配置 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本历史 |
 
 可直接阅读的实现（无外部依赖）：
 
-- `src/core/retry-policy.ts`：重试策略与 RetryDecision 的实现
-- `src/core/quality-assembler.ts`：统一质量快照的装配规则（纯函数，不调模型）
-- `src/types/quality-dimensions.ts`：四个基础维度与四维均分的实现（纯算术）
-- `src/lib/validation-rules.ts`：六条硬性校验规则的实现
-- `src/lib/api-error.ts`：稳定错误码与状态码映射
-- `src/lib/safe-text.ts`：错误文本的净化规则（绝对路径替换、凭据打码），只此一份
-- `src/lib/version.ts`：版本号单一真源
+- `src/domain/retry-policy.ts`：重试策略与 RetryDecision 的规则（纯函数）
+- `src/engine/quality-assembler.ts`：统一质量快照的装配规则（纯函数，不调模型）
+- `src/domain/quality-dimensions.ts`：四个基础维度与四维均分的实现（纯算术）
+- `src/engine/validation-rules.ts`：六条硬性校验规则的实现
+- `src/application/error-model.ts`：稳定错误码与状态码映射
+- `src/domain/safe-text.ts`：错误文本的净化规则（绝对路径替换、凭据打码），只此一份
+- `src/infrastructure/config/version.ts`：版本号单一真源
 - `tests/helpers/fixtures.ts`：共享样例数据与 `FakeLLM`
