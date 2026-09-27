@@ -10,19 +10,19 @@ import {
   repairStory,
   reviewStory,
   validateStory,
-} from "@/lib/api";
-import { reviewPanelState } from "@/lib/review-view";
-import { validationPanelState } from "@/lib/validation-view";
+} from "@/interface/api";
+import { reviewPanelState } from "@/interface/review-view";
+import { validationPanelState } from "@/interface/validation-view";
 import {
   STORY_CONFIG_VERSION,
   validateStoryConfig,
   type StoryConfig,
-} from "@/types/story-config";
-import type { BeatPlan } from "@/types/beat-plan";
+} from "@/domain/story-config";
+import type { BeatPlan } from "@/domain/beat-plan";
 
 /**
  * v0.9.0 前端收口契约（§33~§38/§47）：
- * §33 组件不许自己 fetch，全部走 src/lib/api.ts 一个出口；
+ * §33 组件不许自己 fetch，全部走 src/interface/api.ts 一个出口；
  * §34 Network / Timeout / Invalid Response / API Error 四种失败统一成 RunApiError；
  * §35 重复提交由 ref 同步挡住（state 挡不住双击）；
  * §36 没有正文就没有 Review / Validate 对象，按钮禁用；
@@ -77,19 +77,19 @@ function codeOnly(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/[^\n]*/g, "$1");
 }
 
-/** §33 的检查范围：组件与页面。服务端代码（如 src/lib/llm.ts 的模型客户端）不在其列。 */
+/** §33 的检查范围：组件与页面。服务端代码（如基础设施里的模型客户端）不在其列。 */
 const CLIENT_FILES = listSourceFiles(join("src", "components")).concat(
   listSourceFiles(join("src", "app")),
 );
 
 describe("§33 前端 API 访问集中", () => {
-  it("组件与页面没有任何一处直接 fetch，请求全走 src/lib/api.ts", () => {
+  it("组件与页面没有任何一处直接 fetch，请求全走 interface/api.ts", () => {
     const offenders = CLIENT_FILES.filter((file) => codeOnly(readFileSync(file, "utf8")).includes("fetch("));
     expect(offenders).toEqual([]);
   });
 
   it("api.ts 是前端唯一的请求出口：只有一处 await fetch，且每个导出函数都经它发请求", () => {
-    const src = readFileSync(join("src", "lib", "api.ts"), "utf8");
+    const src = readFileSync(join("src", "interface", "api.ts"), "utf8");
     const exported = [...src.matchAll(/export async function (\w+)/g)].map((m) => m[1]);
     expect(exported.length).toBeGreaterThanOrEqual(9);
     expect(src.match(/await fetch\(/g)?.length ?? 0).toBe(1);
@@ -298,7 +298,7 @@ describe("§38 前端不新增未来能力", () => {
   it("组件 / 页面 / api 客户端里没有未来能力入口", () => {
     const files = listSourceFiles(join("src", "components")).concat(
       listSourceFiles(join("src", "app")),
-      join("src", "lib", "api.ts"),
+      join("src", "interface", "api.ts"),
     );
     const hits: string[] = [];
     for (const file of files) {

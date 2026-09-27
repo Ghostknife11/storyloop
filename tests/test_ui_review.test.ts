@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { reviewStory } from "@/lib/api";
-import { formatScore, reviewPanelState } from "@/lib/review-view";
+import { reviewStory } from "@/interface/api";
+import { formatScore, reviewPanelState } from "@/interface/review-view";
 import {
   STORY_CONFIG_VERSION,
   validateStoryConfig,
   type StoryConfig,
-} from "@/types/story-config";
-import type { ReviewResult } from "@/types/review-result";
+} from "@/domain/story-config";
+import type { ReviewResult } from "@/domain/review-result";
 
 /**
  * v0.5.0 Review UI 契约（§31~§34/§47）：

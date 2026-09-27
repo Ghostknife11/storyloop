@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { validateStory } from "@/lib/api";
-import { validationPanelState } from "@/lib/validation-view";
+import { validateStory } from "@/interface/api";
+import { validationPanelState } from "@/interface/validation-view";
 import {
   STORY_CONFIG_VERSION,
   validateStoryConfig,
   type StoryConfig,
-} from "@/types/story-config";
-import type { ValidationResult } from "@/types/validation-result";
-import type { ReviewResult } from "@/types/review-result";
+} from "@/domain/story-config";
+import type { ValidationResult } from "@/domain/validation-result";
+import type { ReviewResult } from "@/domain/review-result";
 
 /**
  * v0.6.0 Validation UI 契约（§28~§30/§43）：

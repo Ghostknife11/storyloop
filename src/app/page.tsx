@@ -22,8 +22,8 @@ import { CommercialPanel } from "@/components/commercial-panel";
 import { ManifestPanel } from "@/components/manifest-panel";
 import { TelemetryPanel } from "@/components/telemetry-panel";
 import { FailurePanel } from "@/components/failure-panel";
-import type { RunTelemetry } from "@/types/telemetry";
-import type { FailureAnalysisResult } from "@/types/failure-analysis";
+import type { RunTelemetry } from "@/domain/telemetry";
+import type { FailureAnalysisResult } from "@/domain/failure-analysis";
 import {
   ManualRepair,
   RepairPanel,
@@ -35,20 +35,20 @@ import {
   reviewStoryCommercial,
   validateStoryBeats,
   RunApiError, type RepairDetailApi, type RunApiResult,
-} from "@/lib/api";
-import { configFilename, parseStoryConfig, serializeStoryConfig } from "@/lib/config-io";
-import { attemptArtifactPath } from "@/lib/artifacts-view";
-import { retryPolicyOf, useSettings } from "@/lib/settings-store";
+} from "@/interface/api";
+import { configFilename, parseStoryConfig, serializeStoryConfig } from "@/domain/story-config";
+import { attemptArtifactPath } from "@/interface/artifacts-view";
+import { retryPolicyOf, useSettings } from "@/interface/settings-store";
 import {
   GENRE_PRESETS, STYLE_PRESETS, STORY_CONFIG_VERSION, TARGET_WORDS_DEFAULT,
   validateStoryConfig, type StoryConfig,
-} from "@/types/story-config";
-import { validateBeatPlan, type BeatPlan, type StoryBeat } from "@/types/beat-plan";
-import type { ReviewResult } from "@/types/review-result";
-import type { ValidationResult } from "@/types/validation-result";
-import type { QualityResult } from "@/types/quality";
-import type { BeatValidationResult } from "@/types/beat-validation";
-import type { CommercialReviewResult } from "@/types/commercial-review";
+} from "@/domain/story-config";
+import { validateBeatPlan, type BeatPlan, type StoryBeat } from "@/domain/beat-plan";
+import type { ReviewResult } from "@/domain/review-result";
+import type { ValidationResult } from "@/domain/validation-result";
+import type { QualityResult } from "@/domain/quality";
+import type { BeatValidationResult } from "@/domain/beat-validation";
+import type { CommercialReviewResult } from "@/domain/commercial-review";
 
 type Phase = "idle" | "generating" | "success" | "error";
 type PlanPhase = "idle" | "planning" | "success" | "error";

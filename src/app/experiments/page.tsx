@@ -15,10 +15,10 @@ import {
   RunApiError,
   type ExperimentDefinitionApi,
   type ExperimentListItemApi,
-} from "@/lib/api";
-import { experimentListRow } from "@/lib/experiment-view";
-import { REPETITIONS_LIMIT, TOTAL_RUNS_LIMIT, VARIANTS_LIMIT } from "@/types/experiment";
-import { validateExperimentDefinition } from "@/types/experiment";
+} from "@/interface/api";
+import { experimentListRow } from "@/interface/experiment-view";
+import { REPETITIONS_LIMIT, TOTAL_RUNS_LIMIT, VARIANTS_LIMIT } from "@/domain/experiment";
+import { validateExperimentDefinition } from "@/domain/experiment";
 
 /**
  * `/experiments`（v1.7.0）：实验列表 + 新建实验。

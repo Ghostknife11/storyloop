@@ -2,8 +2,8 @@
 
 import { Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { ValidationResult } from "@/types/validation-result";
-import { validationPanelState } from "@/lib/validation-view";
+import type { ValidationResult } from "@/domain/validation-result";
+import { validationPanelState } from "@/interface/validation-view";
 
 /**
  * §28/§30 Validation 面板：Passed / Failed + Issues（Code / Severity / Message）。

@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { generateFromPlan, planStory, previewPrompt, RunApiError } from "@/lib/api";
+import { generateFromPlan, planStory, previewPrompt, RunApiError } from "@/interface/api";
 import {
   STORY_CONFIG_VERSION,
   validateStoryConfig,
   type StoryConfig,
-} from "@/types/story-config";
-import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
+} from "@/domain/story-config";
+import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
 
 /**
  * v0.4.0 UI 两阶段契约（§27~§30/§32/§33）：

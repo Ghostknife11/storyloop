@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchRunFailureAnalysis } from "@/lib/api";
-import { categoryLabel, failurePanelState, severityClass } from "@/lib/failure-view";
-import { validateFailureAnalysis, type FailureAnalysisResult } from "@/types/failure-analysis";
+import { fetchRunFailureAnalysis } from "@/interface/api";
+import { categoryLabel, failurePanelState, severityClass } from "@/interface/failure-view";
+import { validateFailureAnalysis, type FailureAnalysisResult } from "@/domain/failure-analysis";
 
 /**
  * v1.9.0 失败分析面板契约（TASK §32~§34）。

@@ -5,13 +5,13 @@ import {
   MIN_SCORE_RANGE,
   retryPolicyOf,
   type AppSettings,
-} from "@/lib/settings-store";
+} from "@/interface/settings-store";
 import { retryReasonLabel } from "@/components/attempt-panel";
-import { fetchRun, fetchRunAttempt, startRun, type AttemptSummaryApi } from "@/lib/api";
-import type { StoryConfig } from "@/types/story-config";
-import type { BeatPlan } from "@/types/beat-plan";
-import type { ReviewResult } from "@/types/review-result";
-import type { ValidationResult } from "@/types/validation-result";
+import { fetchRun, fetchRunAttempt, startRun, type AttemptSummaryApi } from "@/interface/api";
+import type { StoryConfig } from "@/domain/story-config";
+import type { BeatPlan } from "@/domain/beat-plan";
+import type { ReviewResult } from "@/domain/review-result";
+import type { ValidationResult } from "@/domain/validation-result";
 
 /**
  * §30~§36/§52 Retry UI 契约：

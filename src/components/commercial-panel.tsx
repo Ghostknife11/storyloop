@@ -2,8 +2,8 @@
 
 import { Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { CommercialReviewResult } from "@/types/commercial-review";
-import { commercialPanelState } from "@/lib/commercial-view";
+import type { CommercialReviewResult } from "@/domain/commercial-review";
+import { commercialPanelState } from "@/interface/commercial-view";
 
 /**
  * v1.5.0 TASK §27 Commercial Review 面板：与 Review 面板完全并列的第二份结论。

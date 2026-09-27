@@ -10,12 +10,12 @@ import {
   scoreTransition,
   validationTransition,
 } from "@/components/repair-panel";
-import { MAX_REPAIRS_RANGE, retryPolicyOf, type AppSettings } from "@/lib/settings-store";
-import { repairStory, startRun, type RepairDetailApi } from "@/lib/api";
-import type { StoryConfig } from "@/types/story-config";
-import type { BeatPlan } from "@/types/beat-plan";
-import type { ReviewResult } from "@/types/review-result";
-import type { ValidationResult } from "@/types/validation-result";
+import { MAX_REPAIRS_RANGE, retryPolicyOf, type AppSettings } from "@/interface/settings-store";
+import { repairStory, startRun, type RepairDetailApi } from "@/interface/api";
+import type { StoryConfig } from "@/domain/story-config";
+import type { BeatPlan } from "@/domain/beat-plan";
+import type { ReviewResult } from "@/domain/review-result";
+import type { ValidationResult } from "@/domain/validation-result";
 
 /**
  * §34~§38/§50/§63 Repair UI 契约。

@@ -4,8 +4,8 @@ import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CommercialPanel } from "@/components/commercial-panel";
-import { commercialPanelState } from "@/lib/commercial-view";
-import type { CommercialReviewResult } from "@/types/commercial-review";
+import { commercialPanelState } from "@/interface/commercial-view";
+import type { CommercialReviewResult } from "@/domain/commercial-review";
 import { repoRoot } from "./helpers/fixtures";
 
 /**

@@ -2,8 +2,8 @@
 
 import { Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { BeatValidationResult } from "@/types/beat-validation";
-import { beatIssueLabel, beatValidationPanelState } from "@/lib/beat-validation-view";
+import type { BeatValidationResult } from "@/domain/beat-validation";
+import { beatIssueLabel, beatValidationPanelState } from "@/interface/beat-validation-view";
 
 /**
  * v1.4.0 Beat Validation 面板：Passed / Not Passed + Issues（Code / Severity / Message / Beat）。

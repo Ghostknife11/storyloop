@@ -1,7 +1,7 @@
 "use client";
 
-import type { QualityResult } from "@/types/quality";
-import { qualityPanelState } from "@/lib/quality-view";
+import type { QualityResult } from "@/domain/quality";
+import { qualityPanelState } from "@/interface/quality-view";
 
 /**
  * v1.2.0 §31/§32/§33 Quality Summary 面板：总览。

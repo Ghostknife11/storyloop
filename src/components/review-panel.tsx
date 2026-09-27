@@ -2,8 +2,8 @@
 
 import { Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { ReviewResult } from "@/types/review-result";
-import { reviewPanelState } from "@/lib/review-view";
+import type { ReviewResult } from "@/domain/review-result";
+import { reviewPanelState } from "@/interface/review-view";
 
 /**
  * §31/§32/§33/§34 Review 面板：Score（只显示「74 /100」）/ Summary / Strengths（✓）/ Problems（•）。

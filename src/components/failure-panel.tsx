@@ -1,8 +1,8 @@
 "use client";
 
 import { ShieldAlert } from "lucide-react";
-import type { FailureAnalysisResult } from "@/types/failure-analysis";
-import { failurePanelState, severityClass } from "@/lib/failure-view";
+import type { FailureAnalysisResult } from "@/domain/failure-analysis";
+import { failurePanelState, severityClass } from "@/interface/failure-view";
 
 /**
  * v1.9.0 失败分析面板：把这次 Run 的失败分类摆出来——哪一类是主要的、还有哪几类、

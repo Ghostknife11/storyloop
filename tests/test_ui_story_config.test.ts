@@ -3,14 +3,14 @@ import {
   configFilename,
   parseStoryConfig,
   serializeStoryConfig,
-} from "@/lib/config-io";
-import { generateFromPlan, planStory, previewPrompt } from "@/lib/api";
+} from "@/infrastructure/config/config-io";
+import { generateFromPlan, planStory, previewPrompt } from "@/interface/api";
 import {
   STORY_CONFIG_VERSION,
   validateStoryConfig,
   type StoryConfig,
-} from "@/types/story-config";
-import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
+} from "@/domain/story-config";
+import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
 
 /** v0.2.0 UI 层 StoryConfig 存取覆盖：Save/Load 处理器与生成请求走的是同一批函数。 */
 

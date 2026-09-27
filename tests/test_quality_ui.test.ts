@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QualityPanel } from "@/components/quality-panel";
-import { qualityPanelState, qualityScoreText } from "@/lib/quality-view";
-import type { QualityResult } from "@/types/quality";
+import { qualityPanelState, qualityScoreText } from "@/interface/quality-view";
+import type { QualityResult } from "@/domain/quality";
 
 /**
  * v1.2.0 §31~§35/§53 Quality Summary UI 契约。

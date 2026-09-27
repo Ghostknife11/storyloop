@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { validateStoryBeats } from "@/lib/api";
-import { beatIssueLabel, beatValidationPanelState } from "@/lib/beat-validation-view";
-import type { BeatValidationResult } from "@/types/beat-validation";
+import { validateStoryBeats } from "@/interface/api";
+import { beatIssueLabel, beatValidationPanelState } from "@/interface/beat-validation-view";
+import type { BeatValidationResult } from "@/domain/beat-validation";
 import { SAMPLE_BEAT_VALIDATION, SAMPLE_BEAT_VALIDATION_FAILED } from "./helpers/fixtures";
 
 /**

@@ -9,10 +9,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   fetchExperiment,
-  runExperiment,
+  startExperimentRun,
   RunApiError,
   type ExperimentDetailApi,
-} from "@/lib/api";import {
+} from "@/interface/api";import {
   efficiencyCellText,
   experimentStatusLabel,
   failureDistributionText,
@@ -22,7 +22,7 @@ import {
   runRowsOf,
   variantCardsOf,
   type ExperimentResultRow,
-} from "@/lib/experiment-view";
+} from "@/interface/experiment-view";
 
 /**
  * `/experiments/<id>`（v1.7.0）：变体卡片 + 结果表 + 样本 Run 下钻。
@@ -89,7 +89,7 @@ export default function ExperimentDetailPage() {
   const run = async () => {
     setBusy(true);
     try {
-      const result = await runExperiment(experimentId);
+      const result = await startExperimentRun(experimentId);
       toast.success(`实验跑完：${experimentStatusLabel(result.status).label}`);
       load();
     } catch (e) {

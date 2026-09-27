@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { attemptArtifactPath } from "@/lib/artifacts-view";
-import type { RunOk } from "@/lib/generate-service";
+import { attemptArtifactPath } from "@/interface/artifacts-view";
+import type { RunOk } from "@/application/generate-service";
 
 /**
  * §42 产物清单的展示口径：Run 响应里的 artifacts 是**运行根目录**那一层，

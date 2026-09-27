@@ -6,14 +6,14 @@ import { CheckCircle2, Loader2, Wrench, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { classifyProblem, issueTypeOfCode } from "@/core/repair-strategy";
-import { REPAIR_ISSUE_TYPES } from "@/types/repair";
-import { repairStory, type RepairDetailApi } from "@/lib/api";
-import { formatScore } from "@/lib/review-view";
-import type { BeatPlan } from "@/types/beat-plan";
-import type { StoryConfig } from "@/types/story-config";
-import type { ValidationResult } from "@/types/validation-result";
-import type { ReviewResult } from "@/types/review-result";
+import { classifyProblem, issueTypeOfCode } from "@/engine/repair-strategy";
+import { REPAIR_ISSUE_TYPES } from "@/domain/repair";
+import { repairStory, type RepairDetailApi } from "@/interface/api";
+import { formatScore } from "@/interface/review-view";
+import type { BeatPlan } from "@/domain/beat-plan";
+import type { StoryConfig } from "@/domain/story-config";
+import type { ValidationResult } from "@/domain/validation-result";
+import type { ReviewResult } from "@/domain/review-result";
 
 /** §6/§63 Issue Type → 中文说明：只有这六类，不扩类、不排序。 */
 const REPAIR_ISSUE_LABELS: Record<string, string> = {

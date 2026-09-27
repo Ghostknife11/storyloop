@@ -1,8 +1,8 @@
 "use client";
 
 import { CheckCircle2, Loader2, RotateCcw, Wrench, XCircle } from "lucide-react";
-import type { AttemptSummaryApi } from "@/lib/api";
-import { formatScore } from "@/lib/review-view";
+import type { AttemptSummaryApi } from "@/interface/api";
+import { formatScore } from "@/interface/review-view";
 import { repairIssueLabel } from "@/components/repair-panel";
 
 /** §22/§35 Retry Reason → 中文说明。只有一个原因字段，不做失败归因（§67）。 */

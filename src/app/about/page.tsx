@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ExternalLink, ScrollText } from "lucide-react";
-import { fetchProjectVersion } from "@/lib/api";
+import { fetchProjectVersion } from "@/interface/api";
 
 /**
  * `/about`（TASK §6）：Version / Project / License / Repository。

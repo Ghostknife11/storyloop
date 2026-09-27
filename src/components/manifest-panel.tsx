@@ -1,7 +1,7 @@
 "use client";
 
 import { GitCommitHorizontal } from "lucide-react";
-import type { RunManifest } from "@/types/run-manifest";
+import type { RunManifest } from "@/domain/run-manifest";
 import {
   artifactCountOf,
   attemptStatusText,
@@ -10,7 +10,7 @@ import {
   modelRowText,
   promptRowsOf,
   temperatureRowsOf,
-} from "@/lib/manifest-view";
+} from "@/interface/manifest-view";
 
 /**
  * v1.6.0 出身面板：把 run-manifest.json 里已经写下的事实摆出来——这次 Run 跑在哪个版本上、

@@ -1,8 +1,8 @@
 "use client";
 
 import { Activity } from "lucide-react";
-import type { RunTelemetry } from "@/types/telemetry";
-import { telemetryPanelState, type StageTimelineRow } from "@/lib/telemetry-view";
+import type { RunTelemetry } from "@/domain/telemetry";
+import { telemetryPanelState, type StageTimelineRow } from "@/interface/telemetry-view";
 
 /**
  * v1.8.0 Observability 面板：把这次 Run 的执行过程摆出来——总共多久、调了几次模型、

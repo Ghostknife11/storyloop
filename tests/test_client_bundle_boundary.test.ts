@@ -104,26 +104,26 @@ describe("v1.9.0 §31 客户端依赖图不碰服务端模块", () => {
 
   it("失败类别标签来自共享类型模块，不再经过服务端规则表", () => {
     // 这条不是泛泛的「别 import node:fs」，而是把这次的修法钉住：
-    // 展示标签放 types/，规则表（含 instanceof PipelineError）留在服务端。
-    const labelImports = specifiersOf(readFileSync(join(SRC, "lib", "failure-view.ts"), "utf8"))
-      .concat(specifiersOf(readFileSync(join(SRC, "lib", "experiment-view.ts"), "utf8")))
+    // 展示标签放 domain/，规则表（含 instanceof PipelineError）留在服务端。
+    const labelImports = specifiersOf(readFileSync(join(SRC, "interface", "failure-view.ts"), "utf8"))
+      .concat(specifiersOf(readFileSync(join(SRC, "interface", "experiment-view.ts"), "utf8")))
       .filter((s) => s.includes("failure"));
-    expect(labelImports.sort()).toEqual(["@/types/failure-analysis", "@/types/failure-analysis"]);
+    expect(labelImports.sort()).toEqual(["@/domain/failure-analysis", "@/domain/failure-analysis"]);
     // 规则表自己也不再导出标签：它只管「码 → 类别」这一件事
     // （注释里提到这个名字不算——守的是导出）
-    expect(readFileSync(join(SRC, "lib", "failure-rules.ts"), "utf8")).not.toContain(
+    expect(readFileSync(join(SRC, "analysis", "failure-rules.ts"), "utf8")).not.toContain(
       "export const CATEGORY_LABELS",
     );
   });
 
   it("规则表只留在服务端：分析器用它，界面不 import 它", () => {
     const { files } = reachableFrom(join(SRC, "app", "page.tsx"));
-    expect(files).not.toContain(resolve(SRC, "lib/failure-rules.ts"));
+    expect(files).not.toContain(resolve(SRC, "analysis/failure-rules.ts"));
     expect(files.some((f) => f.endsWith("failure-panel.tsx"))).toBe(true);
     expect(files.some((f) => f.endsWith("failure-view.ts"))).toBe(true);
     // 服务端一侧确实还在用（守卫别误伤真正需要它的人）
-    expect(readFileSync(join(SRC, "core", "failure-analyzer.ts"), "utf8")).toContain(
-      'from "@/lib/failure-rules"',
+    expect(readFileSync(join(SRC, "analysis", "failure-analyzer.ts"), "utf8")).toContain(
+      'from "@/analysis/failure-rules"',
     );
   });
 });

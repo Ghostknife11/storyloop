@@ -7,13 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { PROVIDERS } from "@/lib/constants";
+import { PROVIDERS } from "@/interface/constants";
 import {
   MAX_ATTEMPTS_RANGE,
   MAX_REPAIRS_RANGE,
   MIN_SCORE_RANGE,
   useSettings,
-} from "@/lib/settings-store";
+} from "@/interface/settings-store";
 
 /**
  * `/settings`（TASK §26/§30/§31/§34）：model / base_url / temperature + 自动重试 + 定点修订。

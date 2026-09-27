@@ -8,8 +8,8 @@ import {
   resultRowsOf,
   runRowsOf,
   variantCardsOf,
-} from "@/lib/experiment-view";
-import type { ExperimentDetailApi, ExperimentListItemApi } from "@/lib/api";
+} from "@/interface/experiment-view";
+import type { ExperimentDetailApi, ExperimentListItemApi } from "@/interface/api";
 
 /**
  * v1.7.0 实验界面推导（TASK §25/§26）：三条承诺——不排名、缺数不补 0、
