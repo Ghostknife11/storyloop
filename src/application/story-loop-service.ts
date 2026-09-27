@@ -14,6 +14,7 @@ import {
   getRun,
   getRunAttempt,
   getRunFailureAnalysis,
+  getRunQualityStack,
   getRunTelemetry,
   planStory,
   previewPrompt,
@@ -34,6 +35,7 @@ import {
   type AttemptLookupResult,
   type RunTelemetryLookupResult,
   type RunFailureAnalysisLookupResult,
+  type RunQualityStackLookupResult,
   type RunDeps,
 } from "@/application/generate-service";
 import {
@@ -104,6 +106,8 @@ export interface StoryLoopService {
   getRunTelemetry(runId: string): Promise<RunTelemetryLookupResult>;
   /** 一条 Run 的失败分析。 */
   getRunFailureAnalysis(runId: string): Promise<RunFailureAnalysisLookupResult>;
+  /** v2.1.0 TASK §33 一条 Run 的统一质量视图（Quality Center 的数据源）。 */
+  getRunQualityStack(runId: string): Promise<RunQualityStackLookupResult>;
 }
 
 /** 把绑定好的门面交出去。deps 省略时各用例按服务端配置自行取默认值（§16）。 */
@@ -130,5 +134,6 @@ export function createStoryLoopService(deps: StoryLoopDependencies = {}): StoryL
     getRunAttempt: (runId, attemptNumber) => getRunAttempt(runId, attemptNumber, run.artifactStore),
     getRunTelemetry: (runId) => getRunTelemetry(runId, run.artifactStore),
     getRunFailureAnalysis: (runId) => getRunFailureAnalysis(runId, run.artifactStore),
+    getRunQualityStack: (runId) => getRunQualityStack(runId, run.artifactStore),
   };
 }

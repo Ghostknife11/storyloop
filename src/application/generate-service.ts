@@ -1024,6 +1024,41 @@ export async function getRunFailureAnalysis(
   return { status: 200, json: { failureAnalysis: store.readFailureAnalysis(runId) } };
 }
 
+export type RunQualityStackLookupResult =
+  | { status: 200; json: { qualityStack: QualityStackView | null } }
+  | { status: 400; json: RunError }
+  | { status: 404; json: RunError };
+
+/**
+ * v2.1.0 TASK §33 GET /api/runs/{run_id}/quality-stack：把这次 Run 的统一质量视图原样读回。
+ * §32/§27：v2.0.0 及更早的 Run 没有 quality-stack.json，此时**仍然 200**，body 是
+ * `{"qualityStack": null}`——缺的是一份视图，不是这个 Run 本身。
+ *
+ * 单独一个端点而不是只靠详情接口：与 telemetry / failure-analysis 同一套理由——
+ * Quality Center 只想看质量总览时不必把整篇正文再传一遍。详情接口（fetchRun）
+ * 已经带了同一份数据，两处口径一致，都是盘上那一份的投影。
+ */
+export async function getRunQualityStack(
+  runIdRaw: unknown,
+  store: ArtifactStore = new ArtifactStore(appSettings().runsDir),
+): Promise<RunQualityStackLookupResult> {
+  const runId = runIdOf(runIdRaw);
+  if (runId === null) {
+    return { status: 400, json: errorBody("CONFIG_INVALID", "run_id 非法：必须是单个目录名") };
+  }
+  let exists: boolean;
+  try {
+    exists = store.runExists(runId);
+  } catch {
+    return { status: 400, json: errorBody("CONFIG_INVALID", `run_id 非法：${runId}`) };
+  }
+  if (!exists) {
+    return { status: 404, json: errorBody("RUN_NOT_FOUND", `run_id 不存在：${runId}`) };
+  }
+  // readQualityStack 已经三层降级：文件缺失 / JSON 坏 / 形状不对都归一成 null。
+  return { status: 200, json: { qualityStack: qualityStackViewOf(store.readQualityStack(runId)) } };
+}
+
 /**
  * §39 GET /api/runs/{run_id}/attempts/{attempt_number}。
  * §35：只返回这一次 Attempt 的实体，不做横向比较 / 排名 / Score Delta。

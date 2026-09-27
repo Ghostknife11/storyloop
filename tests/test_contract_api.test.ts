@@ -117,6 +117,8 @@ const ROUTES: ReadonlyArray<readonly [string, string]> = [
   ["api/runs/[run_id]/telemetry", "GET"],
   // v1.9.0：读回这一次 Run 的失败分类（旧 Run 也照常 200，body.failureAnalysis 是 null）
   ["api/runs/[run_id]/failure-analysis", "GET"],
+  // v2.1.0 TASK §33：读回这一次 Run 的统一质量视图（旧 Run 也照常 200，body.qualityStack 是 null）
+  ["api/runs/[run_id]/quality-stack", "GET"],
   ["api/validate", "POST"],
   // v1.4.0：手动校验剧情骨架的结构
   ["api/validate-beats", "POST"],

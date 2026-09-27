@@ -22,7 +22,9 @@ import { CommercialPanel } from "@/components/commercial-panel";
 import { ManifestPanel } from "@/components/manifest-panel";
 import { TelemetryPanel } from "@/components/telemetry-panel";
 import { FailurePanel } from "@/components/failure-panel";
+import { QualityCenter } from "@/components/quality-center";
 import type { RunTelemetry } from "@/domain/telemetry";
+import type { QualityStackView } from "@/domain/quality-stack";
 import type { FailureAnalysisResult } from "@/domain/failure-analysis";
 import {
   ManualRepair,
@@ -31,7 +33,7 @@ import {
   repairStageLabels,
 } from "@/components/repair-panel";
 import {
-  fetchRunAttempt, fetchRunFailureAnalysis, fetchRunTelemetry, generateFromPlan, planStory, previewPrompt, reviewStory, validateStory,
+  fetchRunAttempt, fetchRunFailureAnalysis, fetchRunQualityStack, fetchRunTelemetry, generateFromPlan, planStory, previewPrompt, reviewStory, validateStory,
   reviewStoryCommercial,
   validateStoryBeats,
   RunApiError, type RepairDetailApi, type RunApiResult,
@@ -199,6 +201,11 @@ export default function GeneratePage() {
    *  此时不显示面板，改为一句「这个 Run 没有失败分析」。 */
   const [failureAnalysis, setFailureAnalysis] = useState<FailureAnalysisResult | null>(null);
   const [failureStage, setFailureStage] = useState<"idle" | "loading" | "loaded">("idle");
+  /** v2.1.0 TASK §33：这次 Run 的统一质量视图（Quality Center 的数据源）。
+   *  读完后仍是 null 就是 v2.0.0 及更早的 Run（没有 quality-stack.json），
+   *  此时整个 Quality Center 区域不出现（§37）。 */
+  const [qualityStack, setQualityStack] = useState<QualityStackView | null>(null);
+  const [qualityStackStage, setQualityStackStage] = useState<"idle" | "loading" | "loaded">("idle");
   const [runTitle, setRunTitle] = useState("");
   const [runStage, setRunStage] = useState<RunStage>("idle");
   const [runFailed, setRunFailed] = useState(false);
@@ -520,6 +527,19 @@ export default function GeneratePage() {
           // 读不到失败分类不影响任何结论：只当这次没有这份分析
           setFailureAnalysis(null);
           setFailureStage("loaded");
+        });
+      // v2.1.0 TASK §33：统一质量视图同样单独读一次（同一个理由：POST 响应契约不变）。
+      // 视图在 Run 收尾时已经落盘，所以这次请求一定能读到 2.1.0 起的 Run。
+      setQualityStackStage("loading");
+      void fetchRunQualityStack(data.run_id)
+        .then((s) => {
+          setQualityStack(s);
+          setQualityStackStage("loaded");
+        })
+        .catch(() => {
+          // 读不到质量视图不影响任何结论：Quality Center 整个区域不出现（§37）
+          setQualityStack(null);
+          setQualityStackStage("loaded");
         });
     } catch (e) {
       clearStepperTimers();
@@ -1269,6 +1289,22 @@ export default function GeneratePage() {
                         setStoryTab("after");
                       }}
                     />
+                    {/* v2.1.0 TASK §33 Quality Center：质量相关展示的统一入口
+                        （Overview / Diagnostics / Detailed Scores + §34 四类筛选）。
+                        §37 读完了却一份视图都没有（2.0.0 及更早的 Run）时给一句说明，
+                        不摆空表格、不编「0 条诊断」冒充跑过。 */}
+                    {qualityStackStage === "loaded" && qualityStack === null ? (
+                      <div className="mb-4 rounded-2xl border border-border bg-muted/40 p-3 text-[11px] text-muted-foreground">
+                        Quality Center unavailable for this run —— 这次 Run 没有 quality-stack.json（2.0.0 之前的产物）。
+                      </div>
+                    ) : (
+                      <QualityCenter
+                        qualityStack={qualityStack}
+                        review={shownReview}
+                        commercialReview={shownCommercialReview}
+                        beatValidation={result.beat_validation}
+                      />
+                    )}
                     {/* v1.2.0 §31/§32 Quality Summary：总览在前，Validation / Review 作为详情在后 */}
                     <QualityPanel quality={shownQuality} />
                     {/* §28 Validation 区域：Passed / Failed + Issues（Code / Severity / Message）。

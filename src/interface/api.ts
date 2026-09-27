@@ -356,6 +356,20 @@ export async function fetchRunFailureAnalysis(runId: string): Promise<FailureAna
   return data.failureAnalysis ?? null;
 }
 
+/**
+ * v2.1.0 TASK §33 GET /api/runs/<run_id>/quality-stack：读回这次 Run 的统一质量视图。
+ * §32/§27：旧 Run 没有 quality-stack.json 时接口仍返回 200，body.qualityStack 是 null。
+ * 详情接口（fetchRun）已经带了同一份数据，单独取只用于只想看 Quality Center 的场合。
+ */
+export async function fetchRunQualityStack(runId: string): Promise<QualityStackView | null> {
+  const data = (await requestJson(
+    `/api/runs/${encodeURIComponent(runId)}/quality-stack`,
+    undefined,
+    "读取质量总览失败",
+  )) as { qualityStack?: QualityStackView | null };
+  return data.qualityStack ?? null;
+}
+
 /** §30 Prompt Preview（config 必填，beat_plan 可选）。 */
 export async function previewPrompt(
   config: StoryConfig,
