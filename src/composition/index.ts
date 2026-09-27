@@ -29,7 +29,11 @@ import { buildPipeline } from "@/application/generate-service";
 import { appSettings } from "@/infrastructure/config/app-config";
 import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
 import { ExperimentStore } from "@/infrastructure/storage/experiment-store";
+import { BenchmarkStore } from "@/infrastructure/storage/benchmark-store";
+import { benchmarkEnvironment } from "@/infrastructure/tracking/benchmark-environment";
+import { missingPromptRoles } from "@/infrastructure/tracking/prompt-registry";
 import { healthProbes, providerConfigured } from "@/infrastructure/health/health-probe";
+import type { BenchmarkCaseDeps } from "@/application/benchmark-use-cases";
 import type { ArtifactStore as ArtifactStorePort } from "@/ports/artifact-store";
 import type { LLMClient } from "@/ports/llm-client";
 import type { PipelineFactory } from "@/engine/pipeline-components";
@@ -44,6 +48,16 @@ export {
   type WorkspaceOptions,
 } from "./workspace";
 
+// v2.3.0 Benchmark 半边：路由请直接 import "@/composition/benchmark"。
+// 这里 re-export 给 CLI 与嵌入方一个稳定入口（与 workspace 同一套分工）。
+export {
+  createBenchmarkBundle,
+  createBenchmarkCases,
+  type BenchmarkBundle,
+  type BenchmarkCases,
+  type BenchmarkOptions,
+} from "./benchmark";
+
 /** 组合根的入参：全部可选，缺省值一律来自服务端配置（§33 只在这里读）。 */
 export interface StoryLoopOptions {
   /** 产物根目录；缺省取 RUNS_DIR 或仓库下的 runs/。 */
@@ -53,6 +67,9 @@ export interface StoryLoopOptions {
   llm?: LLMClient;
   artifactStore?: ArtifactStorePort;
   experimentStore?: ExperimentStore;
+  /** v2.3.0 Benchmark 用例依赖（Suite 与执行存储、环境装配、生成路径）。 */
+  benchmarkStore?: BenchmarkStore;
+  benchmark?: BenchmarkCaseDeps;
 }
 
 /** 装好的依赖：两个袋子的部件 + 两个存储实例（实例只为渲染与探测留一份）。 */
@@ -60,6 +77,8 @@ export interface StoryLoopDependenciesBundle extends StoryLoopDependencies {
   runsDir: string;
   artifactStore: ArtifactStorePort;
   experimentStore: ExperimentStore;
+  /** v2.3.0：Suite 与执行共用一个存储根（实例留一份给渲染与调试）。 */
+  benchmarkStore: BenchmarkStore;
 }
 
 /** §14 第一步：把 Infrastructure 的实现装配成用例可用的依赖。 */
@@ -67,15 +86,32 @@ export function createDependencies(options: StoryLoopOptions = {}): StoryLoopDep
   const runsDir = options.runsDir?.trim() || appSettings().runsDir;
   const artifactStore = options.artifactStore ?? new ArtifactStore(runsDir);
   const experimentStore = options.experimentStore ?? new ExperimentStore(runsDir);
+  const benchmarkStore = options.benchmarkStore ?? new BenchmarkStore(runsDir);
   const shared = options.llm ? { llm: options.llm } : {};
   return {
     runsDir,
     artifactStore,
     experimentStore,
+    benchmarkStore,
     run: { ...shared, artifactStore },
     // §30：实验与普通 Run 走同一条正式生成路径，这里由组合根把它交到实验用例手上；
     // 凭据探针同样在这里落地——分析层只问一句，自己不去摸环境变量（§33）
     experiment: { ...shared, artifactStore, experimentStore, generate: buildPipeline, providerProbe: providerConfigured },
+    // v2.3.0：Benchmark 与实验同构——同样把正式生成路径交到分析层，凭据与提示词
+    // 探针也在这里落地。区别只在存储：Benchmark 读 Suite、写执行三件套。
+    benchmark:
+      options.benchmark ??
+      ({
+        ...shared,
+        artifactStore,
+        benchmarkStore,
+        suites: benchmarkStore,
+        executions: benchmarkStore,
+        generate: buildPipeline,
+        providerProbe: providerConfigured,
+        promptProbe: missingPromptRoles,
+        environment: benchmarkEnvironment(),
+      } satisfies BenchmarkCaseDeps),
   };
 }
 

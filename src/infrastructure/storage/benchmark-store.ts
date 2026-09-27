@@ -47,7 +47,6 @@ import type {
   BenchmarkSuiteVersionSummary,
 } from "@/ports/benchmark-store";
 import { benchmarkSuiteDigest } from "@/infrastructure/tracking/benchmark-digest";
-import { generateRunId } from "@/infrastructure/id/run-id";
 
 const SUITE_FILE = "suite.json";
 const EXECUTION_FILE = "execution.json";
@@ -89,11 +88,6 @@ function compareVersions(a: string, b: string): number {
     if (diff !== 0) return diff;
   }
   return 0;
-}
-
-/** 生成一个执行 id：与 run_id 同一套形态（时间戳 + 随机后缀），就是目录名。 */
-export function generateBenchmarkId(now: Date = new Date()): string {
-  return generateRunId(now);
 }
 
 export class BenchmarkStore implements BenchmarkSuiteRepository, BenchmarkExecutionRepository {

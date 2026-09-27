@@ -47,10 +47,28 @@ import {
   type ExperimentDetail,
   type ExperimentListItem,
 } from "@/application/experiment-use-cases";
+import {
+  benchmarkHistory,
+  exportBenchmarkResult,
+  getBenchmarkExecution,
+  getBenchmarkSuite,
+  listBenchmarkExecutions,
+  listBenchmarkSuites,
+  runBenchmark,
+  setBenchmarkBaseline,
+  type BenchmarkCaseDeps,
+  type BenchmarkExecutionDetail,
+  type BenchmarkExecutionListItem,
+  type BenchmarkExportOutcome,
+  type BenchmarkHistoryPoint,
+} from "@/application/benchmark-use-cases";
 import type { BeatPlan } from "@/domain/beat-plan";
 import { projectVersion } from "@/infrastructure/config/version";
 import type { ApiErrorBody } from "@/application/error-model";
 import type { ExperimentDefinition, ExperimentResult } from "@/domain/experiment";
+import type { BenchmarkExecution } from "@/domain/benchmark-result";
+import type { BenchmarkSuite } from "@/domain/benchmark-suite";
+import type { BenchmarkSuiteSummary } from "@/ports/benchmark-store";
 
 /** 用例返回的内联形状在这里命名一次，门面签名就不必重复它的展开。 */
 export type PlanOutcome = { status: number; json: BeatPlan | ApiErrorBody };
@@ -66,6 +84,8 @@ export type PromptPreviewOutcome = { status: number; json: { prompt: string } | 
 export interface StoryLoopDependencies {
   run?: RunDeps;
   experiment?: ExperimentCaseDeps;
+  /** v2.3.0 Benchmark 用例依赖；组合根负责装好（§34）。 */
+  benchmark?: BenchmarkCaseDeps;
 }
 
 /** §17 公共服务门面。方法名与既有用例一一对应，不新造语义。 */
@@ -108,6 +128,25 @@ export interface StoryLoopService {
   getRunFailureAnalysis(runId: string): Promise<RunFailureAnalysisLookupResult>;
   /** v2.1.0 TASK §33 一条 Run 的统一质量视图（Quality Center 的数据源）。 */
   getRunQualityStack(runId: string): Promise<RunQualityStackLookupResult>;
+  /** v2.3.0 §83 Benchmark 列表：已存 Suite（含样本数与来源说明）。 */
+  listBenchmarkSuites(): Promise<BenchmarkSuiteSummary[]>;
+  /** v2.3.0 §83 一份 Suite 全文。 */
+  getBenchmarkSuite(suiteId: string, suiteVersion?: string): Promise<BenchmarkSuite>;
+  /** v2.3.0 §83 跑完一次执行（预检不过就不跑，一次付费调用都不发生）。 */
+  runBenchmark(body: unknown): Promise<BenchmarkExecution>;
+  /** v2.3.0 §83 执行列表。 */
+  listBenchmarkExecutions(): Promise<BenchmarkExecutionListItem[]>;
+  /** v2.3.0 §83 一次执行的详情；compareWith 给了就顺带给出逐指标比较。 */
+  getBenchmarkExecution(
+    benchmarkId: string,
+    compareWith?: string | null,
+  ): Promise<BenchmarkExecutionDetail>;
+  /** v2.3.0 §91 历史图取数（只有真实保存过的执行才进得来）。 */
+  benchmarkHistory(suiteId?: string): Promise<BenchmarkHistoryPoint[]>;
+  /** v2.3.0 §83 导出执行结果（JSON / CSV；不含正文、提示词与凭据）。 */
+  exportBenchmarkResult(benchmarkId: string, format: string): Promise<BenchmarkExportOutcome>;
+  /** v2.3.0 §93 把一次执行标记 / 取消标记为 Baseline（纯标签）。 */
+  setBenchmarkBaseline(benchmarkId: string, isBaseline: boolean): boolean;
 }
 
 /** 把绑定好的门面交出去。deps 省略时各用例按服务端配置自行取默认值（§16）。 */
@@ -115,6 +154,8 @@ export function createStoryLoopService(deps: StoryLoopDependencies = {}): StoryL
   const run: RunDeps = deps.run ?? {};
   // 实验用例收 Partial：这里给不给都由 experiment-use-cases 补默认存储（§14）
   const experiment: ExperimentCaseDeps = deps.experiment ?? {};
+  // Benchmark 同理：组合根不给，用例自己补默认存储与环境装配（§14/§33）
+  const benchmark: BenchmarkCaseDeps = deps.benchmark ?? {};
   return {
     version: () => projectVersion(),
     plan: (body) => planStory(body, run.llm, run.planner),
@@ -135,5 +176,14 @@ export function createStoryLoopService(deps: StoryLoopDependencies = {}): StoryL
     getRunTelemetry: (runId) => getRunTelemetry(runId, run.artifactStore),
     getRunFailureAnalysis: (runId) => getRunFailureAnalysis(runId, run.artifactStore),
     getRunQualityStack: (runId) => getRunQualityStack(runId, run.artifactStore),
+    listBenchmarkSuites: () => listBenchmarkSuites(benchmark),
+    getBenchmarkSuite: (suiteId, suiteVersion) => getBenchmarkSuite(suiteId, benchmark, suiteVersion),
+    runBenchmark: (body) => runBenchmark(body, benchmark),
+    listBenchmarkExecutions: () => listBenchmarkExecutions(benchmark),
+    getBenchmarkExecution: async (benchmarkId, compareWith) =>
+      getBenchmarkExecution(benchmarkId, benchmark, { compareWith: compareWith ?? null }),
+    benchmarkHistory: (suiteId) => benchmarkHistory(suiteId, benchmark),
+    exportBenchmarkResult: (benchmarkId, format) => exportBenchmarkResult(benchmarkId, format, benchmark),
+    setBenchmarkBaseline: (benchmarkId, isBaseline) => setBenchmarkBaseline(benchmarkId, isBaseline),
   };
 }

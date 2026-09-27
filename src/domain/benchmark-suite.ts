@@ -16,7 +16,6 @@
  * 一致），于是模型、suite.json、API 响应、CSV 表头五处同名。
  */
 
-import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
 import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
 
 /** suite.json 自己的 schema 版本，与 story-config / beat-plan 的各管各的。 */
@@ -84,6 +83,9 @@ export const BENCHMARK_RUN_LIMIT = { confirmAbove: 30, hard: 200 } as const;
 
 /** 可选 PASS 切线的取值范围（TASK §95）；协议不给就没有切线，平台不替他定。 */
 export const BENCHMARK_PASS_THRESHOLD_LIMIT = { min: 0, max: 100 } as const;
+
+/** 执行说明（label）长度上限：够写「2.3.0 发布前基线」这一句，别写成一篇日记。 */
+export const SUITE_LABEL_MAX = 120;
 
 // ---------------------------------------------------------------------------
 // 数据来源与许可（TASK §11/§12/§13）
@@ -518,4 +520,46 @@ export function validateBenchmarkProtocol(raw: unknown, known: ReadonlySet<strin
   const r = objOf(raw, "protocol");
   unknownKeys(r, ["repetitions", "plannerMode", "acceptedMetrics", "failureHandling", "passThreshold"], "protocol");
   return protocolOf(r, known);
+}
+
+/**
+ * POST /api/benchmarks/executions 的请求体。
+ *
+ * 为什么没有 model / temperature / baseUrl / apiKey 这些字段：Benchmark 测的是
+ * 服务端当下这一套配置（§81）。允许在请求里覆盖它们，就等于允许「挑一个好测的
+ * 环境再测」，测出来的数也就不再是系统在这个部署上的真实表现。所以这里认的
+ * 字段只有四个，多一个都不收。
+ */
+export interface BenchmarkRunRequest {
+  suiteId: string;
+  /** 省略时取版本号最大的那一版（与 Suite 仓储的读法一致）。 */
+  suiteVersion?: string;
+  /** 执行说明；纯粹是标签，不参与任何判定（§94）。 */
+  label?: string;
+  /** §42 样本数超过安全线时的显式确认。 */
+  allowLargeBenchmark?: boolean;
+}
+
+/** 请求体校验：白名单字段 + 绝不带凭据字段。 */
+export function validateBenchmarkRunRequest(raw: unknown): BenchmarkRunRequest {
+  rejectSecretBearingKeys(raw);
+  const r = objOf(raw, "body");
+  unknownKeys(r, ["suiteId", "suiteVersion", "label", "allowLargeBenchmark"], "body");
+  const out: BenchmarkRunRequest = { suiteId: suiteIdOf(r.suiteId) };
+  const version = optStrOf(r.suiteVersion, "body.suiteVersion", 16);
+  if (version !== undefined) {
+    if (!SUITE_VERSION_PATTERN.test(version)) {
+      throw new BenchmarkValidationError("body.suiteVersion 形如 1.0.0（两位或三位数字）");
+    }
+    out.suiteVersion = version;
+  }
+  const label = optStrOf(r.label, "body.label", SUITE_LABEL_MAX);
+  if (label !== undefined) out.label = label;
+  if (r.allowLargeBenchmark !== undefined) {
+    if (typeof r.allowLargeBenchmark !== "boolean") {
+      throw new BenchmarkValidationError("body.allowLargeBenchmark 只能是 true / false");
+    }
+    out.allowLargeBenchmark = r.allowLargeBenchmark;
+  }
+  return out;
 }

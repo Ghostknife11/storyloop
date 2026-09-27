@@ -84,3 +84,15 @@ export function promptSnapshots(): PromptSnapshot[] {
     return snapshot;
   });
 }
+
+/**
+ * v2.3.0 缺了哪些角色的提示词文件（一个都不缺时返回空数组）。
+ *
+ * Benchmark 预检用它在开跑前确认六份提示词都在。为什么不是「读不到就当没有那一
+ * 步」：缺文件的 Run 照样能跑出正文，于是指标表里会多出一批来路不明的样本
+ * ——它们的提示词摘要那一列是空的，而没人说得清当时发出去的究竟是哪一版文案。
+ * 宁可开跑前一句报错，也不要一批说不清的测量结果。
+ */
+export function missingPromptRoles(): string[] {
+  return PROMPT_ROLES.filter((role) => readPromptText(role) === null);
+}
