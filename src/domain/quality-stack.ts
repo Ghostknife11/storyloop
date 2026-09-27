@@ -70,6 +70,19 @@ export interface QualityStackResult {
   summary: QualityStackSummary;
 }
 
+/**
+ * §32 Run Detail 的 API 投影：只带 status / diagnostics / summary。
+ *
+ * 三套结论的本体不在这里重复一遍——`review` / `beat_validation` / `commercial_review`
+ * 已经在同一个响应里各就各位（§27）。投影只补上「这三套合起来看到什么」，
+ * 于是旧客户端读它认识的字段，新客户端多读一个 qualityStack，互不干扰。
+ */
+export interface QualityStackView {
+  status: QualityStackStatus;
+  diagnostics: QualityDiagnostic[];
+  summary: QualityStackSummary;
+}
+
 /** §21 协调器的输入：三套已经跑完的结论，缺哪一路就传 null（§36 具体模块状态由此保留）。 */
 export interface QualityStackModules {
   beatValidation: BeatValidationV2Result | null;
@@ -224,4 +237,16 @@ export function qualityStackResultOf(raw: unknown): QualityStackResult | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * §32 投影函数：QualityStackResult → QualityStackView。
+ *
+ * 纯搬字段，不算第二遍——summary 与 diagnostics 都用盘上那一份，API 与磁盘逐字对得上。
+ * 没有这份文件（v2.0.0 及更早的 Run）时返回 null，读接口据此把面板藏掉，
+ * 与 telemetry / failureAnalysis 同一套约定（§27）。
+ */
+export function qualityStackViewOf(stack: QualityStackResult | null): QualityStackView | null {
+  if (stack === null) return null;
+  return { status: stack.status, diagnostics: stack.diagnostics, summary: stack.summary };
 }

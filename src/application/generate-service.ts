@@ -55,6 +55,7 @@ import type {
   CommercialReviewStatus,
 } from "@/domain/commercial-review";
 import type { FailureAnalysisResult } from "@/domain/failure-analysis";
+import { qualityStackViewOf, type QualityStackView } from "@/domain/quality-stack";
 
 export { ConfigValidationError, UnsupportedConfigVersionError } from "@/domain/story-config";
 export { LLMError } from "@/infrastructure/llm/openai-compatible-llm-client";
@@ -712,6 +713,9 @@ export interface RunDetail {
    *  failure-analysis.json，这里是 null——面板据此走「旧 Run 没有这份分析」的分支，
    * 既不做迁移，也不临时现编一份。 */
   failureAnalysis: FailureAnalysisResult | null;
+  /** v2.1.0 TASK §32：运行级质量总览（status / diagnostics / summary）。v2.0.0 及更早的
+   *  Run 没有 quality-stack.json，这里是 null；三套结论本体由上面各自字段返回。 */
+  qualityStack: QualityStackView | null;
   attempts: AttemptSummary[];
 }
 
@@ -949,6 +953,10 @@ export async function getRun(
       // v1.9.0 §31：v1.9.0 之前的 Run 没有 failure-analysis.json（或被手改坏）时同样是 null，
       // 读接口不补写、不现算——分析结论必须和磁盘上那份逐字对得上
       failureAnalysis: store.readFailureAnalysis(runId),
+      // v2.1.0 TASK §32：运行级质量总览（status / diagnostics / summary）。
+      // 三套结论本体已由上面各自的字段返回，这里只补合并视图，因此是纯追加字段；
+      // v2.0.0 及更早的 Run 没有 quality-stack.json，此时是 null（§27）。
+      qualityStack: qualityStackViewOf(store.readQualityStack(runId)),
       attempts,
     },
   };

@@ -518,6 +518,9 @@ describe("v1.0.0 API 冻结 — Run 入口", () => {
       "min_review_score",
       // v1.2.0 §26：新增字段；旧 Run 没有 quality.json 时由服务端临时装配后照样返回
       "quality",
+      // v2.1.0 TASK §32：运行级质量总览（status / diagnostics / summary），
+      // 三套结论本体由上面各自字段返回，这里是纯追加的合并视图
+      "qualityStack",
       "quality_status",
       "repair_count",
       "review",

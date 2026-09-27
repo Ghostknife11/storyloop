@@ -8,6 +8,7 @@ import type { CommercialReviewResult } from "@/domain/commercial-review";
 import type { RunManifest } from "@/domain/run-manifest";
 import type { RunTelemetry } from "@/domain/telemetry";
 import type { FailureAnalysisResult, FailureCategory } from "@/domain/failure-analysis";
+import type { QualityStackView } from "@/domain/quality-stack";
 
 /** §34/§38 单个 Attempt 摘要：只带结论，不带完整正文。 */
 export interface AttemptSummaryApi {
@@ -263,6 +264,9 @@ export interface RunDetailApi {
   /** v1.9.0 §31 这次 Run 的失败分类。v1.9.0 之前的 Run 没有 failure-analysis.json，
    *  这里是 null，面板据此显示「这个 Run 没有失败分析」——不做迁移也不现算。 */
   failureAnalysis: FailureAnalysisResult | null;
+  /** v2.1.0 TASK §32 运行级质量总览（status / diagnostics / summary）。v2.0.0 及更早的
+   *  Run 没有 quality-stack.json，这里是 null；三套结论本体由上面各自字段返回。 */
+  qualityStack: QualityStackView | null;
   attempts: AttemptSummaryApi[];
 }
 
