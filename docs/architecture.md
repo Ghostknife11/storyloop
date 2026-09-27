@@ -167,7 +167,7 @@ Finalize：提升入选 Attempt 的产物到 Run 根，写 quality / manifest / 
 ```text
 runs/<run_id>/
 ├── config.json · beats.json · story.md · validation.json · review.json · quality.json
-├── beat-validation.json · commercial-review.json
+├── beat-validation.json · commercial-review.json · quality-stack.json
 ├── metadata.json · run-manifest.json · telemetry.json · failure-analysis.json
 └── attempts/NN/            （含 repaires/NN/MM/）
 ```
@@ -177,12 +177,18 @@ runs/<run_id>/
 `experiment` 块，普通 Run 里这个键不出现）。v1.x 的产物在 2.0.0 中原样可读，读不到的旧
 字段按「没有这个键」处理，不补零、不猜测。
 
+v2.1.0 在运行级多一个 `quality-stack.json`（三套质量结论的统一视图，只在 Run 根目录一份），
+归属规则一个字都没变：它由 `QualityStackCoordinator`（Domain 侧的纯函数）从已有的三套结论
+算出，经 Engine 调端口落盘；上面每一个原有文件一个字段都没少。逐字段契约见
+[quality-stack.md](./quality-stack.md)。
+
 ## 安全边界
 
 | 边界 | 位置 | 守住的约定 |
 |---|---|---|
 | LLM 端点地址关卡 | `infrastructure/security/url-guard.ts` | 请求体 `baseUrl` 只允许 http/https 公网地址，私网 / 环回 / 链路本地（含 `169.254.169.254`）在**发出任何请求之前**被拒；全仓唯一实现，服务端 `LLM_BASE_URL` 是受信配置不受此限 |
 | 凭据隔离 | `infrastructure/config/app-config.ts` | 密钥只在服务端环境里被读一次；不进 API 响应、不进署名、不进产物 |
+| 质量诊断序列化 | `domain/quality-diagnostic.ts` · `domain/quality-stack.ts` | 三套质量组件的诊断只走既有的 secret-safe 边界落盘：`quality-stack.json` 里没有 API Key、没有 `Authorization` / `Cookie` 头、没有 `process.env` 原文、没有带密钥的 URL；诊断也不驱动重试 / 修订 / 换模型 / 换 Prompt |
 | 文本净化 | `domain/safe-text.ts` | 绝对路径替换、凭据打码，落盘与响应前统一过一遍 |
 | URL 关卡唯一实现 | `infrastructure/security/url-guard.ts` | `assertPublicBaseUrl` 只有一份定义，架构测试盯着 |
 | 健康接口 | `app/api/health/route.ts` | 只回答是非题（配没配 / 能不能写），不返回密钥、不返回 baseUrl |

@@ -13,6 +13,59 @@ All notable changes to Storyloop.
 
 ---
 
+## [2.1.0] —— 2026-09-27
+
+2.1.0 在 StoryLoop 2.0 平台架构上升级质量系统：Beat Validator、故事质量 Reviewer 与
+Commercial Reviewer 统一使用结构化 Diagnostic 语言，并在不改变既有 Co/N/C/Ca 与 H/P/E/Pf
+指标语义的前提下，提高诊断的一致性与可解释性。
+
+**没有任何破坏性变更**：HTTP API、请求响应字段、CLI、错误码、`runs/` 下原有产物的布局与
+字段、界面全部与 2.0.0 逐字一致，2.0.0 及更早写的 Run 原样可读。变的是三套质量组件**另外**
+还产出一份统一的 `QualityDiagnostic` 清单，以及一次 Run 多落一份 `quality-stack.json`
+把三套结论汇到一页。
+
+### Added
+
+- Advanced Quality Stack
+- Unified `QualityDiagnostic` model
+- Quality Reviewer v2 with structured Co/N/C/Ca diagnostics
+- Beat Validator v2 with unified planning diagnostics
+- Commercial Reviewer v2 with structured H/P/E/Pf diagnostics
+- Quality Stack Coordinator
+- `quality-stack.json`
+- Unified Quality Center UI
+- Diagnostic filtering by source, severity, target, and category
+- **只读出口**：`GET /api/runs/<run_id>/quality-stack`（旧 Run 回 `{qualityStack: null}`，
+  仍是 200）与 Run 详情响应的可选字段 `qualityStack`（`{status, diagnostics, summary}`）
+- **统一诊断契约文档**（[docs/quality-stack.md](docs/quality-stack.md)）：`QualityDiagnostic`
+  字段、三份 category 白名单、`status` 三值、`summary` 计数口径与三条边界
+- **八个新测试文件**（`tests/test_quality_diagnostic.test.ts`、`test_quality_stack.test.ts`、
+  `test_quality_stack_storage.test.ts`、`test_quality_stack_api.test.ts`、
+  `test_quality_center.test.ts`、`test_quality_stack_compat.test.ts`、
+  `test_failure_quality_stack.test.ts`、`test_quality_stack_security.test.ts`），
+  全部只用假组件，不打任何真实付费 API
+
+### Changed
+
+- Existing reviewers and validators now emit a shared diagnostic language
+- Existing score meanings remain compatible with the established 1.x dimensions
+- Existing review, commercial-review, beat-validation, and quality artifacts remain available
+- Failure Analysis may consume structured diagnostics as evidence without becoming causal attribution
+- 运行级固定文件数从十二个变十三个（新增的 `quality-stack.json` 只在 Run 根目录一份，
+  `attempts/` 与 `repairs/` 下都没有它）；上面每一个原有文件一个字段都没少
+- 三套质量组件的提示词版本推进到 `2`（`PROMPT_VERSIONS`），`run-manifest.json` 的出身清单
+  随之记录新版本；提示词份数与名字不变
+
+### Security
+
+- Quality diagnostics are serialized through the existing secret-safe platform boundaries
+- Existing URL Guard, manifest, experiment, telemetry, failure-analysis, and platform security protections remain intact
+- `quality-stack.json` 里没有 API Key、没有 `Authorization` / `Cookie` 头、没有
+  `process.env` 原文、没有带密钥的 URL；`tests/test_quality_stack_security.test.ts`
+  用假密钥 / 假 Cookie / 假环境变量原文真跑一次 Run，逐个出口把守
+
+---
+
 ## [2.0.0] —— 2026-09-27
 
 2.0.0 是 StoryLoop 第一个架构大版本：把 1.x 累积出来的生成、验证、审阅、修订、实验、

@@ -5,6 +5,35 @@
 >
 > 版本策略见 [compatibility.md](./compatibility.md)。
 
+## 从 2.0.0 升级到 2.1.0
+
+**没有任何需要改代码的地方，也没有任何产物要迁移。** 2.1.0 是 2.0 平台架构上的第一个
+能力增强版本：它给质量系统换了一套统一的诊断语言，并把三套质量结论汇成一页。
+HTTP API、请求响应字段、CLI、错误码、`runs/` 下原有产物的布局与字段、界面全部与 2.0.0
+逐字一致，2.0.0 及更早写的 Run 原样可读。契约见
+[quality-stack.md](./quality-stack.md)。
+
+要紧的有四条：
+
+1. **运行级多一个文件。** 每次 Run 在 `runs/<run_id>/` 下多落一份 `quality-stack.json`
+   （三套质量结论的统一视图），固定文件数从十二个变十三个。它只在 Run 根目录一份，
+   `attempts/` 与 `repairs/` 下都没有它。**上面每一个原有文件一个字段都没少。**
+2. **Run 详情多一个可选字段。** `GET /api/runs/<run_id>` 的响应多一个 `qualityStack`
+   （`{status, diagnostics, summary}` 或 `null`），另有一条只读路由
+   `GET /api/runs/<run_id>/quality-stack`。按「键在不在」解析的下游要多容忍一个可能是
+   `null` 的可选键；没有这个文件（2.0.0 及更早的 Run）时读作 `null`、面板整个隐藏，
+   磁盘上不会被补写。
+3. **分数语义一个都没变。** `Co/N/C/Ca` 与 `H/P/E/Pf` 的维度名、0–100 口径、四维均分算法、
+   `review.score` / `commercial_review.score` / `beat_validation.issues` 全部逐字保留。
+   变的是这三套结论**另外**还产出结构化诊断（`QualityDiagnostic`）：Beat 校验的
+   `issues` 与新的 `diagnostics` 是同一批事实的两种写法，`review.json` /
+   `commercial-review.json` / `beat-validation.json` 的既有字段一个没动。
+4. **诊断不驱动任何决策。** 没有任何代码读诊断来决定重试、修订、采纳、换模型或换 Prompt：
+   RetryPolicy 与 Repair 的判定只认整体分与校验结论，诊断条数从 1 条变 12 条，
+   重试次数与修订类别一字不变。失败分析可以把诊断当证据读，但它仍然只分类、不归因。
+
+回滚到 2.0.0 的代价为零：多出来的文件、字段与路由被旧版本忽略。
+
 ## 从 1.9.1 升级到 2.0.0
 
 **没有任何需要改代码的地方，也没有任何产物要迁移。** 2.0.0 改的是仓库内部的依赖方向

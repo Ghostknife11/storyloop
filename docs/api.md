@@ -113,6 +113,7 @@
 | GET | `/api/runs/<run_id>` | Run 详情 |
 | GET | `/api/runs/<run_id>/telemetry` | v1.8.0 新增：读回这次 Run 的遥测；旧 Run 没有 `telemetry.json` 时返回 `{telemetry: null}`（仍是 200） |
 | GET | `/api/runs/<run_id>/failure-analysis` | v1.9.0 新增：读回这次 Run 的失败分类；失败或旧 Run 没有 `failure-analysis.json` 时返回 `{failureAnalysis: null}`（仍是 200） |
+| GET | `/api/runs/<run_id>/quality-stack` | v2.1.0 新增：读回这次 Run 的统一质量视图；旧 Run 没有 `quality-stack.json` 时返回 `{qualityStack: null}`（仍是 200） |
 | GET | `/api/runs/<run_id>/attempts/<attempt_number>` | 单次尝试详情 |
 | POST | `/api/prompt/preview` | 看将要发给模型的 prompt 长什么样，不调模型 |
 | POST | `/api/experiments` | v1.7.0 新增：登记一份实验定义（只写 `definition.json`，不跑） |
@@ -221,6 +222,11 @@ v1.8.0 起再多一个 `telemetry`：读 `runs/<run_id>/telemetry.json`，原样
 v1.9.0 起再多一个 `failureAnalysis`：读 `runs/<run_id>/failure-analysis.json`，原样返回；
 没有这个文件（1.9.0 之前的 Run）、JSON 坏掉或形状不认识时是 `null`，磁盘上同样不会被补写。
 字段级契约见 [failure-analysis.md](./failure-analysis.md)。
+v2.1.0 起再多一个 `qualityStack`：读 `runs/<run_id>/quality-stack.json` 的投影
+（`{status, diagnostics, summary}`，字段级契约见 [quality-stack.md](./quality-stack.md)）；
+没有这个文件（2.0.0 及更早的 Run）、JSON 坏掉或形状不认识时是 `null`，磁盘上同样不会被补写。
+三套结论的本体不在这里重复——`review` / `beat_validation` / `commercial_review` 各就各位，
+`qualityStack` 只补上「这三套合起来看到什么」。纯 additive，旧客户端读它认识的字段即可。
 `run_id` 为 `""`、`.`、`..` 或含路径分隔符时 400；Run 不存在 404 `RUN_NOT_FOUND`。
 
 `quality` 按三级兜底取，三级都是同一版正文（入选 Attempt 最终留下的那一版）：
@@ -292,6 +298,29 @@ Run 不存在 404 `RUN_NOT_FOUND`；`run_id` 为 `""`、`.`、`..` 或含路径�
 这份分析**不做因果归因**：没有 root cause 字段、没有「很可能是因为」，每条信号只带它自己的
 证据引用（哪份文件 · 哪个字段 · 哪个 Attempt · 哪一轮修订）。API 侧没有任何写入口——
 没有任何路由能通过它触发重试、修订或重新生成。
+
+### `GET /api/runs/<run_id>/quality-stack`（v2.1.0 新增）
+
+只读，无请求体，不调用模型（这一层根本没有模型参与），不写任何产物。响应体恒为：
+
+```json
+{ "qualityStack": { "status": "complete", "diagnostics": [], "summary": { "totalDiagnostics": 0, "errors": 0, "warnings": 0, "info": 0 } } }
+```
+
+`qualityStack` 是 `quality-stack.json` 的**投影**，只带三个字段（三套结论的本体不在这里
+重复），读不到时是 `null`：
+
+- 2.0.0 及更早的 Run 没有这个文件 → `{ "qualityStack": null }`
+- 文件存在但 JSON 坏掉、或形状不认识（`schemaVersion` 不符、`status` 与在位模块对不上、
+  `summary` 与 diagnostics 计数不符、某条诊断非法）→ 同样是 `null`，**不会** 500，也不会补写磁盘
+
+Run 不存在 404 `RUN_NOT_FOUND`；`run_id` 为 `""`、`.`、`..` 或含路径分隔符时 400
+（与其它 Run 读接口同一套校验）。
+
+`status` 三值：`complete`（三套结论都在）、`partial`（至少一套在但不是全套，
+某一套失败时 Run 照常完成）、`failed`（一套都没有）。诊断只说明、不驱动——
+没有任何写入口能通过它触发重试、修订或重新生成。这个响应里同样没有 API Key、
+`Authorization` / `Cookie` 头、环境变量原文或带密钥的 URL。
 
 ### `POST /api/validate-beats`（v1.4.0 新增）
 
@@ -471,6 +500,8 @@ Run 不存在 404 `RUN_NOT_FOUND`；`run_id` 为 `""`、`.`、`..` 或含路径�
   不做失败归因与根因分析、不设阈值、不出告警、也没有分布式追踪
 - **失败分析不是根因分析**：`/failure-analysis` 只把观测到的证据归进固定类别并给出引用，
   不做因果推断、不给 Root Cause、不出修复建议，也不据此改变任何生成行为
+- **质量视图不是第四套评价**：`/quality-stack` 只把已有的三套结论汇到一页并给出统一诊断，
+  不重新评分、不补维度、不驱动重试修订采纳，也不对旧 Run 补写磁盘
 
 ## 相关
 
@@ -480,4 +511,5 @@ Run 不存在 404 `RUN_NOT_FOUND`；`run_id` 为 `""`、`.`、`..` 或含路径�
 - [受控实验契约（v1.7.0）](./experiments.md)
 - [Run Telemetry 契约（v1.8.0）](./telemetry.md)
 - [失败分析契约（v1.9.0）](./failure-analysis.md)
+- [统一质量视图契约（v2.1.0）](./quality-stack.md)
 - [CLI 契约](./cli.md)

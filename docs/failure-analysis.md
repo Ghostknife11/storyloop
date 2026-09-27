@@ -91,6 +91,7 @@ Primary / Secondary 的判定（§21/§22）：
 |---|---|
 | `validation.json` + `issues[].code` | 正文校验的具体 issue code |
 | `beat-validation.json` + `issues[].code` | 骨架结构校验的具体 issue code |
+| `quality-stack.json` + `diagnostics[].id` / `.severity` | v2.1.0 起：三套质量组件的结构化诊断（`QualityDiagnostic`）也可以作证据引用；引用的仍是盘上那一条诊断，不转述、不改写 |
 | `metadata.json` + `attempt_count` / `quality_status` | 重试耗尽的两个事实（真数出来的 Attempt 数、最终采纳结论） |
 | `metadata.json` + `repair_count` | 修订耗尽时的真实修订轮数 |
 | `run-manifest.json` + `repairs[].succeeded` | 每一轮修订的成败；同时带 `attemptId` / `repairId`（v1.9.1 起填），能指到具体那一轮 |
@@ -98,7 +99,9 @@ Primary / Secondary 的判定（§21/§22）：
 | 仅有 `code` 与 `note` | 来自异常链的码，没有可指的文件 |
 
 产物存在性只能作辅助观察，**不单独决定失败类别**（§42）：没有 `commercial-review.json`
-不代表商业可读性有问题，只代表这一步没跑。
+不代表商业可读性有问题，只代表这一步没跑。v2.1.0 起的 `quality-stack.json` 同理：它只是
+三套质量结论与统一诊断的汇总页，分析器可以引其中的诊断当证据，但诊断条数多寡本身
+不决定任何类别，也不触发任何动作。
 
 ## 重试 / 修订耗用的判定
 

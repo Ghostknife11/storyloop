@@ -17,6 +17,14 @@
 > 字段、界面全部与 1.9.1 逐字一致；1.0.0 以来写的产物原样可读，不需要迁移。改的是仓库内部
 > 的依赖方向——六层职责、一个组合根、端口与适配器，见
 > [docs/architecture.md](docs/architecture.md)。
+>
+> **v2.1.0 在 StoryLoop 2.0 平台架构上升级质量系统：Beat Validator、故事质量 Reviewer 与
+> Commercial Reviewer 统一使用结构化 Diagnostic 语言，并在不改变既有 Co/N/C/Ca 与 H/P/E/Pf
+> 指标语义的前提下，提高诊断的一致性与可解释性。** 三套结论各自多产出一份统一的
+> `QualityDiagnostic` 清单，一次 Run 再多落一份 `quality-stack.json` 把这三套汇到一页；
+> 既有的 `review.score` / `commercial_review.score` / `beat_validation.issues` 一个字段都没动，
+> 2.0.0 及更早写的 Run 原样可读。见下面
+> [Advanced Quality Stack](#advanced-quality-stackv210)。
 
 ## 快速开始
 
@@ -101,8 +109,16 @@ StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts
   `UNKNOWN`（不猜），也没有任何代码读它来改生成行为。API 是
   `GET /api/runs/<run_id>/failure-analysis`，界面是 Run 详情页的「失败分析」面板，
   实验详情页另有一组失败类别分布
+- **Advanced Quality Stack（高级质量栈，v2.1.0）**：Beat Validator、故事质量 Reviewer 与
+  Commercial Reviewer 统一使用结构化 `QualityDiagnostic` 语言（`source` / `category` /
+  `severity` / `target` / `message`），一次 Run 再多落一份 `quality-stack.json` 把三套结论
+  汇成一页，界面是 Run 详情页的 Quality Center 面板（可按来源 / severity / target / category
+  筛选）。三套结论的分数语义一个都没改：Co/N/C/Ca 与 H/P/E/Pf 的维度名、0–100 口径与均分
+  算法逐字保留，`review.json` / `commercial-review.json` / `beat-validation.json` 的既有字段
+  一个不少。诊断只说明、不驱动：不触发重试、不触发修订、不换模型、不换 Prompt
 - **现代 Web UI**：六阶段进度、Attempt 计数、修订明细、Validation / Review / Commercial
-  Review / Run Provenance / 可观测性 / 失败分析面板、实验列表与实验详情、Run ID 与产物清单
+  Review / Quality Center / Run Provenance / 可观测性 / 失败分析面板、实验列表与实验详情、
+  Run ID 与产物清单
 - **Modular Platform Architecture（平台化架构，v2.0.0）**：上面每一种能力都落在明确的层里——
   Stable Domain Contracts（领域契约与纯规则）、Application Use Cases（用例编排与公共门面）、
   Engine（生成 / 校验 / 审阅 / 修订 / 管道）、Analysis（实验汇总与失败分类）、
@@ -154,6 +170,14 @@ StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts
 > **不自动调参**（同一份定义重跑会被 409 挡住：定义与结果都不可变，要改条件就复制成一个新实验）。
 > 同一次实验里 A 组三条都有分、B 组只有一条有分，两组的均值本来就不可直接比大小——
 > 这也是界面必须把「有几条真的跑出了分」摆出来的原因。
+>
+> **统一诊断只说明，不驱动（v2.1.0）**：三套质量组件现在说同一种 `QualityDiagnostic`，
+> 但它不携带 rootCause / confidenceProbability / repairPolicy / adaptiveWeight /
+> causalNodeId / evidenceLedgerId / characterDecisionId，也没有任何代码读它来决定重试、
+> 修订、采纳、换模型或换 Prompt——`RetryPolicy` 里仍然只有 `min_review_score` 一个总分门槛。
+> `quality-stack.json` 同样不是第四套评价：不调用模型、不重新评分、不补维度，只是把已有的
+> 三套结论汇到一页。某一套没跑出来时对应的键整个不出现（`status` 相应变成 `partial` 或
+> `failed`），没有这个文件的旧 Run 面板整个隐藏——不补 0、不编一份「0 条诊断」冒充跑过。
 >
 > 后端没有任何为未实现能力预留的隐藏接口——没有的功能就没有入口。
 
@@ -366,6 +390,7 @@ runs/
     ├── run-manifest.json  # 这次 Run 的出身清单（v1.6.0 新增，只在运行级一份）
     ├── telemetry.json    # 这次 Run 的执行过程：阶段耗时 / 调用次数 / 重试修订 / 失败阶段（v1.8.0 新增）
     ├── failure-analysis.json  # 这次 Run 的失败分类：类别 / 信号 / 证据 / 首个失败阶段（v1.9.0 新增）
+    ├── quality-stack.json  # 三套质量结论的统一视图 + 统一诊断清单（v2.1.0 新增，只在运行级一份）
     └── attempts/
         ├── 01/
         │   ├── story.md          # 该次尝试的正文（发生过修订时为修订后的版本）
@@ -401,6 +426,9 @@ runs/
 `duration_ms`、`llm_call_count`、`failure_analysis_status`、`primary_failure_category`。
 `model` 始终是「本次真正生效的模型」（请求覆盖 → 环境变量 → 缺省值），attempt 级的 `error`
 没有错误时是 `null`——这两条是 v1.0.0 固定下来的字段语义。
+v2.1.0 起的 `quality-stack.json` **不在 metadata 里占任何字段**：它是纯 additive 的新产物，
+读它走 `GET /api/runs/<run_id>/quality-stack` 或 Run 详情的 `qualityStack`，
+字段口径见 [docs/quality-stack.md](docs/quality-stack.md)。
 v1.8.0 起的 `duration_ms` / `llm_call_count` 是 `telemetry.json` 的转述：想看阶段耗时、
 每次模型调用的起止与 usage，去读 [docs/telemetry.md](docs/telemetry.md)，metadata 里的
 这两个数只是不用再翻一个文件时的快捷方式。
@@ -701,6 +729,85 @@ Run 类入口与两个读回接口响应里的 `quality`、前端 Quality Summar
 `POST /api/validate-beats` 可以单独校验一份骨架：同样的模型、同样的规则，
 但**不写任何产物**——Run 里那一份 `beat-validation.json` 由 Pipeline 自己负责。
 
+## Advanced Quality Stack（v2.1.0）
+
+v2.1.0 在 StoryLoop 2.0 平台架构上升级质量系统：Beat Validator、故事质量 Reviewer 与
+Commercial Reviewer 统一使用结构化 Diagnostic 语言，并在不改变既有 Co/N/C/Ca 与 H/P/E/Pf
+指标语义的前提下，提高诊断的一致性与可解释性。
+
+v2.0.0 及以前，这三套组件各说各话：Beat 校验是 `BeatValidationIssue`（code + severity +
+beat_ids），商业审阅只有一句 `problems` 字符串。v2.1.0 让它们统一到同一个
+`QualityDiagnostic` 模型上，于是同一个诊断既能进 `quality-stack.json`，也能进界面的
+Quality Center，还能被 FailureAnalyzer 当结构化证据读。
+
+### Unified Diagnostics：一条诊断长什么样
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | string | 稳定标识，由校验方按输出顺序指派（`<source>-<序号>`），不让模型自己编 |
+| `source` | string | `beat-validator` / `quality-reviewer` / `commercial-reviewer`，由解析方给定 |
+| `category` | string | 稳定问题码，按来源各认各的白名单（见下） |
+| `severity` | string | `info`（可优化）/ `warning`（明显影响质量，通常不阻止 Pipeline）/ `error`（结构性问题，可阻止当前阶段） |
+| `target` | string | `beat-plan` / `story` / `opening` / `middle` / `ending` / `character` / `global` |
+| `message` | string | 人类可读说明，不能为空 |
+| `suggestion` | string? | 可选的非空建议，没给就不出现 |
+| `relatedBeatIds` | number[]? | 可选：涉及哪几拍 |
+
+三个来源各认自己那一份 category 白名单：Beat 校验直接沿用 v1.4.0 的十一个稳定 Code
+（于是旧的 `issues` 与新的 `diagnostics` 是同一批事实的两种写法，映射时不需要翻译表）；
+故事质量审阅用十二个类别（`causal_gap` / `weak_climax` / `character_inconsistency` …）；
+商业可读性审阅用另外十个（`weak_opening` / `slow_pacing` / `weak_payoff` …）。
+故事质量诊断写进商业类别、或反过来，一律按非法输出处理——两套评价体系不做换算。
+完整清单见 [docs/quality-stack.md](docs/quality-stack.md)。
+
+### 三套组件各自多产出什么
+
+| 组件 | 既有结论（逐字未动） | v2.1.0 新增 |
+|---|---|---|
+| Quality Reviewer v2 | `score`（四维均分）+ Co/N/C/Ca 四维 + `summary` | `diagnostics`（结构化问题清单） |
+| Beat Validator v2 | `passed` + `issues` + `summary` | `diagnostics`（与 `issues` 同一批事实） |
+| Commercial Reviewer v2 | `score`（四维均分）+ H/P/E/Pf 四维 + `summary` | `diagnostics`（结构化问题清单） |
+
+**没有一个分数被改写过**：四维均分的算法、0–100 口径、`review.score` /
+`commercial_review.score` / `beat_validation.issues` 全部与 2.0.0 逐字一致；
+`review.json` / `commercial-review.json` / `beat-validation.json` 的既有字段一个不少，
+v1.x 客户端的读法完全不变。
+
+### quality-stack.json：把三套结论汇到一页
+
+每次 Run 在 `runs/<run_id>/` 下多落一份 `quality-stack.json`（只在 Run 根目录一份，
+`attempts/` 与 `repairs/` 下都没有它），运行级固定文件数从十二个变十三个：
+
+| Field | Type | Description |
+|---|---|---|
+| `schemaVersion` | string | 本文件自身的 schema 版本，当前恒为 `"1"` |
+| `status` | string | `complete`（三套结论都在）/ `partial`（至少一套在）/ `failed`（一套都没有），按在位模块确定性换算 |
+| `beatValidation` / `qualityReview` / `commercialReview` | object? | 三套结论原样收录，一分不改、一个维度不补；没跑出来时整键不出现 |
+| `diagnostics` | QualityDiagnostic[] | 三套诊断按 骨架 → 故事质量 → 商业可读性 合并后轻量去重（只按 source + category + target + message 判重） |
+| `summary` | object | `totalDiagnostics` / `errors` / `warnings` / `info`，由 `diagnostics` 现算 |
+
+它不是第四套评价：不调用模型、不重新评分、不新增分数。读不到（2.0.0 及更早的 Run、
+文件损坏、形状不对）时统一读作 `null`，磁盘上不会被补写。
+
+### 出口：一条路由、一个字段、一块面板
+
+| 出口 | 说明 |
+|---|---|
+| `GET /api/runs/<run_id>/quality-stack` | v2.1.0 新增只读路由，回 `{qualityStack: {status, diagnostics, summary}}`；旧 Run 是 `{qualityStack: null}`（仍是 200） |
+| Run 详情响应 | 多一个可选字段 `qualityStack`，形状同上；三套结论的本体仍在 `review` / `beat_validation` / `commercial_review` 各就各位 |
+| Quality Center 面板 | Run 详情页多一块：Overview 三行（Planning / Story Quality / Commercial）+ 按 severity 分组的诊断清单 + 四类筛选（来源 / severity / target / category，同时生效）。没有 `quality-stack.json` 的 Run 整个区域隐藏 |
+
+### 三条边界
+
+1. **诊断只说明，不驱动。** 不触发重试、不触发修订、不进采纳判定、不换模型、不换 Prompt。
+   诊断从 1 条变 12 条，`RetryPolicy` 与 `RepairStrategy` 的判定一字不变。
+2. **失败分析可以读它，但不会因此变成归因。** `failure-analysis.json` 可以把诊断当证据
+   引用，仍然只分类、不推断原因。
+3. **不落敏感数据。** 诊断只走既有的 secret-safe 平台边界序列化：`quality-stack.json` 里
+   没有 API Key、没有 `Authorization` / `Cookie` 头、没有原始环境变量、没有带密钥的 URL。
+
+逐字段契约见 [docs/quality-stack.md](docs/quality-stack.md)。
+
 ## 定点修订（Targeted Repair）
 
 请求五个字段：`config`、`beat_plan`、`story`、`issue_type`、`issue_message`。
@@ -834,6 +941,7 @@ v1.4.0 起 Storyloop 只回答「哪一步失败了」，v1.9.0 把这件事往�
 | GET | `/api/runs/<run_id>` | 读回一次 Run 与它的 Attempt 摘要 |
 | GET | `/api/runs/<run_id>/telemetry` | v1.8.0 新增：读回这次 Run 的遥测；旧 Run 没有 `telemetry.json` 时是 `{telemetry: null}` |
 | GET | `/api/runs/<run_id>/failure-analysis` | v1.9.0 新增：读回这次 Run 的失败分析；失败或旧 Run 没有 `failure-analysis.json` 时是 `{failureAnalysis: null}` |
+| GET | `/api/runs/<run_id>/quality-stack` | v2.1.0 新增：读回这次 Run 的统一质量视图；旧 Run 没有 `quality-stack.json` 时是 `{qualityStack: null}` |
 | GET | `/api/runs/<run_id>/attempts/<n>` | 读回某一次 Attempt 的详情 |
 | POST | `/api/experiments` | 建一份实验定义（201）。**只建，不跑** |
 | GET | `/api/experiments` | 实验列表：定义摘要 + 结果状态，不带样本详情 |
@@ -974,6 +1082,10 @@ mapped / NAT64 地址按内嵌的那个地址判
   修订或采纳，也没有「按建议修复」这类动作；同样的输入得到同样的重试次数与同样的修订类别
 - **Beat 校验只管结构，且只报告**：它不评价规划质量（这一拍写得好不好、该不该这么排），
   不做跨拍因果推演，也没有自动改写、重排、补拍或重新规划——发现问题后由你决定怎么改
+- **统一诊断只说明，不驱动（v2.1.0）**：三套质量组件说同一种 `QualityDiagnostic`，
+  但诊断条数不改变任何判定——重试仍只看 `min_review_score` 一个总分门槛，修订仍只看
+  校验与结构审阅结论；`quality-stack.json` 也不重新评分、不补维度、不设质量门禁，
+  只是把已有的三套结论汇到一页供人看
 - **没有工作流引擎 / DAG / Stage Registry**：阶段顺序固定，不能任意跳段
 - **没有鉴权、限流、批量与流式**：API 没有用户体系，也没有 SSE / WebSocket
 - **`target_words` 是目标不是保证**：实际输出长度受模型能力与上下文窗口影响
@@ -982,6 +1094,19 @@ mapped / NAT64 地址按内嵌的那个地址判
   这一版没有多模态、没有外部知识库、没有检索增强，也没有把任何未实现能力预埋成接口
 
 ## 升级说明
+
+v2.1.0 在 2.0 平台架构上升级质量系统，**不需要改任何代码、也不需要迁移任何产物**：
+HTTP API、请求响应字段、CLI、错误码、`runs/` 下原有产物的布局与字段、界面全部与 2.0.0
+逐字一致，2.0.0 及更早写的 Run 原样可读。要紧的有四条：运行级多一个文件
+`quality-stack.json`（固定文件数从十二个变十三个，原有文件一个字段都没少）；
+Run 详情响应多一个可选字段 `qualityStack`，另多一条只读路由
+`GET /api/runs/<run_id>/quality-stack`（旧 Run 读作 `null`、面板整个隐藏、磁盘上不补写）；
+Co/N/C/Ca 与 H/P/E/Pf 的分数语义一个都没变（`review.score` /
+`commercial_review.score` / `beat_validation.issues` 逐字保留）；
+诊断不驱动任何决策（RetryPolicy 与 Repair 的判定只认整体分与校验结论，诊断条数变了
+重试次数与修订类别一字不变）。回滚到 2.0.0 的代价为零：多出来的文件、字段与路由被旧版本
+忽略。逐版说明见 [docs/upgrade.md](docs/upgrade.md)，逐字段契约见
+[docs/quality-stack.md](docs/quality-stack.md)。
 
 v2.0.0 是**第一个架构大版本**，**不需要改任何代码、也不需要迁移任何产物**：HTTP API、
 请求响应字段、CLI、错误码、`runs/` 下的产物布局与字段、界面全部与 1.9.1 逐字一致，
@@ -1215,7 +1340,25 @@ v2.0.0 的平台架构另有三个测试文件：
 两步装配、门面每个用例方法都能取到、`/api/health` 与 `/api/version` 只回真假布尔与版本号）。
 全部用 `FakeLLM`，不打任何真实付费 API。
 
-全部测试合计 **91 个文件 / 1402 条**，全部只调用真实 LLM 之外的桩：
+v2.1.0 的统一质量视图新增八个测试文件（同样只用假组件，不调真实接口）：
+`test_quality_diagnostic`（诊断 schema：三档 severity × 七个 target、三份类别白名单、
+空 message、非法 `relatedBeatIds`、id 由校验方指派、轻量去重只认字符串相等）、
+`test_quality_stack`（协调器：模块在位数 → `status` 三值、诊断合并顺序与去重、
+`summary` 由 diagnostics 现算、写盘前严格校验）、
+`test_quality_stack_storage`（落盘位置只在 Run 根目录、不删旧产物、读盘三层降级）、
+`test_quality_stack_api`（新路由与 Run 详情附加字段、旧 Run 读作 `null`、不补写磁盘）、
+`test_quality_center`（面板状态推导、四类筛选同时生效、筛选选项固定顺序）、
+`test_quality_stack_compat`（旧客户端读 `review.score` / `review.dimensions` /
+`commercial_review.score` / `beat_validation.issues` / `quality.overall_score`、
+没有 `quality-stack.json` 的 v2.0.0 Run 照常可读、Retry / Repair 回归不受诊断条数影响）、
+`test_failure_quality_stack`（失败分析把诊断当证据读，仍不归因、不自动动作）、
+`test_quality_stack_security`（假密钥 / Cookie / 环境变量原文 / 带密钥的 URL 一律不进
+`quality-stack.json`、Run 详情响应与 `/quality-stack` 响应、界面输出）。
+三套组件的 v2 rubric 与诊断映射散在 `test_beat_validation` / `test_commercial_review` /
+`test_quality_dimensions` / `test_review_parser` / `test_failure_analyzer` 等原有文件里
+（+200 余条，未新增文件）。
+
+全部测试合计 **99 个文件 / 1552 条**，全部只调用真实 LLM 之外的桩：
 LLM 由注入的桩对象或 `FakeLLM` 替代（`tests/helpers/fixtures.ts`），
 `fetch` 也被桩掉。重试相关断言同样只用桩，从不触发真实模型调用。
 URL 校验的用例用注入的假解析器跑，不真的查 DNS，也不碰任何真实主机。
@@ -1237,6 +1380,7 @@ URL 校验的用例用注入的假解析器跑，不真的查 DNS，也不碰任
 | [docs/api.md](docs/api.md) | HTTP API 路由、字段、错误码 |
 | [docs/telemetry.md](docs/telemetry.md) | Run Telemetry 契约（v1.8.0）：telemetry.json 字段、计数语义与边界 |
 | [docs/failure-analysis.md](docs/failure-analysis.md) | 失败分析契约（v1.9.0）：类别、优先级、证据指向、状态记法与边界 |
+| [docs/quality-stack.md](docs/quality-stack.md) | 统一质量视图契约（v2.1.0）：QualityDiagnostic 字段、三套 category 白名单、quality-stack.json 与 Quality Center |
 | [docs/cli.md](docs/cli.md) | CLI 命令、参数、退出码 |
 | [docs/upgrade.md](docs/upgrade.md) | 从 0.9.x / 1.0.0 升级到当前版本 |
 | [docs/compatibility.md](docs/compatibility.md) | 兼容性策略与扩展方式 |

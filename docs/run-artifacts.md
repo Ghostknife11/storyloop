@@ -55,6 +55,7 @@ runs/
     ├── run-manifest.json               # 这次 Run 的出身清单（v1.6.0 新增；只在 Run 根目录一份）
     ├── telemetry.json                 # 这次 Run 的执行过程（v1.8.0 新增；只在 Run 根目录一份）
     ├── failure-analysis.json          # 这次 Run 的失败分类（v1.9.0 新增；只在 Run 根目录一份）
+    ├── quality-stack.json             # 三套质量结论的统一视图（v2.1.0 新增；只在 Run 根目录一份）
     └── attempts/
         └── 01/                        # 第 1 次尝试，两位数字
             ├── story.md               # 该次尝试的最终正文（有修订时为修订后）
@@ -76,7 +77,7 @@ runs/
 固定规则：
 
 - attempt 与 repair 目录名都是两位数字 `01`、`02`…（上限 99）
-- 运行级目录里除了 `attempts/` 只有那十二个文件，没有别的
+- 运行级目录里除了 `attempts/` 只有那十三个文件，没有别的
 - `run-manifest.json`（v1.6.0 新增）、`telemetry.json`（v1.8.0 新增）与
   `failure-analysis.json`（v1.9.0 新增）都**只在 Run 根目录一份**：`attempts/` 与 `repairs/`
   下都没有它们。清单里登记的产物路径可以指向这两层，
@@ -322,6 +323,30 @@ v1.5.0 之前产生的 Run 没有 `commercial-review.json`：读接口返回 `nu
 读接口把 manifest 原样挂在 `manifest` 字段里（没有清单的旧 Run 返回 `null`），界面折叠成
 一个面板，列出版本 / 模型 / 参数 / 每次 Attempt，摘要一律截断显示。
 
+### 运行级 quality-stack.json（v2.1.0 新增）
+
+`quality-stack.json` 是**新增的第十三个运行级文件**，只落在 Run 根目录一份
+（`attempts/` 与 `repairs/` 下都没有它）。它不是第四套评价：不调用模型、不重新评分、
+不补维度，只是把已经跑完的三套结论（`beat-validation.json` / `review.json` /
+`commercial-review.json`）放到一张表里看，并让它们说同一种诊断语言。
+
+字段级契约（`QualityDiagnostic` 的每个字段、三套 category 白名单、`status` 三值与
+`summary` 计数口径）见 [quality-stack.md](./quality-stack.md)。落到产物上有四条：
+
+- 三套结论键（`beatValidation` / `qualityReview` / `commercialReview`）**原样收录**，
+  一分不改、一个维度不补；某一套没跑出来时对应的键整个不出现，`status` 相应变成
+  `partial` 或 `failed`；
+- `diagnostics` 是三套诊断按 骨架 → 故事质量 → 商业可读性 顺序合并后做轻量去重的结果
+  （只按 `source + category + target + message` 判重，没有语义合并）；
+- `summary`（`totalDiagnostics` / `errors` / `warnings` / `info`）由 `diagnostics` 现算，
+  写盘前与盘上的值对账，对不上就整份作废；
+- 读盘三层降级与其它产物一致：文件缺失 / JSON 坏 / 形状不对都归一成「没有这一份」，
+  接口据此把 `qualityStack` 读作 `null`、界面面板整个隐藏，磁盘上不会被补写。
+
+**诊断不驱动任何决策**：Retry / Repair / Model Switch / Prompt Switch 一概不读它，
+v2.0.0 的重试与修订行为逐字不变。`metadata.json` 的三层字段集同样一字未动——这个文件
+是纯 additive 的新产物。
+
 ## 读这一侧的容错（v1.9.1 写清）
 
 读接口一律「拿不到就当没有」：文件不存在、JSON 坏、形状不对，都是 `null`；**文件在但读不动**
@@ -339,6 +364,9 @@ v1.5.0 之前产生的 Run 没有 `commercial-review.json`：读接口返回 `nu
 - `telemetry.json`（v1.8.0 新增）里没有 API Key、没有 Authorization / Cookie / 原始请求头、
   没有 `process.env` 原文、没有正文与 Prompt；异常只降级成一个稳定 `errorCode`，
   异常原文一个字都不落盘（明细见 [telemetry.md](./telemetry.md)）
+- `quality-stack.json`（v2.1.0 新增）同样不写凭据：诊断只走既有的 secret-safe 边界序列化，
+  里面没有 API Key、没有 Authorization / Cookie 头、没有 `process.env` 原文、
+  没有带密钥的 URL（明细见 [quality-stack.md](./quality-stack.md)）
 
 ## 不做什么
 
@@ -349,6 +377,8 @@ v1.5.0 之前产生的 Run 没有 `commercial-review.json`：读接口返回 `nu
 - `telemetry.json`（v1.8.0 新增）不做跨 Run 聚合、不设阈值、不出告警，也不据此改变任何生成
   行为：它只回答「这次怎么跑的」，不回答「为什么失败」
 - `quality.json` 只是把已有结论汇到一起：不额外打分、不设 PASS/FAIL 阈值、不做多维评分
+- `quality-stack.json`（v2.1.0 新增）同理：不重新评分、不做语义合并、不驱动重试修订采纳，
+  也不迁移旧 Run（没有这个文件的 Run 不会被补写）
 - 不写 `.tmp` 之外的中间文件（原子写入产生的临时文件见上面的「固定规则」）
 
 ## 相关
@@ -357,4 +387,6 @@ v1.5.0 之前产生的 Run 没有 `commercial-review.json`：读接口返回 `nu
 - [BeatPlan v1 契约](./beat-plan.md)
 - [API 契约](./api.md)
 - [Run Telemetry 契约（v1.8.0）](./telemetry.md)
+- [失败分析契约（v1.9.0）](./failure-analysis.md)
+- [统一质量视图契约（v2.1.0）](./quality-stack.md)
 - [升级说明](./upgrade.md)

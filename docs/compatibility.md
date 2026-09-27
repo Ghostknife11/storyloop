@@ -257,6 +257,26 @@ attempt 级的四类文件上，run 级文件不带前缀。另外 `--help` 出�
 没有改错误码、没有新文件。1.4.0 及以前生成的全部 Run 读出来逐字一致，唯一例外是
 「模型给了维度」的 attempt 摘要分数——而那正是 v1.3.0 文档承诺的口径。
 
+## v2.1.0 的统一质量视图（纯 additive）
+
+v2.1.0 让三套质量组件（Beat Validator / 故事质量 Reviewer / Commercial Reviewer）多说一种
+语言：各自的结论**另外**再产出一份结构化 `QualityDiagnostic` 清单，并新增运行级文件
+`quality-stack.json`（只在 Run 根目录一份）、一条只读路由
+`GET /api/runs/<run_id>/quality-stack`、Run 详情响应里的一个可选字段 `qualityStack`。
+没有删字段、没有改字段名、没有改路由与错误码——这条新路由同样复用 `RUN_NOT_FOUND`
+与既有的 `run_id` 校验，HTTP 状态码集合一个都没变。
+
+- **分数语义一个都没动。** `review.score` / `commercial_review.score` /
+  `beat_validation.issues` / `quality.overall_score` 与四个维度的键名、0–100 口径、
+  四维均分算法逐字保留；`review.json` / `commercial-review.json` /
+  `beat-validation.json` / `quality.json` 的既有字段一个不少。Beat 校验的旧 `issues`
+  与新的 `diagnostics` 是同一批事实的两种写法，映射时不需要翻译表。
+- **读不到的旧 Run 不补写。** 没有 `quality-stack.json`（2.0.0 及更早的 Run）、文件损坏
+  或形状不认识时，`qualityStack` 读作 `null`、Quality Center 面板整个隐藏，磁盘上不会被
+  补写，Run 详情接口仍然是 200。
+- **诊断不驱动任何决策。** 重试仍只看 `min_review_score` 一个总分门槛，修订仍只看校验与
+  结构审阅结论；诊断从 1 条变 12 条，RetryPolicy 与 RepairStrategy 的判定一字不变。
+
 ## v1.9.0 的失败分析（纯 additive）
 
 v1.9.0 新增 `failure-analysis.json`、一条只读路由 `GET /api/runs/<run_id>/failure-analysis`、
@@ -446,5 +466,6 @@ Co/N/C/Ca 四个维度）。低商业分是一次诚实的业务结果，不是�
 - [API 契约](./api.md)
 - [Run Telemetry 契约（v1.8.0）](./telemetry.md)
 - [失败分析契约（v1.9.0）](./failure-analysis.md)
+- [统一质量视图契约（v2.1.0）](./quality-stack.md)
 - [CLI 契约](./cli.md)
 - [Run 产物契约](./run-artifacts.md)
