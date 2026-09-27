@@ -5,6 +5,68 @@
 >
 > 版本策略见 [compatibility.md](./compatibility.md)。
 
+## 从 1.9.1 升级到 2.0.0
+
+**没有任何需要改代码的地方，也没有任何产物要迁移。** 2.0.0 改的是仓库内部的依赖方向
+（谁可以 import 谁），不是它对外做的事：HTTP API、请求响应字段、CLI 参数、错误码、
+`runs/` 下的产物布局与字段、界面行为全部与 1.9.1 逐字一致。新的架构说明见
+[architecture.md](./architecture.md)。
+
+两件事它必须同时做到，缺一件就算失败：
+
+1. **v1.x 的 Run 原样读得出来。** 磁盘上 1.0.0 以来写的每一个文件，2.0.0 不需要转换、
+   不需要批量迁移就直接读（任务书 §21/§42）。落盘格式一个字节都没动：`run-manifest.json` 与
+   `telemetry.json` 的 `schemaVersion` 仍是 `"1"`，运行级文件名仍是那 12 个加一个
+   `attempts/` 目录。反过来也一样：2.0.0 写出来的产物，1.9.1 读起来毫无障碍。
+2. **安全回归一条都没被重构碰坏。** v1.1.0 起的 URL 关卡（请求体 `baseUrl` 只准公网地址，
+   拒绝时一个字节都不发出去）、v0.9.0 起的密钥隔离（密钥不进响应、不进产物、不进日志）、
+   以及 URL 关卡的全仓唯一实现仍在原地。这些都有专门的回归测试守着。
+
+### 唯一真正影响调用方的地方：import 路径
+
+如果你只是用 HTTP API / CLI / Web UI，这一版对你没有任何影响。只有**把本项目代码当库
+import** 的用法要改，而且改的都是路径：
+
+- 配置的序列化 / 解析 / 文件名（`serializeStoryConfig`、`parseStoryConfig`、`configFilename`）
+  搬到了 `src/domain/story-config.ts`。旧路径 `@/infrastructure/config/config-io` 仍然可用
+  （只剩 re-export），但新代码请直接从 Domain 导入。
+- 服务提供方清单与默认生成参数（`PROVIDERS`、`DEFAULT_GENERATION_PARAMS`、`ProviderInfo`）
+  搬到了 `src/domain/provider.ts`。旧路径 `@/interface/constants` 同样只剩 re-export。
+- 日志的脱敏规则（`redactSecrets`）搬到了 `src/domain/safe-text.ts`；
+  `@/infrastructure/logging/logger` 仍导出它。
+- 想自己装配一份应用的，用组合根那三个函数（任务书 §34）：
+
+  ```ts
+  import { createDependencies, createStoryLoopApplication } from "@/composition";
+
+  const deps = createDependencies({ runsDir: "runs" });   // 基础设施实例在这里落地
+  const app = createStoryLoopApplication(deps);           // 用例在这里绑成应用
+  const { status, json } = await app.service.generate(body);
+  ```
+
+  `createStoryLoop(options)` 是这两步的合并写法，路由与 CLI 用的就是它。
+
+### 明确的「不许发生」
+
+任务书把这几条列为绝对禁止，2.0.0 一条都没犯：Domain 不 import Infrastructure，
+Engine 不 import Next.js，Application 不 import React，Interface 里不出现
+`new StoryGenerator(...)` / `new FileStore(...)`，路由只做解析 / 校验 / 调用 / 映射，
+`process.env` 只被 Infrastructure 读。这些由 `tests/test_architecture.test.ts` 守着：
+它静态扫 `src/` 下的 import 并判定六层依赖，还有一条循环依赖检测。
+新增一层依赖方向之外的边，测试会红。
+
+```bash
+git fetch && git checkout 2.0.0     # tag 不带 v 前缀
+npm install
+```
+
+回滚到 1.9.1 的代价为零：产物逐字节同构，2.0.0 没有新文件、新字段、新路由、新错误码；
+回滚后缺失的只有组合根与架构测试，运行行为与 1.9.1 相同。
+
+```bash
+git checkout 1.9.1
+```
+
 ## 从 1.0.0 升级到 1.0.1
 
 **没有任何需要改代码的地方。** 1.0.1 不改运行行为，产物布局、字段、API、CLI 与 1.0.0 逐字一致；
