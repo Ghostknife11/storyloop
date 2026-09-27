@@ -9,7 +9,7 @@ import {
   LOG_LEVELS,
   appSettings,
   llmSettings,
-} from "@/lib/app-config";
+} from "@/infrastructure/config/app-config";
 
 /**
  * §4/§5/§6 配置收口：四类配置各自只有一个来源，优先级固定为

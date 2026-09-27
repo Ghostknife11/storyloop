@@ -2,8 +2,8 @@ import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadPromptTemplate, PromptTemplateError } from "@/lib/prompt-template";
-import { PromptBuilder } from "@/lib/prompt-builder";
+import { loadPromptTemplate, PromptTemplateError } from "@/infrastructure/prompts/prompt-template";
+import { PromptBuilder } from "@/infrastructure/prompts/prompt-builder";
 
 let tmp: string | null = null;
 afterEach(() => {

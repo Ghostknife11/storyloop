@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Logger, redactSecrets } from "@/lib/logger";
+import { Logger, redactSecrets } from "@/infrastructure/logging/logger";
 
 /**
  * §8/§9/§10 统一日志：等级过滤、run/attempt/repair 前缀、密钥脱敏。

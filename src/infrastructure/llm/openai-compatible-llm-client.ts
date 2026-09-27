@@ -1,9 +1,15 @@
 /**
- * v0.9.0 LLM 客户端加固（TASK §14/§15/§16）。
+ * v0.9.0 LLM 客户端加固（TASK §14/§15/§16）。v2.0.0：归入 Infrastructure。
  *
  * 所有模型调用仍走这一个类：Planner / Generator / Reviewer / Repairer 都不自己实现
  * timeout / auth / request（§14）。薄客户端，刻意不做 Provider Registry /
  * Model Router / Fallback（§70）。
+ *
+ * v2.0.0 的两处变化，都不改行为：
+ *   1. 位置：src/interface/llm.ts → src/infrastructure/llm/。它是唯一 import fetch 的
+ *      业务模块，因此必须在 Infrastructure 层，并成为「安全边界」的一部分。
+ *   2. 名字：类改叫 OpenAIClient（§25），旧名 LLMClient 仍等价导出——
+ *      值导出指向本类，类型导出指向 ports/llm-client.ts 的端口。
  *
  * Transport Retry（§15）：
  *   - 只对 timeout、429 与临时 5xx（500/502/503/504）重试，其它情况立即失败；
@@ -12,34 +18,17 @@
  *     一次 Attempt 内部的 transport 重试不增加 attempt_number。
  */
 
-import { llmSettings, type LLMOverrides } from "@/lib/app-config";
-import { Logger } from "@/lib/logger";
-import type { LLMTelemetrySink, TelemetryErrorCode } from "@/core/telemetry-collector";
-import type { TelemetryCost } from "@/types/telemetry";
+import { llmSettings, type LLMOverrides } from "@/infrastructure/config/app-config";
+import { Logger } from "@/infrastructure/logging/logger";
+import type { LLMTelemetrySink, TelemetryErrorCode } from "@/infrastructure/telemetry/telemetry-collector";
+import type { TelemetryCost } from "@/domain/telemetry";
+import type { LLMClient as LLMClientPort } from "@/ports/llm-client";
 
-/** §16 轻量异常体系：三个类，不建巨大层级。 */
-export class LLMError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "LLMError";
-  }
-}
-
-/** §16 超时：请求在 timeoutMs 内没有完成（含 transport 重试全部超时）。 */
-export class LLMTimeoutError extends LLMError {
-  constructor(message = "LLM 请求超时") {
-    super(message);
-    this.name = "LLMTimeoutError";
-  }
-}
-
-/** §16 请求失败：网络异常或 API 返回非 2xx（429 / 5xx 重试耗尽后也归这里）。 */
-export class LLMRequestError extends LLMError {
-  constructor(message: string, readonly status?: number) {
-    super(message);
-    this.name = "LLMRequestError";
-  }
-}
+// §16/§32：异常体系在 Domain（domain/llm-errors.ts），这里按旧路径 re-export，
+// 让既有的 `from "@/infrastructure/llm/openai-compatible-llm-client"` 继续可用。
+// 是同一个类对象，不是抄一份——instanceof 判定因此不会分叉。
+export { LLMError, LLMTimeoutError, LLMRequestError } from "@/domain/llm-errors";
+import { LLMError, LLMRequestError, LLMTimeoutError } from "@/domain/llm-errors";
 
 /** §15 硬上限：1 次首发 + 2 次重试 = 最多 3 次请求。 */
 export const MAX_TRANSPORT_RETRIES = 2;
@@ -144,7 +133,8 @@ export interface LLMClientOptions {
   telemetry?: LLMTelemetrySink;
 }
 
-export class LLMClient {
+/** §25 OpenAI 兼容适配器。实现 ports/llm-client.ts 的 LLMClient 端口。 */
+export class OpenAIClient implements LLMClientPort {
   constructor(
     private readonly baseUrl: string,
     private readonly apiKey: string,
@@ -270,10 +260,18 @@ export class LLMClient {
   }
 }
 
+/**
+ * v1.x 导入兼容。`LLMClient` 这个名字在 2.0.0 里属于**端口**（src/ports/llm-client.ts），
+ * 这里为了不破坏既有的 `new LLMClient(...)` 与 `: LLMClient` 写法，把两个名字空间都留出来：
+ * 值空间是本适配器，类型空间是端口接口。
+ */
+export const LLMClient = OpenAIClient;
+export type LLMClient = LLMClientPort;
+
 /** 从服务端配置构建客户端；前端只允许传非敏感的 model/baseUrl/temperature 覆盖。 */
-export function clientFromEnv(overrides: LLMOverrides = {}, options: LLMClientOptions = {}): LLMClient {
+export function clientFromEnv(overrides: LLMOverrides = {}, options: LLMClientOptions = {}): LLMClientPort {
   const settings = llmSettings(overrides);
-  return new LLMClient(settings.baseUrl, process.env.LLM_API_KEY || "", settings.model, {
+  return new OpenAIClient(settings.baseUrl, process.env.LLM_API_KEY || "", settings.model, {
     timeoutMs: settings.timeoutMs,
     telemetry: options.telemetry,
   });

@@ -19,8 +19,8 @@ import {
   PROMPT_ROLES,
   type PromptRole,
   type PromptSnapshot,
-} from "@/types/run-manifest";
-import { sha256Hex } from "@/lib/tracking/digest";
+} from "@/domain/run-manifest";
+import { sha256Hex } from "@/infrastructure/tracking/digest";
 
 /** 模块加载时锁定项目根，与 `src/lib/prompt-template.ts` 同一套做法（测试 chdir 之后不漂移）。 */
 const PROJECT_ROOT = process.cwd();

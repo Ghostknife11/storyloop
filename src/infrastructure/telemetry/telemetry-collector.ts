@@ -1,5 +1,6 @@
 /**
  * v1.8.0 TelemetryCollector：把一次 Run 的执行过程记成结构化数据。
+ * v2.0.0：归入 Infrastructure Telemetry（§28「Telemetry Collector 是基础设施」）。
  *
  * 这个类只有写入口，没有读流程的入口：它拿不到 RetryPolicy、不知道阈值、
  * 不接触 decideRetry，也不改任何生成参数（TASK §16/§61）。Pipeline 往这儿报数，
@@ -31,8 +32,8 @@ import type {
   StageTelemetry,
   StageTelemetryStatus,
   TelemetryCost,
-} from "@/types/telemetry";
-import { isStageName } from "@/types/telemetry";
+} from "@/domain/telemetry";
+import { isStageName, type TelemetryErrorCode } from "@/domain/telemetry";
 
 /** 共享 LLM 客户端只依赖这一小块：报一次调用 + 问现在在哪个阶段。 */
 export interface LLMTelemetrySink {
@@ -57,42 +58,14 @@ export interface LLMCallReport {
   errorCode?: string | null;
 }
 
-/** §22 错误只降级成稳定码：原文一个字都不落盘。 */
-export type TelemetryErrorCode =
-  | "LLM_TIMEOUT"
-  | "LLM_REQUEST_FAILED"
-  | "LLM_EMPTY_RESPONSE"
-  | "VALIDATION_COMPONENT_FAILED"
-  | "REVIEW_COMPONENT_FAILED"
-  | "BEAT_VALIDATION_COMPONENT_FAILED"
-  | "COMMERCIAL_REVIEW_COMPONENT_FAILED"
-  | "GENERATION_FAILED"
-  | "BEAT_PLAN_REJECTED"
-  | "ARTIFACT_WRITE_FAILED"
-  | "RUN_FAILED";
-
-/** 错误码 → 固定文案。写死在这里，就不可能把异常里的路径 / 凭据带进产物。 */
-const ERROR_MESSAGES: Record<TelemetryErrorCode, string> = {
-  LLM_TIMEOUT: "模型调用超时",
-  LLM_REQUEST_FAILED: "模型调用失败（网络或服务端返回错误）",
-  LLM_EMPTY_RESPONSE: "模型返回内容为空",
-  VALIDATION_COMPONENT_FAILED: "正文校验组件自身失败",
-  REVIEW_COMPONENT_FAILED: "质量审阅组件自身失败",
-  BEAT_VALIDATION_COMPONENT_FAILED: "骨架校验组件自身失败",
-  COMMERCIAL_REVIEW_COMPONENT_FAILED: "商业可读性审阅组件自身失败",
-  GENERATION_FAILED: "正文生成失败",
-  BEAT_PLAN_REJECTED: "骨架结构校验未通过",
-  ARTIFACT_WRITE_FAILED: "产物写入失败",
-  RUN_FAILED: "Run 失败（未归类）",
-};
-
-export function telemetryErrorMessage(code: string): string {
-  return ERROR_MESSAGES[code as TelemetryErrorCode] ?? "发生了未记录原因的失败";
-}
-
-export function isTelemetryErrorCode(value: unknown): value is TelemetryErrorCode {
-  return typeof value === "string" && value in ERROR_MESSAGES;
-}
+// §22/§32：错误码与「码 → 文案」属于遥测契约，已移入 Domain（domain/telemetry.ts）。
+// 这里按旧路径 re-export，让既有的 `from "@/infrastructure/telemetry/telemetry-collector"`
+// 导入继续可用——是同一份定义，不是抄一份。
+export {
+  isTelemetryErrorCode,
+  telemetryErrorMessage,
+  type TelemetryErrorCode,
+} from "@/domain/telemetry";
 
 /**
  * 单调时钟（毫秒）：只用于算差值，不用于生成时间戳。

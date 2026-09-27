@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GET } from "@/app/api/version/route";
-import { projectVersion } from "@/lib/version";
+import { projectVersion } from "@/infrastructure/config/version";
 import { repoVersion } from "./helpers/fixtures";
 
 describe("GET /api/version", () => {

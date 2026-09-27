@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { StoryGenerator } from "@/lib/story-generator";
-import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
-import { validateBeatPlan } from "@/types/beat-plan";
+import { StoryGenerator } from "@/engine/story-generator";
+import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
+import { validateBeatPlan } from "@/domain/beat-plan";
 
 const baseConfig = validateStoryConfig({
   config_version: "1",

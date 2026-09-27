@@ -9,8 +9,8 @@
  * Manifest 不会假装知道 commit。
  */
 
-import { projectVersion } from "@/lib/version";
-import type { ProjectSnapshot } from "@/types/run-manifest";
+import { projectVersion } from "@/infrastructure/config/version";
+import type { ProjectSnapshot } from "@/domain/run-manifest";
 
 /** 常见的构建 / 部署注入变量；第一个取到合法值的生效。 */
 const COMMIT_ENV_KEYS = [

@@ -13,18 +13,18 @@
  * 装配器不从产物里推断「这次 Run 是不是实验样本」。
  */
 
-import type { ArtifactStore } from "@/storage/artifact-store";
-import { attemptDirectoryName } from "@/core/generation-attempt";
-import { repairDirectoryName } from "@/types/repair";
-import type { RetryPolicy } from "@/core/retry-policy";
-import { llmSettings } from "@/lib/app-config";
-import { PROVIDERS } from "@/lib/constants";
-import { PLAN_TEMPERATURE } from "@/lib/beat-planner";
-import { STORY_TEMPERATURE } from "@/lib/story-generator";
-import { REVIEW_TEMPERATURE } from "@/lib/basic-reviewer";
-import { COMMERCIAL_REVIEW_TEMPERATURE } from "@/lib/commercial-reviewer";
-import { BEAT_VALIDATION_TEMPERATURE } from "@/lib/beat-validator";
-import { REPAIR_TEMPERATURE } from "@/lib/story-repairer";
+import type { ArtifactStore } from "@/infrastructure/storage/artifact-store";
+import { attemptDirectoryName } from "@/engine/generation-attempt";
+import { repairDirectoryName } from "@/domain/repair";
+import type { RetryPolicy } from "@/engine/retry-policy";
+import { llmSettings } from "@/infrastructure/config/app-config";
+import { PROVIDERS } from "@/domain/provider";
+import { PLAN_TEMPERATURE } from "@/engine/beat-planner";
+import { STORY_TEMPERATURE } from "@/engine/story-generator";
+import { REVIEW_TEMPERATURE } from "@/engine/basic-reviewer";
+import { COMMERCIAL_REVIEW_TEMPERATURE } from "@/engine/commercial-reviewer";
+import { BEAT_VALIDATION_TEMPERATURE } from "@/engine/beat-validator";
+import { REPAIR_TEMPERATURE } from "@/engine/story-repairer";
 import {
   RUN_MANIFEST_SCHEMA_VERSION,
   type ArtifactManifestEntry,
@@ -34,10 +34,10 @@ import {
   type ParameterSnapshot,
   type RepairManifestEntry,
   type RunManifest,
-} from "@/types/run-manifest";
-import { projectSnapshot } from "@/lib/tracking/project-snapshot";
-import { promptSnapshots } from "@/lib/tracking/prompt-registry";
-import { sha256Hex } from "@/lib/tracking/digest";
+} from "@/domain/run-manifest";
+import { projectSnapshot } from "@/infrastructure/tracking/project-snapshot";
+import { promptSnapshots } from "@/infrastructure/tracking/prompt-registry";
+import { sha256Hex } from "@/infrastructure/tracking/digest";
 
 /**
  * v1.6.0 只有一个 `LLMClient`，六个阶段共用它（Pipeline 的 Writer / Reviewer / Repairer

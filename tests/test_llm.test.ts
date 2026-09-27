@@ -6,7 +6,7 @@ import {
   LLMTimeoutError,
   MAX_TRANSPORT_RETRIES,
   clientFromEnv,
-} from "@/lib/llm";
+} from "@/infrastructure/llm/openai-compatible-llm-client";
 
 afterEach(() => {
   vi.unstubAllGlobals();

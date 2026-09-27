@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
-import type { CharacterConfig, StoryConfig } from "@/types/story-config";
-import { PromptTemplateError } from "@/lib/prompt-template";
+import type { CharacterConfig, StoryConfig } from "@/domain/story-config";
+import { PromptTemplateError } from "@/infrastructure/prompts/prompt-template";
 
 /**
  * v0.2.0 PromptBuilder（TASK §37）：build(config: StoryConfig)。

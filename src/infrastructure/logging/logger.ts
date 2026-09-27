@@ -1,17 +1,24 @@
 /**
- * v0.9.0 统一日志（TASK §8/§9/§10）。
+ * v2.0.0：Infrastructure 层的统一日志实现。
  *
+ * 规则全部来自 v0.9.0（TASK §8/§9/§10），未作修改：
  * - 四个等级 DEBUG / INFO / WARNING / ERROR，缺省 INFO，由 LOG_LEVEL 决定（§8）。
- * - Run 级带 run_id，Attempt 内带 attempt_number，Repair 内带 repair_number（§9）：
- *     [run=20260922_101500_ab12cd] planning started
- *     [run=... attempt=1] generation completed
- *     [run=... attempt=1 repair=1] repair completed
+ * - Run 级带 run_id，Attempt 内带 attempt_number，Repair 内带 repair_number（§9）。
  * - 只做工程日志：不做 Prometheus / OpenTelemetry / Trace / Metrics（§10 禁止）。
  * - 任何输出都会过一遍 redactSecrets：API Key 与 Authorization Header 不得落日志（§9）。
- *   原始异常仍可整体传入——序列化时同样会脱敏。
+ *
+ * 从 interface/logger.ts 搬到 Infrastructure 的原因：它写 stdout/stderr，
+ * 是平台副作用；而它用到的脱敏规则已移到 domain/safe-text.ts（纯函数），
+ * 依赖方向因此是 Infrastructure → Domain，方向正确。
  */
 
-import { appSettings, type LogLevel } from "@/lib/app-config";
+import { appSettings, type LogLevel } from "@/infrastructure/config/app-config";
+import { redactSecrets } from "@/domain/safe-text";
+
+// v2.0.0：脱敏规则搬到 domain/safe-text.ts（纯函数，Domain 层）。
+// 这里 re-export 一份，让既有的 `import { redactSecrets } from "@/infrastructure/logging/logger"`
+// 继续可用——Infrastructure 依赖 Domain，方向正确。
+export { redactSecrets };
 
 export interface LogContext {
   run_id?: string;
@@ -25,14 +32,6 @@ const LEVEL_ORDER: Record<LogLevel, number> = {
   warning: 2,
   error: 3,
 };
-
-/** §9 脱敏：密钥形态的串一律打码，日志里只剩前后各几位用于定位。 */
-export function redactSecrets(text: string): string {
-  return text
-    .replace(/sk-[A-Za-z0-9_-]{8,}/g, "sk-***")
-    .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer ***")
-    .replace(/("?(?:api[_-]?key|authorization|token|password|secret)"?\s*[:=]\s*")([^"]*)(")/gi, "$1***$3");
-}
 
 function contextPrefix(context: LogContext): string {
   const parts: string[] = [];
@@ -68,15 +67,12 @@ export class Logger {
   debug(message: string, detail?: unknown): void {
     this.write("debug", message, detail);
   }
-
   info(message: string, detail?: unknown): void {
     this.write("info", message, detail);
   }
-
   warning(message: string, detail?: unknown): void {
     this.write("warning", message, detail);
   }
-
   error(message: string, detail?: unknown): void {
     this.write("error", message, detail);
   }

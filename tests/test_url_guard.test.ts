@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { assertPublicBaseUrl, assertPublicHttpUrl, UnsafeRequestUrlError } from "@/lib/url-guard";
-import { toApiError } from "@/lib/api-error";
-import { planStory, startRun } from "@/lib/generate-service";
+import { assertPublicBaseUrl, assertPublicHttpUrl, UnsafeRequestUrlError } from "@/infrastructure/security/url-guard";
+import { toApiError } from "@/application/error-model";
+import { planStory, startRun } from "@/application/generate-service";
 
 /**
  * §26 请求体 baseUrl 覆盖的地址校验。

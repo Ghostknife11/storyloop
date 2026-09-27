@@ -1,12 +1,16 @@
 /**
- * v0.9.0 统一配置收口（TASK §4/§5/§6/§14）。
+ * v2.0.0：Infrastructure 层的配置收口。
+ *
+ * v0.9.0 统一配置（TASK §4/§5/§6/§14）的规则全部保留，唯一的变化是位置：
+ * 它是全仓库**唯一**直接读 process.env 的地方（§33「配置只在基础设施层」），
+ * 因此从 interface 目录搬到了 Infrastructure Config。
  *
  * 四类配置互不越界，各自只有一个来源：
  *   Application Settings —— runs 目录 / 日志等级 / 默认超时，只来自环境变量 + 默认值
  *   LLM Settings        —— base_url / model / temperature / timeout
- *   StoryConfig         —— 故事内容与创作目标（src/types/story-config.ts）
+ *   StoryConfig         —— 故事内容与创作目标（src/domain/story-config.ts）
  *   RetryPolicy         —— max_attempts / min_review_score / enable_repair / ...
- *                          （src/core/retry-policy.ts）
+ *                          （src/engine/retry-policy.ts）
  *
  * 优先级固定为（§6，从高到低）：
  *   Request Override（model / baseUrl / temperature / timeoutMs，全部非敏感）
@@ -15,7 +19,7 @@
  *   ↓
  *   Default Values
  *
- * API Key 不在本模块出现：它只在 src/lib/llm.ts 里从服务端环境读取一次，
+ * API Key 不在本模块出现：它只在 src/infrastructure/llm/ 里从服务端环境读取一次，
  * 不进请求覆盖、不进返回值、不进任何产物（§7）。
  *
  * 所有函数都在调用时读 process.env，不做模块级缓存：测试改环境变量后立即生效，
