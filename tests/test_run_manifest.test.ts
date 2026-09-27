@@ -32,7 +32,7 @@ import { experimentProvenanceText, manifestPanelState, shortDigest, temperatureR
 import {
   SAMPLE_BEAT_PLAN,
   SAMPLE_BEAT_VALIDATION_V2,
-  SAMPLE_COMMERCIAL_REVIEW,
+  SAMPLE_COMMERCIAL_REVIEW_V2,
   SAMPLE_CONFIG,
   SAMPLE_STORY,
   REVIEW_REPLY,
@@ -76,7 +76,7 @@ const RUN_MANIFEST_FILE = "run-manifest.json";
 
 const PLAN_REPLY = JSON.stringify(SAMPLE_BEAT_PLAN);
 const GOOD_REVIEW = REVIEW_REPLY;
-const COMMERCIAL_REPLY = JSON.stringify(SAMPLE_COMMERCIAL_REVIEW);
+const COMMERCIAL_REPLY = JSON.stringify(SAMPLE_COMMERCIAL_REVIEW_V2);
 const LOW_REVIEW = JSON.stringify(qualityReviewV2Of(41, ["高潮缺失"]));
 /** 修订后的正文：与 SAMPLE_STORY 同量级，且带着主角名字，否则重新校验当场就不过。 */
 const REPAIRED_STORY = `陈岚在雨夜找到了证人，${"雨水顺着屋檐砸在台阶上。".repeat(80)}`;
@@ -131,13 +131,13 @@ describe("v1.6.0 出身清单 — 形状与校验", () => {
     }
   });
 
-  it("v2.1.0 只有 reviewer 与 beat-validator 升到 2：换了 v2 提示词，其余四个角色文案没动", () => {
+  it("v2.1.0 三个角色升到 2：换了 v2 提示词，其余三个角色文案没动", () => {
     expect(PROMPT_VERSIONS).toEqual({
       planner: "1",
       generator: "1",
       "beat-validator": "2",
       reviewer: "2",
-      "commercial-reviewer": "1",
+      "commercial-reviewer": "2",
       repairer: "1",
     });
   });

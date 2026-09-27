@@ -50,14 +50,11 @@ function commercial(score: number): string {
   return JSON.stringify({
     score: 99,
     summary: "开篇即冲突，结尾收得住。",
-    strengths: ["第一段就抛出失踪悬念"],
-    problems: ["中段推理过程重复"],
-    suggestions: ["把中段两次排查合并成一次带新信息的排查"],
     dimensions: {
-      hook: { score, summary: "开场即冲突。" },
-      pacing: { score, summary: "中段排查略拖。" },
-      engagement: { score, summary: "动力持续住。" },
-      payoff: { score, summary: "结局收得干脆。" },
+      hook: { score, summary: "开场即冲突。", strengths: [], problems: [] },
+      pacing: { score, summary: "中段排查略拖。", strengths: [], problems: [] },
+      engagement: { score, summary: "动力持续住。", strengths: [], problems: [] },
+      payoff: { score, summary: "结局收得干脆。", strengths: [], problems: [] },
     },
   });
 }

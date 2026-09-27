@@ -26,6 +26,7 @@ import type { ValidationResult, ValidationIssueCode } from "@/domain/validation-
 import type { BeatValidationResult } from "@/domain/beat-validation";
 import type { BeatValidationV2Result } from "@/domain/beat-validation-v2";
 import type { CommercialReviewResult } from "@/domain/commercial-review";
+import type { CommercialReviewV2Result } from "@/domain/commercial-review-v2";
 import { LLMError, LLMTimeoutError } from "@/infrastructure/llm/openai-compatible-llm-client";
 import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
 import { ExperimentStore } from "@/infrastructure/storage/experiment-store";
@@ -164,6 +165,57 @@ export const SAMPLE_COMMERCIAL_REVIEW: CommercialReviewResult = {
   },
 };
 
+/**
+ * v2.1.0 Commercial Reviewer v2 的样例输出——这是「模型回复」的那一份
+ * （四维各带 strengths / problems，命中项写成统一 QualityDiagnostic，
+ * 类别是 §19 的十个商业类别之一）。
+ *
+ * 这一份是照着上面那个 v1 样例反推出来的：摊平回 v1 DTO 时必须逐字等于
+ * SAMPLE_COMMERCIAL_REVIEW（strengths / problems / suggestions 一条不多一条不少），
+ * 这样 Pipeline 与 /api/review/commercial 的 DTO 兼容层才能拿旧样例直接对拍。
+ */
+export const SAMPLE_COMMERCIAL_REVIEW_V2: CommercialReviewV2Result = {
+  score: 71.5,
+  summary: "开篇三句内进入冲突，中段略拖，结尾收得住。",
+  dimensions: {
+    hook: {
+      score: 82,
+      summary: "开场即冲突，读完想往下看。",
+      strengths: ["第一段就抛出失踪悬念"],
+      problems: [],
+    },
+    pacing: {
+      score: 68,
+      summary: "中段排查过程拖了两轮。",
+      strengths: [],
+      problems: ["中段推理过程重复"],
+    },
+    engagement: {
+      score: 74,
+      summary: "主角动机明确，动力持续住了。",
+      strengths: [],
+      problems: [],
+    },
+    payoff: {
+      score: 62,
+      summary: "结局收得干脆但回报略赶。",
+      strengths: [],
+      problems: [],
+    },
+  },
+  diagnostics: [
+    {
+      id: "commercial-reviewer-1",
+      source: "commercial-reviewer",
+      category: "repetitive_middle",
+      severity: "warning",
+      target: "middle",
+      message: "中段两次排查问的是同一批证人，信息没有增加。",
+      suggestion: "把中段两次排查合并成一次带新信息的排查",
+    },
+  ],
+};
+
 /** v1.4.0：一份结构完整的 BeatPlan 的合格结论——SAMPLE_BEAT_PLAN 就该是这个结果。 */
 export const SAMPLE_BEAT_VALIDATION: BeatValidationResult = {
   passed: true,
@@ -226,13 +278,15 @@ export function reviewOf(score: number, problems: string[] = []): ReviewResult {
   return { score, summary: "总结。", strengths: ["强"], problems };
 }
 
-/** v1.5.0：一个永远返回同一条商业可读性结论的假商业审阅者。
+/** 一个永远返回同一条商业可读性结论的假商业审阅者。
  *  服务层测试不注入它，buildPipeline 就会自己造一个指向真实端点的客户端（§47 绝不允许），
  *  所以走服务层的用例一律通过这里给一个假件。FakeLLM 对单条回复会一直重复返回，
- *  调用多少次都够用。 */
-export function commercialReviewerOf(commercial?: CommercialReviewResult): CommercialReviewer {
+ *  调用多少次都够用。
+ *  喂给它的是 v2 形状的模型回复（§18）；落盘与返回时由 legacyCommercialReviewOf
+ *  摊平回 v1.5.0 的 CommercialReviewResult。 */
+export function commercialReviewerOf(commercial?: CommercialReviewV2Result): CommercialReviewer {
   return new CommercialReviewer(
-    new FakeLLM([JSON.stringify(commercial ?? SAMPLE_COMMERCIAL_REVIEW)]) as never,
+    new FakeLLM([JSON.stringify(commercial ?? SAMPLE_COMMERCIAL_REVIEW_V2)]) as never,
   );
 }
 

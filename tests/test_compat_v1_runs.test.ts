@@ -25,14 +25,14 @@ import { manifestPanelState } from "@/interface/manifest-view";
 import { telemetryPanelState } from "@/interface/telemetry-view";
 import { qualityPanelState } from "@/interface/quality-view";
 import { runScoresOf } from "@/analysis/experiment-summary";
-import { FakeLLM, SAMPLE_BEAT_PLAN, SAMPLE_COMMERCIAL_REVIEW, SAMPLE_CONFIG, REVIEW_REPLY, SAMPLE_REVIEW, SAMPLE_STORY, withTmpDir } from "./helpers/fixtures";
+import { FakeLLM, SAMPLE_BEAT_PLAN, SAMPLE_COMMERCIAL_REVIEW, SAMPLE_COMMERCIAL_REVIEW_V2, SAMPLE_CONFIG, REVIEW_REPLY, SAMPLE_REVIEW, SAMPLE_STORY, withTmpDir } from "./helpers/fixtures";
 import { RUN_FILES } from "./test_contract_artifacts.test";
 
 const PLAN_REPLY = JSON.stringify(SAMPLE_BEAT_PLAN);
 const BEAT_VALIDATION_REPLY = JSON.stringify({ passed: true, diagnostics: [], summary: "骨架结构完整。" });
 
 /** 一次 Automatic Run 的五次调用：Plan → 骨架校验 → 正文 → 结构审阅 → 商业审阅。 */
-const HAPPY_SCRIPT = [PLAN_REPLY, BEAT_VALIDATION_REPLY, SAMPLE_STORY, REVIEW_REPLY, JSON.stringify(SAMPLE_COMMERCIAL_REVIEW)];
+const HAPPY_SCRIPT = [PLAN_REPLY, BEAT_VALIDATION_REPLY, SAMPLE_STORY, REVIEW_REPLY, JSON.stringify(SAMPLE_COMMERCIAL_REVIEW_V2)];
 
 /** 一次顺利跑完后拿到的 RunOk（只取后面断言要用到的字段）。 */
 async function runOnce(patch: Record<string, unknown> = {}): Promise<{ runId: string; json: Record<string, unknown>; app: ReturnType<typeof createStoryLoop> }> {

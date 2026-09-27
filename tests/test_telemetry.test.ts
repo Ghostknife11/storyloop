@@ -21,7 +21,7 @@ import { buildPipeline } from "@/application/generate-service";
 import type { ExperimentDefinition } from "@/domain/experiment";
 import {
   SAMPLE_BEAT_PLAN,
-  SAMPLE_COMMERCIAL_REVIEW,
+  SAMPLE_COMMERCIAL_REVIEW_V2,
   SAMPLE_CONFIG,
   SAMPLE_STORY,
   REVIEW_REPLY,
@@ -44,7 +44,7 @@ import type { RunTelemetry } from "@/domain/telemetry";
 
 const PLAN_REPLY = JSON.stringify(SAMPLE_BEAT_PLAN);
 const GOOD_REVIEW_REPLY = REVIEW_REPLY;
-const COMMERCIAL_REPLY = JSON.stringify(SAMPLE_COMMERCIAL_REVIEW);
+const COMMERCIAL_REPLY = JSON.stringify(SAMPLE_COMMERCIAL_REVIEW_V2);
 // v2.1.0：Beat 校验结论换成统一 diagnostics（passed 由 severity 推导）
 const BEAT_VALIDATION_REPLY = JSON.stringify({
   passed: true,

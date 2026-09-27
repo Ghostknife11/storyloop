@@ -20,6 +20,7 @@ import {
   type CommercialReviewResult,
   type CommercialReviewStatus,
 } from "@/domain/commercial-review";
+import { legacyCommercialReviewOf } from "@/domain/commercial-review-v2";
 import { BeatValidator } from "@/engine/beat-validator";
 import { StoryRepairer } from "@/engine/story-repairer";
 import { ArtifactStore } from "@/ports/artifact-store";
@@ -1176,7 +1177,9 @@ export class GenerationPipeline {
     try {
       // §11：与基础审阅同一份输入口径，但用独立 Prompt 与独立 schema。
       // 温度取 CommercialReviewer 自己的默认值，不跟着正文的创作温度走。
-      commercialReview = await this.commercialReviewer.review(config, story);
+      // v2.1.0：组件内部说统一 diagnostics，边界处摊平回 v1.5.0 的 DTO——
+      // commercial-review.json、metadata、UI 的口径一个字都没变（TASK §18/§27）。
+      commercialReview = legacyCommercialReviewOf(await this.commercialReviewer.review(config, story));
     } catch (e) {
       // §24：这一路失败只让 commercial_review_status 变成 failed。
       // v1.9.1：reviewing_commercial 这一段同样按失败收尾

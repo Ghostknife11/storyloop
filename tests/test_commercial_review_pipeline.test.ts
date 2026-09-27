@@ -12,6 +12,7 @@ import { RepairStrategy } from "@/engine/repair-strategy";
 import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "@/engine/retry-policy";
 import { CommercialReviewer } from "@/engine/commercial-reviewer";
 import type { CommercialReviewResult } from "@/domain/commercial-review";
+import type { CommercialReviewV2Result } from "@/domain/commercial-review-v2";
 import {
   SAMPLE_BEAT_PLAN,
   SAMPLE_CONFIG,
@@ -43,14 +44,11 @@ const LOW_REVIEW = JSON.stringify(qualityReviewV2Of(41, ["高潮缺失"]));
 const COMMERCIAL_HIGH = JSON.stringify({
   score: 88,
   summary: "开篇即冲突，全篇有推力。",
-  strengths: ["第一段抛出悬念"],
-  problems: [],
-  suggestions: ["中段压缩一轮排查"],
   dimensions: {
-    hook: { score: 90, summary: "开场即冲突。" },
-    pacing: { score: 86, summary: "节奏稳。" },
-    engagement: { score: 88, summary: "动力持续。" },
-    payoff: { score: 88, summary: "回报到位。" },
+    hook: { score: 90, summary: "开场即冲突。", strengths: ["第一段抛出悬念"], problems: [] },
+    pacing: { score: 86, summary: "节奏稳。", strengths: [], problems: [] },
+    engagement: { score: 88, summary: "动力持续。", strengths: [], problems: [] },
+    payoff: { score: 88, summary: "回报到位。", strengths: [], problems: [] },
   },
 });
 
@@ -58,20 +56,17 @@ const COMMERCIAL_HIGH = JSON.stringify({
 const COMMERCIAL_LOW = JSON.stringify({
   score: 12,
   summary: "四维都很低。",
-  strengths: [],
-  problems: ["开篇太平", "中段拖", "动力断", "结尾空"],
-  suggestions: ["重写开篇"],
   dimensions: {
-    hook: { score: 20, summary: "开篇没有抓力。" },
-    pacing: { score: 10, summary: "大量原地踏步。" },
-    engagement: { score: 8, summary: "中段读不下去。" },
-    payoff: { score: 10, summary: "结尾没有回报。" },
+    hook: { score: 20, summary: "开篇没有抓力。", strengths: [], problems: ["开篇太平"] },
+    pacing: { score: 10, summary: "大量原地踏步。", strengths: [], problems: ["中段拖"] },
+    engagement: { score: 8, summary: "中段读不下去。", strengths: [], problems: ["动力断"] },
+    payoff: { score: 10, summary: "结尾没有回报。", strengths: [], problems: ["结尾空"] },
   },
 });
 
 /** 一次 spy 版的商业审阅者：记录它收到的正文，原样返回固定结论。 */
 function spyReviewer(
-  reply: unknown = JSON.parse(COMMERCIAL_HIGH) as CommercialReviewResult,
+  reply: unknown = JSON.parse(COMMERCIAL_HIGH) as CommercialReviewV2Result,
 ): { reviewer: CommercialReviewer; seen: string[] } {
   const seen: string[] = [];
   const reviewer = new CommercialReviewer({
@@ -205,13 +200,13 @@ describe("v1.5.0 重试路径：根目录那份永远对得上入选 Attempt（�
         seen.push(prompt);
         n += 1;
         return JSON.stringify({
-          ...JSON.parse(COMMERCIAL_HIGH) as CommercialReviewResult,
+          ...(JSON.parse(COMMERCIAL_HIGH) as CommercialReviewV2Result),
           summary: `第 ${n} 次商业审阅`,
           dimensions: {
-            hook: { score: 50 + n, summary: `hook ${n}` },
-            pacing: { score: 60 + n, summary: `pacing ${n}` },
-            engagement: { score: 70 + n, summary: `engagement ${n}` },
-            payoff: { score: 80 + n, summary: `payoff ${n}` },
+            hook: { score: 50 + n, summary: `hook ${n}`, strengths: [], problems: [] },
+            pacing: { score: 60 + n, summary: `pacing ${n}`, strengths: [], problems: [] },
+            engagement: { score: 70 + n, summary: `engagement ${n}`, strengths: [], problems: [] },
+            payoff: { score: 80 + n, summary: `payoff ${n}`, strengths: [], problems: [] },
           },
         });
       },

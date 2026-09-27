@@ -42,14 +42,16 @@ const PROMPT_FILES: Record<PromptRole, string> = {
  * v2.1.0：reviewer 换成 Quality Reviewer v2——四维各带 strengths / problems、
  * 新增结构化 diagnostics、评分锚点写进文案，整体分改由系统按四维均分计算。
  * beat-validator 同版升级——命中项写成统一 diagnostics，passed 交给系统按
- * severity 推导。其余四个角色的文案这一版没动。
+ * severity 推导。commercial-reviewer 同版升级——H/P/E/Pf 四维各带
+ * strengths / problems、新增十个类别的结构化 diagnostics、统一评分锚点，
+ * 整体分同样交给系统按四维均分计算。planner / generator / repairer 的文案没动。
  */
 export const PROMPT_VERSIONS: Record<PromptRole, string> = {
   planner: "1",
   generator: "1",
   "beat-validator": "2",
   reviewer: "2",
-  "commercial-reviewer": "1",
+  "commercial-reviewer": "2",
   repairer: "1",
 };
 

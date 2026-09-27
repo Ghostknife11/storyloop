@@ -12,9 +12,14 @@ import type { ReviewResult } from "@/domain/review-result";
 import type { QualityReviewV2Result } from "@/domain/quality-review-v2";
 import { legacyReviewOf } from "@/domain/quality-review-v2";
 import type { ValidationResult } from "@/domain/validation-result";
-import type { CommercialReviewResult } from "@/domain/commercial-review";
+import type { CommercialReviewV2Result } from "@/domain/commercial-review-v2";
 import type { AttemptSummaryApi } from "@/interface/api";
-import { SAMPLE_COMMERCIAL_REVIEW, apiErrorOf, qualityReviewV2Of } from "./helpers/fixtures";
+import {
+  SAMPLE_COMMERCIAL_REVIEW,
+  SAMPLE_COMMERCIAL_REVIEW_V2,
+  apiErrorOf,
+  qualityReviewV2Of,
+} from "./helpers/fixtures";
 
 /**
  * §31~§33/§46 HTTP 路由层：只验证「JSON 解析 → 委托 service → 响应形状」，
@@ -55,20 +60,9 @@ function reviewWithDimensions(score: number, summary?: string): string {
 
 const RUN_ID = /^\d{8}_\d{6}_[a-z0-9]{6}$/;
 
-/** v1.5.0：与 SAMPLE_COMMERCIAL_REVIEW 同值的一份商业可读性结论（stubLLM 的固定回复）。 */
-const commercialReview: CommercialReviewResult = {
-  score: 71.5,
-  summary: "开篇三句内进入冲突，中段略拖，结尾收得住。",
-  strengths: ["第一段就抛出失踪悬念"],
-  problems: ["中段推理过程重复"],
-  suggestions: ["把中段两次排查合并成一次带新信息的排查"],
-  dimensions: {
-    hook: { score: 82, summary: "开场即冲突，读完想往下看。" },
-    pacing: { score: 68, summary: "中段排查过程拖了两轮。" },
-    engagement: { score: 74, summary: "主角动机明确，动力持续住了。" },
-    payoff: { score: 62, summary: "结局收得干脆但回报略赶。" },
-  },
-};
+/** v2.1.0：stubLLM 的固定回复——模型侧是 v2 形状，落盘时摊平回 v1.5.0 的
+ *  SAMPLE_COMMERCIAL_REVIEW（见 legacyCommercialReviewOf）。 */
+const commercialReview: CommercialReviewV2Result = SAMPLE_COMMERCIAL_REVIEW_V2;
 
 /** target_words=5000 时长度下限为 750：这里远超下限、含主角名、以句号结尾，可通过全部硬规则。 */
 const LONG_STORY = `陈岚推开派出所的玻璃门，${"雨水顺着屋檐砸在台阶上。".repeat(80)}`;

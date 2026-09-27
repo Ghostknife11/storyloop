@@ -15,7 +15,7 @@ import { failureAnalyzerFor } from "@/analysis/failure-analysis-service";
 import {
   SAMPLE_BEAT_PLAN,
   SAMPLE_BEAT_VALIDATION_V2,
-  SAMPLE_COMMERCIAL_REVIEW,
+  SAMPLE_COMMERCIAL_REVIEW_V2,
   SAMPLE_CONFIG,
   REVIEW_REPLY,
   qualityReviewV2Of,
@@ -42,7 +42,7 @@ import {
 
 const PLAN_REPLY = JSON.stringify(SAMPLE_BEAT_PLAN);
 const GOOD_REVIEW = REVIEW_REPLY;
-const COMMERCIAL_REPLY = JSON.stringify(SAMPLE_COMMERCIAL_REVIEW);
+const COMMERCIAL_REPLY = JSON.stringify(SAMPLE_COMMERCIAL_REVIEW_V2);
 const LOW_REVIEW = JSON.stringify(qualityReviewV2Of(41, ["高潮缺失"]));
 
 function pipelineWith(

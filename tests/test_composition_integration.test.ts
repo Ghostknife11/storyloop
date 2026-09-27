@@ -22,7 +22,7 @@ import { createDependencies, createStoryLoop, createStoryLoopApplication } from 
 import { buildPipeline } from "@/application/generate-service";
 import { runScoresOf } from "@/analysis/experiment-summary";
 import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
-import { FakeLLM, SAMPLE_BEAT_PLAN, SAMPLE_CONFIG, REVIEW_REPLY, SAMPLE_REVIEW, SAMPLE_COMMERCIAL_REVIEW, SAMPLE_STORY, withTmpDir } from "./helpers/fixtures";
+import { FakeLLM, SAMPLE_BEAT_PLAN, SAMPLE_CONFIG, REVIEW_REPLY, SAMPLE_REVIEW, SAMPLE_COMMERCIAL_REVIEW_V2, SAMPLE_STORY, withTmpDir } from "./helpers/fixtures";
 
 const PLAN_REPLY = JSON.stringify(SAMPLE_BEAT_PLAN);
 const HAPPY_SCRIPT = [
@@ -30,7 +30,7 @@ const HAPPY_SCRIPT = [
   JSON.stringify({ passed: true, diagnostics: [], summary: "骨架结构完整。" }),
   SAMPLE_STORY,
   REVIEW_REPLY,
-  JSON.stringify(SAMPLE_COMMERCIAL_REVIEW),
+  JSON.stringify(SAMPLE_COMMERCIAL_REVIEW_V2),
 ];
 
 describe("§34 手动装配：createDependencies → createStoryLoopApplication", () => {
@@ -153,7 +153,7 @@ describe("§31/§37 用例层的方法面：路由与 CLI 只用到这些入口"
     await check("validateBeats", async () => createStoryLoop({ llm: new FakeLLM([JSON.stringify({ passed: true, diagnostics: [], summary: "骨架结构完整。" })]) as never }).service.validateBeats({ config: SAMPLE_CONFIG as unknown as Record<string, unknown>, beat_plan: SAMPLE_BEAT_PLAN }));
     await check("review", async () => createStoryLoop({ llm: new FakeLLM([REVIEW_REPLY]) as never }).service.review({ config: SAMPLE_CONFIG as unknown as Record<string, unknown>, story: SAMPLE_STORY }));
     await check("reviewCommercial", async () =>
-      createStoryLoop({ llm: new FakeLLM([JSON.stringify(SAMPLE_COMMERCIAL_REVIEW)]) as never }).service.reviewCommercial({ config: SAMPLE_CONFIG as unknown as Record<string, unknown>, story: SAMPLE_STORY }),
+      createStoryLoop({ llm: new FakeLLM([JSON.stringify(SAMPLE_COMMERCIAL_REVIEW_V2)]) as never }).service.reviewCommercial({ config: SAMPLE_CONFIG as unknown as Record<string, unknown>, story: SAMPLE_STORY }),
     );
     await check("repair", async () => createStoryLoop({ llm: new FakeLLM([SAMPLE_STORY]) as never }).service.repair({
       config: SAMPLE_CONFIG as unknown as Record<string, unknown>,

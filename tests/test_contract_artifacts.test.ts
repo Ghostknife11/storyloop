@@ -22,7 +22,7 @@ import {
   MISSING_ENDING,
   SAMPLE_BEAT_PLAN,
   SAMPLE_BEAT_VALIDATION_V2,
-  SAMPLE_COMMERCIAL_REVIEW,
+  SAMPLE_COMMERCIAL_REVIEW_V2,
   SAMPLE_CONFIG,
   REVIEW_REPLY,
   qualityReviewV2Of,
@@ -135,7 +135,7 @@ function pipelineWith(llm: FakeLLM, store: ArtifactStore, retryPolicy?: RetryPol
   // v1.5.0：商业审阅者同样自带一份假 LLM（§12 两个审阅者互不读取），
   // 免得它抢走主序列里给 BasicReviewer / StoryRepairer 的那几条回复。
   const commercialReviewer = new CommercialReviewer(
-    new FakeLLM([JSON.stringify(SAMPLE_COMMERCIAL_REVIEW)]) as never,
+    new FakeLLM([JSON.stringify(SAMPLE_COMMERCIAL_REVIEW_V2)]) as never,
   );
   return new GenerationPipeline(
     new BeatPlanner(client),

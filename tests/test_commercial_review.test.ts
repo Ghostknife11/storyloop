@@ -11,20 +11,34 @@ import {
   validateCommercialReviewResult,
   type CommercialDimensions,
 } from "@/domain/commercial-review";
-import { parseCommercialReviewResult } from "@/engine/commercial-review-parser";
+import {
+  CommercialReviewV2ValidationError,
+  commercialReviewV2ResultOf,
+  legacyCommercialReviewOf,
+  validateCommercialReviewV2Result,
+} from "@/domain/commercial-review-v2";
+import { CommercialReviewParseError, parseCommercialReviewV2Result } from "@/engine/commercial-review-parser";
 import { CommercialReviewer, COMMERCIAL_REVIEW_TEMPERATURE } from "@/engine/commercial-reviewer";
-import { SAMPLE_COMMERCIAL_REVIEW, SAMPLE_CONFIG, SAMPLE_STORY, FakeLLM } from "./helpers/fixtures";
+import {
+  SAMPLE_COMMERCIAL_REVIEW,
+  SAMPLE_COMMERCIAL_REVIEW_V2,
+  SAMPLE_CONFIG,
+  SAMPLE_STORY,
+  FakeLLM,
+} from "./helpers/fixtures";
 
 /**
- * v1.5.0 商业可读性审阅模型层（TASK §9/§10/§11/§23）。
+ * v2.1.0 商业可读性审阅模型层（TASK §17~§20/§23/§37）。
  *
- * 四组约定：
+ * 五组约定：
  * 1. 四个维度齐全、各自 0 ~ 100 且带非空短评——缺一个就不是合法结论；
  * 2. 整体分 = (H + P + E + Pf) / 4 的确定性均分，与 `reviewOverallScore` 同一套
  *    「重新聚合、不轻信模型自报分」的规则；
  * 3. 与 Co/N/C/Ca 那套结构审阅结论互不引用、互不换算（§12）；
- * 4. 非法输出抛 CommercialReviewValidationError / CommercialReviewParseError，
- *    业务层不自动重试（§15）。
+ * 4. 非法输出抛 CommercialReviewV2ValidationError / CommercialReviewParseError，
+ *    业务层不自动重试（§15）；
+ * 5. v1.5.0 的 CommercialReviewResult 仍在（commercial-review.json 与接口的形状没变），
+ *    这里同时把守两侧：v2 的统一 diagnostics 与 v1 DTO 兼容层。
  */
 
 function dims(scores: Partial<Record<(typeof COMMERCIAL_DIMENSION_KEYS)[number], number>> = {}): CommercialDimensions {
@@ -176,32 +190,178 @@ describe("v1.5.0 commercialReviewResultOf：读旧 / 坏数据只给 null（§32
   });
 });
 
-describe("v1.5.0 parseCommercialReviewResult（§23）", () => {
-  it("带 ```json 围栏的输出也能解析", () => {
-    const raw = "```json\n" + JSON.stringify(SAMPLE_COMMERCIAL_REVIEW) + "\n```";
-    expect(parseCommercialReviewResult(raw)).toEqual(SAMPLE_COMMERCIAL_REVIEW);
+describe("v2.1.0 parseCommercialReviewV2Result（§18/§37 JSON 边界）", () => {
+  it("干净 JSON / 带围栏 / 带首尾空白都能解析", () => {
+    const raw = JSON.stringify(SAMPLE_COMMERCIAL_REVIEW_V2);
+    expect(parseCommercialReviewV2Result(raw)).toEqual(SAMPLE_COMMERCIAL_REVIEW_V2);
+    expect(parseCommercialReviewV2Result(`\`\`\`json\n${raw}\n\`\`\``)).toEqual(SAMPLE_COMMERCIAL_REVIEW_V2);
+    expect(parseCommercialReviewV2Result(`\n  ${raw}  \n`)).toEqual(SAMPLE_COMMERCIAL_REVIEW_V2);
+    // 与 review-parser 同一套口径：只做 trim + 去围栏，不围捕正文里的 JSON
+    expect(() => parseCommercialReviewV2Result(`结论如下：\n${raw}\n以上。`)).toThrow(CommercialReviewParseError);
   });
 
   it("不是合法 JSON → CommercialReviewParseError，不尝试自动修 JSON", () => {
-    expect(() => parseCommercialReviewResult("我觉得这篇挺抓人的")).toThrow(/不是合法 JSON/);
+    expect(() => parseCommercialReviewV2Result("我觉得这篇挺抓人的")).toThrow(/不是合法 JSON/);
+    expect(() => parseCommercialReviewV2Result("")).toThrow(CommercialReviewParseError);
+    expect(() => parseCommercialReviewV2Result("{score: 1,}")).toThrow(/不是合法 JSON/);
   });
 
-  it("JSON 合法但 schema 不过 → CommercialReviewParseError，缺 hook 就是这个下场", () => {
-    const bad = { ...SAMPLE_COMMERCIAL_REVIEW } as Record<string, unknown>;
-    const d = { ...SAMPLE_COMMERCIAL_REVIEW.dimensions } as Record<string, unknown>;
-    delete d.hook;
-    bad.dimensions = d;
-    expect(() => parseCommercialReviewResult(JSON.stringify(bad))).toThrow(/hook/);
+  it("JSON 合法但结构不对时照样抛错：旧格式（没有维度）不再有退路", () => {
+    const legacy = {
+      score: 71.5,
+      summary: "开篇三句内进入冲突。",
+      strengths: ["第一段就抛出失踪悬念"],
+      problems: ["中段推理过程重复"],
+      suggestions: [],
+    };
+    expect(() => parseCommercialReviewV2Result(JSON.stringify(legacy))).toThrow(CommercialReviewParseError);
+    expect(() => parseCommercialReviewV2Result(JSON.stringify(legacy))).toThrow(/dimensions/);
+    expect(() => parseCommercialReviewV2Result('{"dimensions":{},"summary":"s"}')).toThrow(/hook/);
+    // 顶层多一个未知键不影响解析：只认 dimensions / diagnostics / summary
+    expect(() =>
+      parseCommercialReviewV2Result(JSON.stringify({ ...SAMPLE_COMMERCIAL_REVIEW_V2, extra: 1 })),
+    ).not.toThrow();
+  });
+
+  it("四维各自必须带 strengths / problems：缺一个就是非法输出", () => {
+    const raw = JSON.parse(JSON.stringify(SAMPLE_COMMERCIAL_REVIEW_V2)) as Record<string, unknown>;
+    const d = (raw.dimensions as Record<string, Record<string, unknown>>);
+    delete d.pacing.strengths;
+    expect(() => parseCommercialReviewV2Result(JSON.stringify(raw))).toThrow(/pacing\.strengths/);
+    expect(() =>
+      parseCommercialReviewV2Result(
+        JSON.stringify({
+          ...SAMPLE_COMMERCIAL_REVIEW_V2,
+          dimensions: {
+            ...SAMPLE_COMMERCIAL_REVIEW_V2.dimensions,
+            payoff: { score: 62, summary: "回报略赶。", strengths: ["高潮有对抗"], problems: "收得赶" },
+          },
+        }),
+      ),
+    ).toThrow(/payoff\.problems/);
+  });
+
+  it("诊断用统一 schema：未知 category / 非法 severity / 空 message 一律拒绝", () => {
+    const withDiagnostics = (diagnostics: unknown) =>
+      JSON.stringify({ ...SAMPLE_COMMERCIAL_REVIEW_V2, diagnostics });
+    expect(() =>
+      parseCommercialReviewV2Result(
+        withDiagnostics([{ category: "weak_opening", severity: "error", target: "opening", message: "x" }]),
+      ),
+    ).not.toThrow();
+    expect(() =>
+      parseCommercialReviewV2Result(
+        withDiagnostics([{ category: "weak_climax", severity: "error", target: "opening", message: "x" }]),
+      ),
+    ).toThrow(/category 非法：weak_climax/);
+    expect(() =>
+      parseCommercialReviewV2Result(
+        withDiagnostics([{ category: "slow_pacing", severity: "fatal", target: "middle", message: "x" }]),
+      ),
+    ).toThrow(/severity 非法：fatal/);
+    expect(() =>
+      parseCommercialReviewV2Result(
+        withDiagnostics([{ category: "slow_pacing", severity: "warning", target: "middle", message: "  " }]),
+      ),
+    ).toThrow(/message 不能为空/);
+    expect(() => parseCommercialReviewV2Result(withDiagnostics({}))).toThrow(/diagnostics 必须是数组/);
+    expect(() => parseCommercialReviewV2Result(JSON.stringify({ ...SAMPLE_COMMERCIAL_REVIEW_V2, summary: " " }))).toThrow(
+      /summary 不能为空/,
+    );
+  });
+
+  it("§19 十个商业类别一个不多一个不少：审阅类别写不进结构类别", () => {
+    for (const category of [
+      "weak_opening",
+      "late_conflict",
+      "slow_pacing",
+      "repetitive_middle",
+      "low_information_gain",
+      "weak_engagement",
+      "tension_drop",
+      "weak_payoff",
+      "unresolved_promise",
+      "overlong_resolution",
+    ]) {
+      expect(() =>
+        parseCommercialReviewV2Result(
+          JSON.stringify({
+            ...SAMPLE_COMMERCIAL_REVIEW_V2,
+            diagnostics: [{ category, severity: "info", target: "story", message: "x" }],
+          }),
+        ),
+      ).not.toThrow();
+    }
   });
 });
 
-describe("v1.5.0 CommercialReviewer（§12/§13/§14）", () => {
+describe("v2.1.0 CommercialReviewV2Result schema（§18/§37）", () => {
+  it("合法结果原样通过，score 是四维确定性均分", () => {
+    expect(validateCommercialReviewV2Result(SAMPLE_COMMERCIAL_REVIEW_V2)).toEqual(SAMPLE_COMMERCIAL_REVIEW_V2);
+    expect(SAMPLE_COMMERCIAL_REVIEW_V2.score).toBe(71.5);
+  });
+
+  it("模型自报的 score 不被采信：99 和 1 都得到同一个确定性均分", () => {
+    for (const score of [99, 1]) {
+      const out = validateCommercialReviewV2Result({ ...SAMPLE_COMMERCIAL_REVIEW_V2, score });
+      expect(out.score).toBe(71.5);
+    }
+  });
+
+  it("§37 缺字段一律抛错：不补 0、不挑一个维度先凑着", () => {
+    const raw = JSON.parse(JSON.stringify(SAMPLE_COMMERCIAL_REVIEW_V2)) as Record<string, unknown>;
+    const d = (raw.dimensions as Record<string, unknown>);
+    delete d.engagement;
+    expect(() => validateCommercialReviewV2Result(raw)).toThrow(CommercialReviewV2ValidationError);
+    expect(() => validateCommercialReviewV2Result(raw)).toThrow(/engagement/);
+    // 四维齐全但顶层总结缺失：错在 summary，不拿维度短评先凑
+    expect(() =>
+      validateCommercialReviewV2Result({ dimensions: SAMPLE_COMMERCIAL_REVIEW_V2.dimensions }),
+    ).toThrow(/summary 不能为空/);
+    expect(() =>
+      validateCommercialReviewV2Result({
+        ...SAMPLE_COMMERCIAL_REVIEW_V2,
+        dimensions: { ...SAMPLE_COMMERCIAL_REVIEW_V2.dimensions, reread_value: { score: 90, summary: "s", strengths: [], problems: [] } },
+      }),
+    ).toThrow(/未知维度 reread_value/);
+  });
+
+  it("commercialReviewV2ResultOf 读旧 / 坏数据只给 null，绝不补默认值", () => {
+    expect(commercialReviewV2ResultOf(SAMPLE_COMMERCIAL_REVIEW_V2)).toEqual(SAMPLE_COMMERCIAL_REVIEW_V2);
+    expect(commercialReviewV2ResultOf(null)).toBeNull();
+    expect(commercialReviewV2ResultOf("{ not json")).toBeNull();
+    expect(commercialReviewV2ResultOf({ score: 71.5 })).toBeNull();
+  });
+
+  it("§27 DTO 兼容层：v2 结论摊平回 v1.5.0 的 CommercialReviewResult", () => {
+    expect(legacyCommercialReviewOf(SAMPLE_COMMERCIAL_REVIEW_V2)).toEqual(SAMPLE_COMMERCIAL_REVIEW);
+  });
+
+  it("§27 反向：没有 suggestion 的诊断不产生 suggestions，空数组照样合法", () => {
+    const noSuggestion = validateCommercialReviewV2Result({
+      ...SAMPLE_COMMERCIAL_REVIEW_V2,
+      diagnostics: [{ category: "tension_drop", severity: "info", target: "story", message: "中段张力下滑" }],
+    });
+    expect(legacyCommercialReviewOf(noSuggestion).suggestions).toEqual([]);
+  });
+
+  it("v2 结论里绝不携带修复能力字段（§15：只报告）", () => {
+    const keys = Object.keys(validateCommercialReviewV2Result(SAMPLE_COMMERCIAL_REVIEW_V2)).sort();
+    expect(keys).toEqual(["diagnostics", "dimensions", "score", "summary"]);
+    const diagnosticKeys = Object.keys(SAMPLE_COMMERCIAL_REVIEW_V2.diagnostics[0]).sort();
+    expect(diagnosticKeys).toEqual([
+      "category", "id", "message", "severity", "source", "suggestion", "target",
+    ]);
+  });
+});
+
+describe("v2.1.0 CommercialReviewer（§12/§13/§14/§17）", () => {
   const calls: { prompt: string; temperature: number; system: string }[] = [];
-  const llm = new FakeLLM([JSON.stringify(SAMPLE_COMMERCIAL_REVIEW)]) as never;
+  const llm = new FakeLLM([JSON.stringify(SAMPLE_COMMERCIAL_REVIEW_V2)]) as never;
   const spied = {
     generate: async (prompt: string, temperature: number, system: string) => {
       calls.push({ prompt, temperature, system });
-      return JSON.stringify(SAMPLE_COMMERCIAL_REVIEW);
+      return JSON.stringify(SAMPLE_COMMERCIAL_REVIEW_V2);
     },
   };
 
@@ -222,11 +382,27 @@ describe("v1.5.0 CommercialReviewer（§12/§13/§14）", () => {
   it("温度固定 0.3，system 提示只谈四个商业维度", async () => {
     const reviewer = new CommercialReviewer(spied as never);
     const out = await reviewer.review(SAMPLE_CONFIG, SAMPLE_STORY);
-    expect(out).toEqual(SAMPLE_COMMERCIAL_REVIEW);
+    expect(out).toEqual(SAMPLE_COMMERCIAL_REVIEW_V2);
     expect(calls.at(-1)?.temperature).toBe(COMMERCIAL_REVIEW_TEMPERATURE);
     expect(COMMERCIAL_REVIEW_TEMPERATURE).toBe(0.3);
     expect(calls.at(-1)?.system).toContain("商业可读性");
     expect(calls.at(-1)?.system).toContain("只输出 JSON");
+  });
+
+  it("Prompt 里写清统一 rubric、十个诊断类别与「不驱动重试」的边界", async () => {
+    const reviewer = new CommercialReviewer(spied as never);
+    const prompt = reviewer.buildCommercialReviewPrompt(SAMPLE_CONFIG, SAMPLE_STORY);
+    expect(prompt).toContain("90-100");
+    expect(prompt).toContain("整体分由系统按四个维度的均分确定性计算");
+    for (const category of ["weak_opening", "slow_pacing", "weak_payoff", "overlong_resolution"]) {
+      expect(prompt, `提示词里应当列出 ${category}`).toContain(category);
+    }
+    expect(prompt).toContain("不决定是否重试");
+    // §20：Payoff 只是一个维度，不许长成承诺追踪 / 伏笔图谱
+    expect(prompt).toContain("不要把它扩成承诺追踪、伏笔图谱一类的专门体系");
+    expect(prompt).not.toContain("伏笔回收率");
+    expect(prompt).not.toContain("承诺履约度");
+    expect(prompt).not.toContain("Promise Tracking Engine");
   });
 
   it("默认模板路径就是 prompts/commercial_reviewer.txt，与 BasicReviewer 各读各的", async () => {

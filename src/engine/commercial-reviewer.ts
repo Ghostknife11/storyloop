@@ -3,9 +3,9 @@ import { join } from "node:path";
 import type { StoryConfig } from "@/domain/story-config";
 import {
   COMMERCIAL_DIMENSION_DEFINITIONS,
-  type CommercialReviewResult,
 } from "@/domain/commercial-review";
-import { parseCommercialReviewResult } from "@/engine/commercial-review-parser";
+import type { CommercialReviewV2Result } from "@/domain/commercial-review-v2";
+import { parseCommercialReviewV2Result } from "@/engine/commercial-review-parser";
 import type { LLMClient } from "@/ports/llm-client";
 
 /** 模块加载时锁定项目根，避免测试 chdir 后模板路径漂移。 */
@@ -15,7 +15,7 @@ const PROJECT_ROOT = process.cwd();
 export const COMMERCIAL_REVIEW_TEMPERATURE = 0.3;
 
 /**
- * §12 CommercialReviewer：StoryConfig + Story → Prompt → LLM → CommercialReviewResult。
+ * §12 CommercialReviewer：StoryConfig + Story → Prompt → LLM → CommercialReviewV2Result。
  *
  * 与 BasicReviewer（Co/N/C/Ca 那一套）是两个独立的审阅者，共用一个 LLMClient，
  * 但不共用一个 Prompt、不共用一套 schema、也不互相读取结论（TASK §12）：
@@ -23,6 +23,7 @@ export const COMMERCIAL_REVIEW_TEMPERATURE = 0.3;
  *
  * §14 只 evaluate / explain / suggest：不改写正文、不重写、不触发修复或重试。
  * 分数再低也只是屏幕上多一行说明（TASK §15）。
+ * v2.1.0：命中项换成统一 QualityDiagnostic，整体分由系统按四维均分算（TASK §17/§18）。
  */
 export class CommercialReviewer {
   private template: string;
@@ -82,12 +83,12 @@ export class CommercialReviewer {
     config: StoryConfig,
     story: string,
     temperature = COMMERCIAL_REVIEW_TEMPERATURE,
-  ): Promise<CommercialReviewResult> {
+  ): Promise<CommercialReviewV2Result> {
     const raw = await this.llm.generate(
       this.buildCommercialReviewPrompt(config, story),
       temperature,
       "你是一名短篇小说商业可读性审阅者。只评价开篇抓力、节奏、持续阅读动力与回报。只输出 JSON。",
     );
-    return parseCommercialReviewResult(raw);
+    return parseCommercialReviewV2Result(raw);
   }
 }

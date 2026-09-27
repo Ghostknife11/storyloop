@@ -13,7 +13,7 @@ import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
 import type { BeatValidationV2Result } from "@/domain/beat-validation-v2";
 import type { QualityReviewV2Result } from "@/domain/quality-review-v2";
 import type { ValidationResult } from "@/domain/validation-result";
-import type { CommercialReviewResult } from "@/domain/commercial-review";
+import type { CommercialReviewV2Result } from "@/domain/commercial-review-v2";
 import type { RepairRequest, RepairResult } from "@/domain/repair";
 import type { FailureAnalysisInput } from "@/domain/failure-analysis";
 import type { RunTelemetry } from "@/domain/telemetry";
@@ -79,17 +79,15 @@ const BEAT_OK: BeatValidationV2Result = {
   summary: "骨架结构完整。",
 };
 
-const COMMERCIAL_OK: CommercialReviewResult = {
+const COMMERCIAL_OK: CommercialReviewV2Result = {
   score: 76,
   summary: "可读性良好。",
-  strengths: ["开场有钩子"],
-  problems: [],
-  suggestions: [],
+  diagnostics: [],
   dimensions: {
-    hook: { score: 78, summary: "s" },
-    pacing: { score: 74, summary: "s" },
-    engagement: { score: 76, summary: "s" },
-    payoff: { score: 76, summary: "s" },
+    hook: { score: 78, summary: "s", strengths: ["开场有钩子"], problems: [] },
+    pacing: { score: 74, summary: "s", strengths: [], problems: [] },
+    engagement: { score: 76, summary: "s", strengths: [], problems: [] },
+    payoff: { score: 76, summary: "s", strengths: [], problems: [] },
   },
 };
 
@@ -114,7 +112,7 @@ interface Components {
   validator: { validate: () => Promise<ValidationResult> };
   reviewer: { review: () => Promise<QualityReviewV2Result> };
   beatValidator?: { validate: () => Promise<BeatValidationV2Result> };
-  commercialReviewer?: { review: () => Promise<CommercialReviewResult> };
+  commercialReviewer?: { review: () => Promise<CommercialReviewV2Result> };
   repairer?: { repair: (r: RepairRequest) => Promise<RepairResult> };
   store?: ArtifactStore;
   policy?: Partial<RetryPolicy>;

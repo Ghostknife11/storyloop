@@ -48,6 +48,7 @@ import {
   SAMPLE_BEAT_PLAN,
   SAMPLE_BEAT_VALIDATION_V2,
   SAMPLE_COMMERCIAL_REVIEW,
+  SAMPLE_COMMERCIAL_REVIEW_V2,
   SAMPLE_CONFIG,
   SAMPLE_QUALITY_REVIEW_V2,
   REVIEW_REPLY,
@@ -163,7 +164,7 @@ function runDeps(llm: FakeLLM, beatValidation?: BeatValidationV2Result) {
     // v1.5.0：商业审阅同样是独立的一次调用。FakeLLM 对单条回复会一直重复返回，
     // 于是这里不必在每条用例的主回复序列里给它排一个位置。
     commercialReviewer: new CommercialReviewer(
-      new FakeLLM([JSON.stringify(SAMPLE_COMMERCIAL_REVIEW)]) as never,
+      new FakeLLM([JSON.stringify(SAMPLE_COMMERCIAL_REVIEW_V2)]) as never,
     ),
   };
 }

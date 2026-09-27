@@ -12,7 +12,7 @@ import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
 import { CommercialReviewer } from "@/engine/commercial-reviewer";
 import { CommercialReviewParseError } from "@/engine/commercial-review-parser";
 import { aggregateCommercialDimensions } from "@/domain/commercial-review";
-import { apiErrorOf, FakeLLM, SAMPLE_COMMERCIAL_REVIEW } from "./helpers/fixtures";
+import { apiErrorOf, FakeLLM, SAMPLE_COMMERCIAL_REVIEW, SAMPLE_COMMERCIAL_REVIEW_V2 } from "./helpers/fixtures";
 
 /**
  * v1.5.0 POST /api/review/commercial 契约（TASK §30/§31/§32）。
@@ -64,7 +64,7 @@ async function readJson(res: Response): Promise<Record<string, unknown>> {
  * 冒充 OpenAI-compatible /chat/completions，只回一份固定的商业可读性结论。
  * 路由自己组装 CommercialReviewer，所以只能从传输层注入。
  */
-function stubCommercialLLM(content: string = JSON.stringify(SAMPLE_COMMERCIAL_REVIEW)) {
+function stubCommercialLLM(content: string = JSON.stringify(SAMPLE_COMMERCIAL_REVIEW_V2)) {
   const fetchMock = vi.fn(async () => ({
     ok: true,
     status: 200,
@@ -101,7 +101,7 @@ describe("POST /api/review/commercial（v1.5.0 §30/§31）", () => {
 
   it("模型自报的 score 与维度不符时，响应里的是重算值", async () => {
     withTmpDir();
-    const liar = { ...SAMPLE_COMMERCIAL_REVIEW, score: 99 };
+    const liar = { ...SAMPLE_COMMERCIAL_REVIEW_V2, score: 99 };
     stubCommercialLLM(JSON.stringify(liar));
     const res = await postCommercialReview(post({ config, story }));
     expect(res.status).toBe(200);

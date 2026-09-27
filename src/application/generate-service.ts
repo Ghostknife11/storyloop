@@ -49,6 +49,7 @@ import type { QualityStatus } from "@/engine/pipeline";
 import { projectVersion as readProjectVersion } from "@/infrastructure/config/version";
 import type { BeatValidationResult } from "@/domain/beat-validation";
 import { legacyBeatValidationOf } from "@/domain/beat-validation-v2";
+import { legacyCommercialReviewOf } from "@/domain/commercial-review-v2";
 import type {
   CommercialReviewResult,
   CommercialReviewStatus,
@@ -506,7 +507,8 @@ export async function reviewStoryCommercial(body: unknown, deps: RunDeps = {}): 
       await clientFor(runtime, deps.llm),
       join(PROJECT_ROOT, "prompts", "commercial_reviewer.txt"),
     );
-    const review = await reviewer.review(config, story);
+    // v2.1.0：组件内部说统一 diagnostics，接口与落盘仍摊平回 v1.5.0 的 DTO（TASK §18/§27）
+    const review = legacyCommercialReviewOf(await reviewer.review(config, story));
 
     // §30：re-review 覆盖当前 commercial-review.json，不建立 commercial_review_history
     store?.putCommercialReview(runId, review);
