@@ -88,8 +88,13 @@ export class FileDocumentRepository implements DocumentRepository {
    * 修订目录：projects/<id>/revisions/<docId>。这个存储只负责「删掉它」，
    * 读和写都归 FileRevisionRepository（revision-store.ts）——一处只干一件事，
    * 删稿件时要连着删修订，但改修订内容不该经过稿件存储。
+   * 两个 id 都先过一遍模式再拼路径，与 revision-store.ts 的 revisionsDir 同一条纪律：
+   * 不拿「调用方前面已经校验过」当兜底。
    */
   private revisionsDir(projectId: string, documentId: string): string {
+    if (!isWorkspaceId(projectId) || !isWorkspaceId(documentId)) {
+      throw new DocumentWriteError(documentId, undefined);
+    }
     const dir = resolve(this.projectsRoot, projectId, REVISIONS_DIR, documentId);
     if (dir === this.projectsRoot || !dir.startsWith(this.projectsRoot + sep)) {
       throw new DocumentWriteError(documentId, undefined);

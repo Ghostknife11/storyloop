@@ -5,6 +5,27 @@
 >
 > 版本策略见 [compatibility.md](./compatibility.md)。
 
+## 从 2.3.0 升级到 2.3.1
+
+**没有任何需要改代码的地方，也没有任何产物要迁移。** 2.3.1 是 2.3.0 的一次审计响应补丁：
+对 2.3.0 的代码重跑了一次完整的 Mimosa 深度扫描，报告的一条中危经逐条核实确认是误报
+（本仓没有任何数据库，被点名的路由也不接受排序入参），**本版不修复任何安全漏洞**。
+
+人工复核那条链路时查出两处防护不对称，本版补齐。两处都不是可利用的漏洞——每一处都有路径
+containment 兜底，调用方在到达之前也已经校验过 id；补的是「拼路径之前先看 id 合不合法」
+这条纪律在两个存储里写得不一致，等于把唯一的关卡留在了调用顺序上：
+
+1. **`FileDocumentRepository.revisionsDir` 补齐 id 校验**：`projectId` 与 `documentId`
+   现在都先过 `isWorkspaceId` 再拼路径，与兄弟存储 `FileRevisionRepository.revisionsDir`
+   逐字一致。
+2. **`BenchmarkStore.suiteDir` 补齐 Suite id 与版本校验**：现在自己检查
+   `SUITE_ID_PATTERN` / `SUITE_VERSION_PATTERN`，与 `suiteEntries` / `readSuite` /
+   `readBeatPlan` 同一条纪律。写路径收到的 Suite 本来就由领域工厂校验过，新增的这一层守的
+   是「万一没拦住」时也不把路径拼出去。
+
+行为一个字节都没变：Benchmark 的八条路由、错误码、产物布局、读写行为与 2.3.0 逐字一致，
+2.3.0 产生的执行记录原样可读，回滚到 2.3.0 的代价为零。
+
 ## 从 2.2.0 升级到 2.3.0
 
 **没有任何需要改代码的地方，也没有任何产物要迁移。** 2.3.0 在 2.0 平台架构上加了

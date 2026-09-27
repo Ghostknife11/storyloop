@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -222,5 +222,29 @@ describe("FileDocumentRepository（§5/§47）", () => {
     expect(store.listDocumentIds("prj_a")).toEqual([DOC_ID]);
     expect(store.readDocument("prj_b", DOC_ID)).toBeNull();
     expect(store.listDocumentIds("prj_b")).toEqual([]);
+  });
+
+  it("删稿件连 revisions/ 一起删，两个 id 都得先过模式（§42）", () => {
+    const root = projectsRoot();
+    const store = new FileDocumentRepository(root);
+    store.putDocument(documentOf());
+    const revisions = join(root, PROJECT_ID, "revisions", DOC_ID);
+    mkdirSync(revisions, { recursive: true });
+    writeFileSync(join(revisions, "index.json"), "{}", "utf8");
+    // 上一层放一个同名结构：真把路径拼出去了，删的就是它而不是项目里的那份
+    const outside = join(root, "revisions", DOC_ID);
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(join(outside, "index.json"), "{}", "utf8");
+
+    store.deleteDocument(PROJECT_ID, DOC_ID);
+
+    expect(store.readDocument(PROJECT_ID, DOC_ID)).toBeNull();
+    expect(existsSync(revisions)).toBe(false);
+    expect(existsSync(outside)).toBe(true);
+
+    for (const bad of ["../escape", "a/b", "..", ""]) {
+      expect(() => store.deleteDocument(PROJECT_ID, bad), bad).toThrow();
+      expect(() => store.deleteDocument(bad, DOC_ID), bad).toThrow();
+    }
   });
 });

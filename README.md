@@ -33,6 +33,11 @@
 > 同样配置跑两次，数字不会逐字节一致——**同样配置并不保证模型输出逐字节一致。**
 > 契约见 [docs/benchmark.md](docs/benchmark.md)，题库来源与许可见
 > [docs/benchmark-data.md](docs/benchmark-data.md)。
+>
+> **v2.3.1 是 2.3.0 的审计响应补丁**：对 2.3.0 重跑了一次完整的 Mimosa 深度扫描，报告的一条
+> 中危经核实是误报（本仓没有任何数据库，被点名的路由也不接受排序入参），本版不修复任何安全
+> 漏洞；人工复核另查出两处「拼路径前先验 id」的防护不对称并补齐，行为逐字未变。
+> 升级说明见 [docs/upgrade.md](docs/upgrade.md)。
 
 ## 快速开始
 
@@ -1499,7 +1504,12 @@ v2.3.0 的 Benchmark Platform 另有八个测试文件（同样只用假组件�
 `test_benchmark_api`（八条路由的字段、错误码与状态码）、
 `test_benchmark_dataset`（随仓库发布那份题库的来源与许可、什么内容永远不会进 Benchmark）。
 
-全部测试合计 **118 个文件 / 1911 条**，全部只调用真实 LLM 之外的桩：
+v2.3.1 是对 2.3.0 的一次审计响应补丁，没有新增测试文件：两个既有文件各补了一条关卡断言
+（`test_benchmark_store`：直接往 `putSuite` 塞不合法 id / 版本的 Suite 必须抛
+`BenchmarkWriteError`，且盘上一个目录都不多出来；`test_workspace_document`：删稿件要连
+`revisions/` 一起删且不越出项目目录）。
+
+全部测试合计 **118 个文件 / 1917 条**，全部只调用真实 LLM 之外的桩：
 LLM 由注入的桩对象或 `FakeLLM` 替代（`tests/helpers/fixtures.ts`），
 `fetch` 也被桩掉。重试相关断言同样只用桩，从不触发真实模型调用。
 URL 校验的用例用注入的假解析器跑，不真的查 DNS，也不碰任何真实主机。

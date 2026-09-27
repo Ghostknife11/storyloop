@@ -123,6 +123,13 @@ describe("v1.0.0 发布门禁 — 版本唯一来源", () => {
     expect(read("CHANGELOG.md")).toContain(`## [${version}]`);
   });
 
+  it("CHANGELOG 里最新的版本条目就是当前版本（新增条目必须置顶）", () => {
+    const version = repoVersion();
+    const headings = [...read("CHANGELOG.md").matchAll(/^## \[(\d+\.\d+\.\d+)\]/gm)].map((m) => m[1]);
+    expect(headings.length).toBeGreaterThan(0);
+    expect(headings[0]).toBe(version);
+  });
+
   it("源码里不再有别的硬编码版本字符串", () => {
     const version = repoVersion();
     const forbidden = new Set(["0.9.1", "0.9.0", "0.8.0", "0.7.0", "0.6.0", "0.5.0", "0.4.0", "0.3.0", "0.2.0", "0.1.0", "0.0.1"]);
@@ -590,5 +597,28 @@ describe("v2.3.0 发布门禁 — Benchmark 边界", () => {
         expect(existsSync(join(repoRoot(), "benchmarks", "suites", "storyloop-core", "1.0.0", String(raw.beatPlanRef)))).toBe(true);
       }
     }
+  });
+});
+
+describe("v2.3.1 发布门禁 — 审计响应必须说真话", () => {
+  it("CHANGELOG 的 2.3.1 条目写明「不修复任何安全漏洞」", () => {
+    const changelog = read("CHANGELOG.md");
+    const entry = changelog.slice(changelog.indexOf("## [2.3.1]"));
+    expect(entry).toContain("## [2.3.1]");
+    // 深度扫描报的那一条是误报，这一版不许被说成修了漏洞
+    expect(entry).toContain("误报");
+    expect(entry).toContain("不修复任何安全漏洞");
+    expect(entry).toContain("没有任何破坏性变更");
+  });
+
+  it("README 与升级说明同样不许把 2.3.1 说成安全修复", () => {
+    expect(read("README.md")).toContain("本版不修复任何安全");
+    expect(read("docs/upgrade.md")).toContain("本版不修复任何安全漏洞");
+    expect(read("docs/compatibility.md")).toContain("本版不修复任何安全漏洞");
+  });
+
+  it("两处补齐的防护在 README 测试合计里对得上账", () => {
+    const readme = read("README.md");
+    expect(readme).toContain("118 个文件 / 1917 条");
   });
 });

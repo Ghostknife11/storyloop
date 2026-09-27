@@ -305,6 +305,31 @@ v2.3.0 新增第三棵产物树 `benchmarks/`（`suites/` 是入库的题库原�
 逐字段契约见 [benchmark.md](./benchmark.md)，题库来源与许可见
 [benchmark-data.md](./benchmark-data.md)。
 
+## v2.3.1 的审计响应补丁（纯 additive，零行为变化）
+
+v2.3.1 不改任何一个对外契约：没有新增路由、没有新增错误码、没有新增产物文件、没有改字段名，
+`runs/` 与 `benchmarks/` 的读写行为与 2.3.0 逐字一致，2.3.0 产生的执行记录原样可读。
+
+对 2.3.0 的代码重跑了一次完整的 Mimosa 深度扫描（`scan-2026-09-27T19-20-25`），报告一条
+中危「疑似跨文件污点」：HTTP 请求输入 → `src/application/workspace-documents.ts` 的动态排序
+字段。逐条核实后确认是**误报**：本仓没有任何数据库（`package.json` 里没有 mongo / SQL 类驱动，
+`src/` 里没有数据库客户端）；被点名的 `GET /api/projects/<id>/documents` 只接受路径段 `id`，
+全仓 `/api/` 下不存在 `sort` / `orderBy` 之类的请求参数；`listDocuments` 里的 `.sort()` 收的
+是一个写死的比较器（`updatedAt` 降序，打平时按 id 倒序收尾），不是从请求里取的排序依据。
+**本版不修复任何安全漏洞。**
+
+人工复核那条链路时查出两处防护不对称，本版补齐。两处都不是可利用的漏洞——每一处都有路径
+containment 检查兜底，调用方在到达之前也已经校验过 id；补的是「拼路径之前先看 id 合不合法」
+这条纪律在两个存储里写得不一致：
+
+- **`FileDocumentRepository.revisionsDir`** 现在与兄弟存储 `FileRevisionRepository.revisionsDir`
+  逐字一致，`projectId` 与 `documentId` 都先过 `isWorkspaceId` 再拼路径。
+- **`BenchmarkStore.suiteDir`** 现在自己检查 `SUITE_ID_PATTERN` / `SUITE_VERSION_PATTERN`，
+  与 `suiteEntries` / `readSuite` / `readBeatPlan` 同一条纪律。写路径收到的 Suite 本来就由
+  领域工厂校验过，新增的这一层守的是「万一没拦住」时也不把路径拼出去。
+
+两处都只可能挡住本来就会被挡住或本来就到不了的输入，因此现有行为一个字节都没变。
+
 ## v1.9.0 的失败分析（纯 additive）
 
 v1.9.0 新增 `failure-analysis.json`、一条只读路由 `GET /api/runs/<run_id>/failure-analysis`、

@@ -120,6 +120,12 @@ export class BenchmarkStore implements BenchmarkSuiteRepository, BenchmarkExecut
   // -------------------------------------------------------------------------
 
   private suiteDir(suiteId: string, version: string): string {
+    // Suite id 与版本都先过一遍模式，与 suiteEntries / readSuite / readBeatPlan 同一条纪律。
+    // 写路径收到的 Suite 已经由领域工厂校验过，这一行守的是「拼路径」这一步本身：
+    // 不因为调用顺序看起来安全，就把唯一的关卡留在外部。
+    if (!SUITE_ID_PATTERN.test(suiteId) || !SUITE_VERSION_PATTERN.test(version)) {
+      throw new BenchmarkWriteError(SUITE_FILE);
+    }
     const dir = resolve(this.suitesRoot, suiteId, version);
     if (dir === this.suitesRoot || !dir.startsWith(this.suitesRoot + sep)) {
       throw new BenchmarkWriteError(SUITE_FILE);

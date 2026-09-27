@@ -176,6 +176,24 @@ describe("BenchmarkStore — Suite", () => {
     writeFileSync(path, JSON.stringify(raw), "utf8");
     expect(new BenchmarkStore("runs").readSuite("store-suite", "1.0.0")).toBeNull();
   });
+
+  it("写路径自己也验 id 与版本：拼路径这一步不靠调用方兜底（§42）", () => {
+    const dir = withTmpDir();
+    const store = new BenchmarkStore("runs");
+    const good = suiteRaw("1.0.0");
+    // 领域工厂会拦住这些形状，所以这里直接用原始对象——要测的正是「万一没拦住」
+    for (const bad of [
+      { ...good, id: "../escape" },
+      { ...good, id: "store-suite/nested" },
+      { ...good, id: "" },
+      { ...good, version: "../../1.0.0" },
+      { ...good, version: "" },
+    ]) {
+      expect(() => store.putSuite(bad as never), JSON.stringify(bad)).toThrow(BenchmarkWriteError);
+    }
+    // 一次都没写出去：benchmarks/ 底下不该多出任何目录
+    expect(existsSync(join(dir, "benchmarks", "suites"))).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
