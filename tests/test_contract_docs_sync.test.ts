@@ -1,16 +1,17 @@
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { GenerationPipeline } from "@/core/pipeline";
-import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "@/core/retry-policy";
-import { ArtifactStore } from "@/storage/artifact-store";
-import { BeatPlanner } from "@/lib/beat-planner";
-import { StoryGenerator } from "@/lib/story-generator";
-import { StoryValidator } from "@/lib/story-validator";
-import { BasicReviewer } from "@/lib/basic-reviewer";
-import { CommercialReviewer } from "@/lib/commercial-reviewer";
-import { StoryRepairer } from "@/lib/story-repairer";
-import { RepairStrategy } from "@/core/repair-strategy";
+import { GenerationPipeline } from "@/engine/pipeline";
+import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "@/engine/retry-policy";
+import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
+import { BeatPlanner } from "@/engine/beat-planner";
+import { StoryGenerator } from "@/engine/story-generator";
+import { StoryValidator } from "@/engine/story-validator";
+import { BasicReviewer } from "@/engine/basic-reviewer";
+import { CommercialReviewer } from "@/engine/commercial-reviewer";
+import { StoryRepairer } from "@/engine/story-repairer";
+import { RepairStrategy } from "@/engine/repair-strategy";
+import { failureAnalyzerFor } from "@/analysis/failure-analysis-service";
 import {
   SAMPLE_BEAT_PLAN,
   SAMPLE_BEAT_VALIDATION,
@@ -81,7 +82,7 @@ function pipelineWith(
     (brokenComponents?.commercialReviewer ?? new CommercialReviewer(
       new FakeLLM([COMMERCIAL_REPLY]) as never,
     )) as never,
-  );
+  ).withFailureAnalyzer(failureAnalyzerFor(store));
 }
 
 /** 跑一次真 Pipeline，返回 run 目录与其中每层 metadata 的键集合。

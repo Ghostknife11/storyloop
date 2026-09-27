@@ -1,8 +1,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { FALLBACK_VERSION } from "@/lib/version";
-import { FAILURE_CATEGORIES } from "@/types/failure-analysis";
+import { FALLBACK_VERSION } from "@/infrastructure/config/version";
+import { FAILURE_CATEGORIES } from "@/domain/failure-analysis";
 import { repoRoot, repoVersion } from "./helpers/fixtures";
 
 /**
@@ -44,6 +44,8 @@ const DOCS = [
   "telemetry.md",
   // v1.9.0：失败分析的契约（类别、优先级、证据指向、状态记法与边界）
   "failure-analysis.md",
+  // v2.0.0：平台架构的契约（六层职责、依赖方向、组合根、端口与适配器、安全边界）
+  "architecture.md",
 ] as const;
 
 /**
@@ -193,7 +195,7 @@ describe("v1.0.0 发布门禁 — docs 与示例", () => {
   it("每份契约文档都标注了版本与冻结状态", () => {
     for (const file of DOCS) {
       const text = read(join("docs", file));
-      expect(text, `${file} 应说明自己冻结的是哪个版本`).toMatch(/v1(\.\d+)*/);
+      expect(text, `${file} 应说明自己冻结的是哪个版本`).toMatch(/v\d+(\.\d+)*/);
       expect(text.length, `${file} 不能是空壳`).toBeGreaterThan(200);
     }
   });
