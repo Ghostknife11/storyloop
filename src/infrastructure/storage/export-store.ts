@@ -128,8 +128,20 @@ export class FileExportRepository implements ExportRepository {
     }
   }
 
+  /**
+   * 读文件字节；文件不存在返回 null。
+   *
+   * 文件名不合法也返回 null 而不是抛错：调用方问的是「这个文件能不能读」，
+   * 一个压根不该存在的文件名答案就是「不能」。exists 一向是这个口径，
+   * readArtifact 跟它不一致会让同一份脏数据在两条路上得到两种答复。
+   */
   readArtifact(projectId: string, filename: string): Uint8Array | null {
-    const path = this.artifactPath(projectId, filename);
+    let path: string;
+    try {
+      path = this.artifactPath(projectId, filename);
+    } catch {
+      return null;
+    }
     if (!existsSync(path)) return null;
     try {
       const buffer = readFileSync(path);
@@ -163,6 +175,10 @@ export class FileExportRepository implements ExportRepository {
   /**
    * 追加一条历史。整份重写 + rename（与其它存储同一套原子写法）。
    * 没有条数上限：一条记录几百字节，真有项目导出上万次，那也是用户在真用。
+   *
+   * 写的是 `{exports:[...]}` 而不是裸数组——读的一侧（domain/export-artifact.ts
+   * 的 exportHistoryOf）认的是这个形状，和 revisions.json 的 {revisions:[...]}
+   * 同一个道理：一个文件将来要加字段（比如 schemaVersion）时不至于把历史读空。
    */
   recordExport(projectId: string, result: ExportResult): void {
     const history = this.listExports(projectId);
@@ -171,7 +187,7 @@ export class FileExportRepository implements ExportRepository {
     const tmpPath = join(join(finalPath, ".."), `${TMP_PREFIX}${basename(finalPath)}.tmp`);
     try {
       mkdirSync(join(finalPath, ".."), { recursive: true });
-      writeFileSync(tmpPath, JSON.stringify(history, null, 2), "utf8");
+      writeFileSync(tmpPath, JSON.stringify({ exports: history }, null, 2), "utf8");
       renameSync(tmpPath, finalPath);
     } catch (e) {
       throw new ExportWriteError(INDEX_FILE, e);

@@ -19,8 +19,8 @@ import { sha256Hex } from "@/infrastructure/tracking/digest";
  * v2.2.0 导出链测试（TASK §27）。
  *
  * 只测「字节从哪来」：ZIP 结构、正文分块、两种容器的 XML 安全、文件名安全。
- * 不测存储端（见 test_workspace_export_store.test.ts），也不测工作流判定
- * （见 test_workspace_lifecycle.test.ts）。导出链最容易出的不是业务错误，
+ * 不测存储端（见 test_workspace_export_store.test.ts），也不测工作流
+ * （见 test_workspace_export_case.test.ts）。导出链最容易出的不是业务错误，
  * 而是「用户正文里的一个 <script> 把整个文件变成坏包」这种事——所以这里
  * 有一段专门的恶意正文用例。
  */
