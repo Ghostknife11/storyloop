@@ -5,6 +5,40 @@
 >
 > 版本策略见 [compatibility.md](./compatibility.md)。
 
+## 从 2.2.0 升级到 2.3.0
+
+**没有任何需要改代码的地方，也没有任何产物要迁移。** 2.3.0 在 2.0 平台架构上加了
+Benchmark Platform：固定且版本化的 Suite 按写死的协议、经同一条生产流水线批量执行，
+统一汇总质量、商业可读性、可靠性、失败分布与效率指标。Run 类路由、请求响应字段、
+CLI、错误码、`runs/` 下原有产物的布局与字段、界面全部与 2.2.0 逐字一致，
+2.2.0 及更早写的 Run 原样可读。契约见 [benchmark.md](./benchmark.md)，
+题库来源与许可见 [benchmark-data.md](./benchmark-data.md)。
+
+要紧的有五条：
+
+1. **多一棵与 `runs/` 同级的产物树 `benchmarks/`。** `benchmarks/suites/<suite_id>/<version>/`
+   放入库的题库原文（`suite.json` + `cases/<case_id>/beat-plan.json`）；
+   `benchmarks/executions/<benchmark_id>/` 放每次测量的产物（`execution.json` /
+   `samples.json` / `aggregate.json`）。后者与 `runs/` / `experiments/` 一样不入库
+   （`.gitignore` 里是 `/benchmarks/executions/`）。**`runs/` 里的东西一个字节都没动。**
+2. **多八条 `/api/benchmarks/**` 路由与四个 `BENCHMARK_*` 错误码。** 全部 additive：
+   Run 类路由清单、字段名、状态码含义与错误码逐字保留。按字段穷举解析 `GET /api/runs/<id>`
+   的下游只会多看到 `manifest.benchmark` 这一个可选对象，按「键在不在」判断即可。
+3. **`run-manifest.json` 上多一个可选的 `benchmark` 块。** 记六件事：`benchmarkId` /
+   `suiteId` / `suiteVersion` / `suiteDigest` / `caseId` / `repetition`——一次 Run 是被哪次
+   测量、哪道题、第几次跑出来的。**普通 Run 里这个键不出现**，2.3.0 之前写的 Run 一个字
+   节都没变；把旧 Run 拿给 2.3.0 读，那个键就是不出现，不是错误。
+4. **执行落到终态之后不可改写。** `completed` / `partial` / `failed` 三种终态都拦住一切
+   再写入（`BENCHMARK_WRITE_FAILED`）。历史结果不许被后续一次运行覆盖；Suite 要改就开新
+   版本号，历史执行记的是 `suiteId@suiteVersion` 与 `suiteDigest`。
+5. **Benchmark 只测量，不控制。** 没有任何代码读一次执行的结果来决定重试、修订、采纳、
+   换模型或换 Prompt；Benchmark 也不接受从请求里覆盖模型、地址或密钥（跑在服务端配置上）。
+   组合根多了一个 `@/composition/benchmark` 半边，`index.ts` 仍 re-export 它的符号；
+   与 2.2.0 不同的是 Benchmark **没有**再拆一层——它必须真的发起生成，模型客户端本来就
+   该在它的依赖图里。
+
+回滚到 2.2.0 的代价为零：多出来的产物树、路由与字段被旧版本整个忽略。
+
 ## 从 2.1.0 升级到 2.2.0
 
 **没有任何需要改代码的地方，也没有任何产物要迁移。** 2.2.0 在 2.0 平台架构上加了

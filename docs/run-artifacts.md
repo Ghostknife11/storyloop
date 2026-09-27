@@ -3,6 +3,11 @@
 > 本文件是 v1.0.0 冻结的 Run 产物布局：目录层级、文件名、每层 metadata 的字段集。
 > 1.x 版本不得改名、不得删文件、不得改变字段语义；扩展只能是新增文件或新增可选字段。
 >
+> **v2.3.0 没有新增任何 Run 级文件，也没有改任何一个字段。** 它新增的是另一棵树
+> `benchmarks/`（题库原文 + 每次测量的执行三件套）与 `run-manifest.json` 上一个可选的
+> `benchmark` 块——只在 Benchmark 样本上出现，普通 Run 里这个键不出现。
+> 契约见 [benchmark.md](./benchmark.md)。
+>
 > v1.2.0 在这一约束下新增了 `quality.json`（Run 根 + 每个 attempt）与三个 metadata 字段：
 > `quality_assembly_status` / `overall_score` / `quality_issue_count`。都是纯新增，
 > 没有任何旧字段改名或改语义。
@@ -312,13 +317,17 @@ v1.5.0 之前产生的 Run 没有 `commercial-review.json`：读接口返回 `nu
 | `parameters` | 各阶段 temperature 与本次生效的 `RetryPolicy` 参数 |
 | `attempts` | 每次 Attempt 的编号、是否入选、重试原因，以及该次发生的修订 |
 | `artifacts` | 清单登记的全部产物的路径与 SHA-256 摘要 |
+| `experiment` | 可选块（v1.7.0 新增）：这次 Run 是某个受控实验的样本时才有，记 `experimentId` / `variantId` / `repetition`；普通 Run 里这个键不出现 |
+| `benchmark` | 可选块（v2.3.0 新增）：这次 Run 是某次 Benchmark 执行的样本时才有，记 `benchmarkId` / `suiteId` / `suiteVersion` / `suiteDigest` / `caseId` / `repetition`；普通 Run 里这个键不出现 |
 
 三条硬规则：
 
 - **不重复内容**：清单登记「跑了什么」，不搬运故事正文、审阅结论的任何文字。
 - **不碰凭据**：只记模型名、provider 与 baseUrl 的分类（服务器配置 / 请求公有覆盖），
   **baseUrl 原文不落盘**；`topP` / `maxTokens` 这类本次客户端没有下发的字段一律不写。
-- **不是实验框架**：清单只为一次 Run 自证出身，不做跨 Run 对比、不跑基准、不统计成功率。
+- **不是实验框架、也不是基准平台**：清单只为一次 Run 自证出身，不做跨 Run 对比、不统计成功率、
+  不自己跑基准。v2.3.0 的 Benchmark Platform 是另一棵树（`benchmarks/`），它反过来**读**这份
+  清单上的 `benchmark` 块来回答「这条 Run 是哪次测量跑出来的」——清单本身仍然不汇总、不排名。
 
 读接口把 manifest 原样挂在 `manifest` 字段里（没有清单的旧 Run 返回 `null`），界面折叠成
 一个面板，列出版本 / 模型 / 参数 / 每次 Attempt，摘要一律截断显示。
@@ -358,7 +367,9 @@ v2.0.0 的重试与修订行为逐字不变。`metadata.json` 的三层字段集
 
 - 产物里不写 API Key、不写 Bearer token
 - 错误文本会过 `src/lib/safe-text.ts`：本机绝对路径替换为 `<path>`、凭据样式的字符串打码
-- `runs/` 与 `outputs/` 在 `.gitignore` 里，不进仓库；仓库里只有 `examples/example_run/` 这个合成样例
+- `runs/` 与 `outputs/` 在 `.gitignore` 里，不进仓库；仓库里只有 `examples/example_run/` 这个合成样例。
+  `benchmarks/executions/`（每次 Benchmark 测量的产物）与 `experiments/` 同样不入库；
+  入库的只有 `benchmarks/suites/` 这一份题库原文，来源与许可见 [benchmark-data.md](./benchmark-data.md)
 - `run-manifest.json` 里的模型条目只含模型名 / provider / baseUrl 分类，没有 baseUrl 原文、
   没有 key、没有 Authorization 头；登记不到的产物不写占位行
 - `telemetry.json`（v1.8.0 新增）里没有 API Key、没有 Authorization / Cookie / 原始请求头、
@@ -372,8 +383,9 @@ v2.0.0 的重试与修订行为逐字不变。`metadata.json` 的三层字段集
 
 - 不做跨 Run 的版本库、不做产物 diff、不做 run 重放（`ExperimentRunner` 一类能力保留给后续版本）
 - 不做失败归因统计与因果图（`FailureAttribution` / `CausalGraph` 同理）
-- `run-manifest.json` 不做基准对比、不统计成功率、不做自适应调参（`BenchmarkRunner` /
-  `AdaptiveGeneration` / `SelfOptimization` 一类能力保留给后续版本）
+- `run-manifest.json` 不做基准对比、不统计成功率；v2.3.0 起它只在 Benchmark 样本上多一个
+  可选的 `benchmark` 指针块（`benchmarkId` / `suiteId` / `suiteVersion` / `suiteDigest` /
+  `caseId` / `repetition`），回答「这条 Run 是哪次测量跑出来的」，本身不汇总、不排名
 - `telemetry.json`（v1.8.0 新增）不做跨 Run 聚合、不设阈值、不出告警，也不据此改变任何生成
   行为：它只回答「这次怎么跑的」，不回答「为什么失败」
 - `quality.json` 只是把已有结论汇到一起：不额外打分、不设 PASS/FAIL 阈值、不做多维评分

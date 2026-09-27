@@ -120,6 +120,20 @@ v2.2.0 加了 Creator Workspace 之后，`src/composition/` 分成两个模块�
 import `@/composition/workspace`**：绕回 index 就等于把模型客户端拉回工作区的依赖图里，
 拆模块买到的东西就没了。
 
+### v2.3.0：组合根按能力拆成三个模块
+
+v2.3.0 加了 Benchmark Platform，`src/composition/` 变成三个模块：
+
+| 模块 | 装什么 | 谁 import |
+|---|---|---|
+| `@/composition`（`index.ts`） | 生成管线：生成路径的依赖袋与门面，`new` 出按请求现建的模型客户端 | 生成类路由与 CLI |
+| `@/composition/workspace` | Workspace：项目 / 稿件 / 导出 / 健康。**依赖图里一个 HTTP 客户端都没有** | `/api/projects/**` 十二条路由 |
+| `@/composition/benchmark` | Benchmark：`createBenchmarkBundle` / `createBenchmarkCases`。装 `BenchmarkStore`、环境装配、凭据与提示词探针，以及**同一条生成路径**（它必须真的发起生成） | `/api/benchmarks/**` 八条路由 |
+
+这一边**没有**照工作区的样子把生成路径拆出去——Benchmark 的 `POST /executions` 就是花真钱
+跑样本，模型客户端本来就该在它的依赖图里，硬拆只会得到两个都要维护的半边。`index.ts` 仍然
+re-export 三个模块的符号（老 import 路径不断），新路由直接 import 自己那一个模块。
+
 拆开买到的是两件实在事：
 
 1. **看得见**。工作区路由的 import 闭包里连一个会发请求的模块都不存在，
@@ -225,6 +239,25 @@ projects/<project_id>/
 `workspace.projectId`，把一次 Run 指到它所属的项目——这是 Run 归属的唯一事实源，
 项目详情是扫出来的，不缓存第二份。逐字段契约见 [workspace.md](./workspace.md)。
 
+v2.3.0 多了**第三棵产物树**，同样与 `runs/` 同级：
+
+```text
+benchmarks/
+├── suites/<suite_id>/<version>/      # 入库的题库原文（来源与许可见 benchmark-data.md）
+│   ├── suite.json                    # 题面 + 协议 + 来源
+│   └── cases/<case_id>/beat-plan.json # 固定骨架那道题的骨架（可选）
+└── executions/<benchmark_id>/        # 每次测量的产物，不入库
+    ├── execution.json                # 执行头：状态 + 跑之前定下的快照
+    ├── samples.json                  # 每条样本一行（只存 runId 引用）
+    └── aggregate.json                # 汇总数字（没跑完就是 null）
+```
+
+归属规则一个字都没变：写盘只在 Infrastructure（`BenchmarkStore`，同样临时文件 + 重命名、
+终态不可写）。Benchmark 样例就是普通 Run——正文、提示词、遥测一个字都不搬过来，只留
+`runId` 这一根指针；`run-manifest.json` 上多一个可选的 `benchmark` 块（`benchmarkId` /
+`suiteId` / `suiteVersion` / `suiteDigest` / `caseId` / `repetition`），普通 Run 里这个键
+不出现。逐字段契约见 [benchmark.md](./benchmark.md)。
+
 ## 安全边界
 
 | 边界 | 位置 | 守住的约定 |
@@ -239,6 +272,10 @@ projects/<project_id>/
 | 工作区不外联 | `composition/workspace.ts` · `tests/test_workspace_network_boundary.test.ts` | v2.2.0 新增：工作区十二条路由的 import 闭包里没有 LLM 客户端、没有 URL 关卡、没有生成管线；并且把 `fetch` 换成会计数的桩后，建稿 / 改名 / 存稿 / 导出照旧成功、计数为 0 |
 | 工作区不跑出项目目录 | `infrastructure/storage/{project,document,export}-store.ts` | 所有路径拼接后必须仍落在 `projects/<id>/` 内；越界一律 400，不去读目录外的东西 |
 | 工作区不认未登记字段 | `domain/workspace.ts` | 白名单外的键（含 `apiKey` 这类凭据形状的字段名）一律 400；`contentHash` 只能由服务端现算 |
+| Benchmark 不接受请求覆盖 | `analysis/benchmark-runner.ts` | 一次测量跑在服务端配置上：请求体里出现模型 / 地址 / 密钥形状的键一律 400，跑之前由预检确认；没有任何入口让一次执行改另一条流水线的行为 |
+| Benchmark 产物不含敏感数据 | `domain/benchmark-suite.ts` · `analysis/benchmark-export.ts` | Suite 里混进凭据键读回来就是 `null`；执行快照只留模型名与地址类别（`server-configured` / `request-public-override`），提示词只留版本号与 SHA-256 摘要；导出里没有 baseUrl、没有凭据、没有提示词原文、没有生成正文 |
+| Benchmark 跑不出自己的目录 | `infrastructure/storage/benchmark-store.ts` | `beatPlanRef` 越界（绝对路径、`..`、别的 Suite 目录）一律当不存在；Suite / 执行 id 同一条形状规则，读不回来的是 `null`，写不进去的直接拒 |
+| Benchmark 历史不可改写 | `infrastructure/storage/benchmark-store.ts` | 执行落到 `completed` / `partial` / `failed` 之后任何再写入都拒（`BENCHMARK_WRITE_FAILED`）；中途被杀留下如实记的 `partial`，不谎报 `completed` |
 
 ## 架构测试
 
@@ -255,3 +292,12 @@ projects/<project_id>/
 另有两个专项测试文件守工作区边界（都只读源码 / 打桩，不调真模型）：
 `tests/test_workspace_network_boundary.test.ts`（导入闭包无 HTTP 客户端 + `fetch` 桩计数为 0）
 与 `tests/test_workspace_ui.test.ts`（界面禁词与三条边界）。
+
+v2.3.0 的 Benchmark 边界由八个专项文件守着（同样只读源码 / 打桩 / 用临时目录，不调真模型）：
+`tests/test_benchmark_suite.test.ts`（Suite 结构与来源许可校验、`beatPlanRef` 必须真在 Suite
+目录里）、`test_benchmark_runner.test.ts`（五步预检、样本顺序、`partial` 口径）、
+`test_benchmark_store.test.ts`（原子写、终态不可写、越界引用一律当不存在）、
+`test_benchmark_export.test.ts`（两种导出格式的内容边界）、`test_benchmark_comparator.test.ts`
+（只给事实与差值）、`test_benchmark_view.test.ts`（界面文本口径）、`test_benchmark_api.test.ts`
+（八条路由的字段与错误码）、`test_benchmark_dataset.test.ts`（题库来源许可与
+「什么内容永不进 Benchmark」）。

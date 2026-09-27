@@ -19,6 +19,13 @@
 > `WORKSPACE_WRITE_FAILED`），以及 `projects/` 这一份全新的产物树。同样是 additive：
 > Run 类路由、字段与错误码逐字未动。详见 [docs/workspace.md](docs/workspace.md)。
 >
+> v2.3.0 新增 Benchmark Platform：八条 `/api/benchmarks/**` 路由、四个新错误码
+> （`BENCHMARK_INVALID` / `BENCHMARK_NOT_FOUND` / `BENCHMARK_CONFLICT` /
+> `BENCHMARK_WRITE_FAILED`），以及 `benchmarks/` 这一份全新的产物树。同样是 additive：
+> Run 类路由、字段与错误码逐字未动；Benchmark 样例就是普通 Run，只是在
+> `run-manifest.json` 上多一个可选的 `benchmark` 块。详见
+> [docs/benchmark.md](docs/benchmark.md)。
+>
 > 契约测试：`tests/test_contract_api.test.ts`（同时守护路由清单本身）
 
 ## 通用约定
@@ -55,9 +62,13 @@
 | `WORKSPACE_NOT_FOUND` | 404 | v2.2.0 新增：项目 / 稿件 / 导出记录不存在，或导出记录对应的文件已经不在 |
 | `WORKSPACE_CONFLICT` | 409 | v2.2.0 新增：生成的 id 撞上了已有项目或已有稿件，重试即可 |
 | `WORKSPACE_WRITE_FAILED` | 500 | v2.2.0 新增：工作区落盘失败，或保存稿件时 `contentHash` 对不上（整篇都不落盘） |
+| `BENCHMARK_INVALID` | 400 | v2.3.0 新增：Benchmark 请求体不合法（结构不对、带凭据形状的键、样本数超过安全线且没显式 `allowLargeBenchmark: true`）、Suite 不合法（含结构 / 来源 / 许可）、固定骨架题目引用的文件不在 Suite 目录里、服务端没配模型或密钥、导出 `format` 不是 `json` / `csv` |
+| `BENCHMARK_NOT_FOUND` | 404 | v2.3.0 新增：没有这个 Suite / 这个版本，或没有这次执行 |
+| `BENCHMARK_CONFLICT` | 409 | v2.3.0 新增：同一版本的 Suite 已经有一个执行在跑 |
+| `BENCHMARK_WRITE_FAILED` | 500 | v2.3.0 新增：Benchmark 数据写不进去——执行已到终态还要写、目录不可写、磁盘满 |
 
 用户错误（改请求就能解决）一律 4xx，运行时错误 5xx。响应里永远不出现堆栈、
-本机绝对路径或凭据：异常文本会先过 `src/lib/safe-text.ts`。
+本机绝对路径或凭据：异常文本会先过 `src/domain/safe-text.ts`。
 
 ### 共享的请求体字段
 
@@ -147,6 +158,25 @@ v2.2.0 新增 Creator Workspace 的十二条路由（全部 additive，原有路
 | POST | `/api/projects/<id>/exports` | v2.2.0 新增：导出一篇稿件为 DOCX / EPUB；只认 `documentId` / `format` |
 | GET | `/api/projects/<id>/exports/<exportId>` | v2.2.0 新增：下载已导出的文件（二进制，按账本里的文件名读） |
 | GET | `/api/projects/<id>/health` | v2.2.0 新增：项目健康结论（确定性，不调模型，不给建议） |
+
+v2.3.0 新增 Benchmark Platform 的八条路由（全部 additive，原有路由一个未动）。
+字段级契约见 [docs/benchmark.md](docs/benchmark.md)：
+
+| 方法 | 路径 | 作用 |
+|---|---|---|
+| GET | `/api/benchmarks/suites` | v2.3.0 新增：全部已存 Suite 的摘要（含来源与许可），按 `suiteId` 归组 |
+| GET | `/api/benchmarks/suites/<id>` | v2.3.0 新增：某一版 Suite 全文；`?version=` 指定版本，缺省读最新版 |
+| GET | `/api/benchmarks/executions` | v2.3.0 新增：执行列表；`?suiteId=` 只看一份 Suite 的历史 |
+| POST | `/api/benchmarks/executions` | v2.3.0 新增：跑完一次执行；请求体只认 `suiteId` / `suiteVersion` / `label` / `allowLargeBenchmark` |
+| GET | `/api/benchmarks/executions/<id>` | v2.3.0 新增：执行详情（头 + 样本 + 汇总）；`?compare=<另一个执行 id>` 附带逐指标比较 |
+| GET | `/api/benchmarks/executions/<id>/export` | v2.3.0 新增：导出；`?format=json`（缺省）或 `csv`，同一份执行导出两次字节一致 |
+| POST | `/api/benchmarks/executions/<id>/baseline` | v2.3.0 新增：标记 / 取消标记基线；请求体只有 `isBaseline` |
+| GET | `/api/benchmarks/history` | v2.3.0 新增：历史图取数；`?suiteId=` 只看一份 Suite |
+
+Benchmark 的这三条纪律与别处不同，值得单独说一句：**它不接受从请求里覆盖模型、地址或
+密钥**（跑在服务端配置上，预检先确认）；**它的样例就是普通 Run**（正文、提示词与遥测仍只落
+在 `runs/<run_id>/`，Benchmark 只留 `runId`）；**它的执行落到终态后不可改写**（任何再写入
+都是 `BENCHMARK_WRITE_FAILED`）。
 
 ## 响应字段
 

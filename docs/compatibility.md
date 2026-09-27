@@ -277,6 +277,34 @@ v2.1.0 让三套质量组件（Beat Validator / 故事质量 Reviewer / Commerci
 - **诊断不驱动任何决策。** 重试仍只看 `min_review_score` 一个总分门槛，修订仍只看校验与
   结构审阅结论；诊断从 1 条变 12 条，RetryPolicy 与 RepairStrategy 的判定一字不变。
 
+## v2.2.0 的创作者工作区（纯 additive）
+
+v2.2.0 新增第二棵产物树 `projects/`、十二条 `/api/projects/**` 路由、四个 `WORKSPACE_*`
+错误码，以及 `run-manifest.json` 上一个可选的 `workspace.projectId`。没有删字段、没有改
+字段名、没有改既有路由与错误码；`runs/` 下的产物一个字节都没动，2.2.0 之前写的 Run 里
+`workspace` 这个键不出现（不是错误，只是没有归属）。逐字段契约见
+[workspace.md](./workspace.md)。
+
+## v2.3.0 的 Benchmark Platform（纯 additive）
+
+v2.3.0 新增第三棵产物树 `benchmarks/`（`suites/` 是入库的题库原文，`executions/` 是每次
+测量的产物）、八条 `/api/benchmarks/**` 路由、四个 `BENCHMARK_*` 错误码，以及
+`run-manifest.json` 上一个可选的 `benchmark` 块（`benchmarkId` / `suiteId` /
+`suiteVersion` / `suiteDigest` / `caseId` / `repetition`）。没有删字段、没有改字段名、
+没有改既有路由与错误码；`runs/` 下的产物一个字节都没动——Benchmark 样例就是普通 Run，
+正文、提示词与遥测仍然只落在 `runs/<run_id>/`，Benchmark 只留 `runId` 这一根指针。
+
+- **普通 Run 里 `benchmark` 这个键不出现。** 2.3.0 之前写的 Run 一个字节都没变；把旧 Run
+  拿给 2.3.0 读，那个键就是不出现，接口 200，界面照常渲染。
+- **执行落到终态后不可改写。** `completed` / `partial` / `failed` 三种终态都拦住一切再写入
+  （`BENCHMARK_WRITE_FAILED`），历史结果不许被后续一次运行覆盖。
+- **Benchmark 只测量，不控制。** 没有任何代码读一次执行的结果来决定重试、修订、采纳、
+  换模型或换 Prompt；它也不接受从请求里覆盖模型、地址或密钥。同样配置并不保证模型输出
+  逐字节一致——它给的是可复现的协议与可比较的事实。
+
+逐字段契约见 [benchmark.md](./benchmark.md)，题库来源与许可见
+[benchmark-data.md](./benchmark-data.md)。
+
 ## v1.9.0 的失败分析（纯 additive）
 
 v1.9.0 新增 `failure-analysis.json`、一条只读路由 `GET /api/runs/<run_id>/failure-analysis`、
