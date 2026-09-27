@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   PROJECT_STATUSES,
-  WorkspaceValidationError,
   projectListItemOf,
   projectOf,
   validateProject,
@@ -12,7 +11,7 @@ import {
   withProjectPatch,
   type Project,
 } from "@/domain/project";
-import { isWorkspaceId } from "@/domain/workspace";
+import { WorkspaceValidationError, isWorkspaceId } from "@/domain/workspace";
 import { FileProjectRepository, ProjectWriteError } from "@/infrastructure/storage/project-store";
 import {
   generateDocumentId,

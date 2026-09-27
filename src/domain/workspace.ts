@@ -83,13 +83,6 @@ export class WorkspaceStateError extends Error {
   }
 }
 
-function objOf(raw: unknown, field: string): Record<string, unknown> {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    throw new WorkspaceValidationError(`${field} 必须是对象`);
-  }
-  return raw as Record<string, unknown>;
-}
-
 /** 必填文本：去首尾空白、非空、有上限、不含控制字符。 */
 export function textOf(raw: unknown, field: string, max: number): string {
   if (typeof raw !== "string" || !raw.trim()) {
