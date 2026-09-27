@@ -1,0 +1,112 @@
+{
+  "schemaVersion": "1",
+  "id": "storyloop-core",
+  "version": "1.0.0",
+  "name": "StoryLoop 核心题面",
+  "description": "一份小规模原创题面，用来反复测同一条流水线：同一批题、同一个协议，跑很多次看数字稳不稳。刻意只放三道题——几十道题的题库要花的时间与费用都会乘上去，而这个版本要的是「能反复跑」，不是「跑得多」。",
+  "cases": [
+    {
+      "id": "suspense-001",
+      "title": "消失的目击者",
+      "genre": "悬疑",
+      "storyConfig": {
+        "config_version": "1",
+        "title": "消失的目击者",
+        "genre": "悬疑",
+        "premise": "一场雨夜车祸唯一的目击者在报案前一夜失踪，负责这起事故的实习记者在找人的过程中发现，所有人的口供都在保护同一个不存在的人。",
+        "setting": "南方多雨的海港小城，事件发生在旧码头一带。",
+        "protagonist": {
+          "name": "陈岚",
+          "description": "实习记者，刚从政法线被调到社会线，执着于把每件事问到细节。"
+        },
+        "conflict": "每一条线索的下一环都要求她先证明自己不是在编故事。",
+        "stakes": "再找不到人，这起事故就会以「司机疲劳驾驶」结案。",
+        "target_words": 3000,
+        "style": "节奏紧凑"
+      },
+      "beatPlanMode": "regenerate",
+      "tags": ["悬疑", "短篇", "找人口"]
+    },
+    {
+      "id": "rich-family-001",
+      "title": "分割线",
+      "genre": "豪门",
+      "storyConfig": {
+        "config_version": "1",
+        "title": "分割线",
+        "genre": "豪门",
+        "premise": "母亲留下的老宅被划进拆迁范围，三个多年不联系的兄妹被迫回到同一张桌子前，而遗嘱里有一条谁都没听说过的附加条款。",
+        "setting": "老城区一栋三层旧宅，院子里有一棵母亲种的玉兰。",
+        "protagonist": {
+          "name": "周叙",
+          "description": "家中最小的儿子，长年在外地做工程监理，最怕的是又被安排。"
+        },
+        "conflict": "谁先开口谈钱，谁就显得像是为了钱回来。",
+        "stakes": "老宅拆掉那天，这个家就再也没有坐在一起的借口。",
+        "target_words": 3000,
+        "style": "克制冷峻"
+      },
+      "beatPlanMode": "regenerate",
+      "tags": ["豪门", "家庭", "短篇"]
+    },
+    {
+      "id": "reborn-fixed-001",
+      "title": "第二次机会的价码",
+      "genre": "重生",
+      "storyConfig": {
+        "config_version": "1",
+        "title": "第二次机会的价码",
+        "genre": "重生",
+        "premise": "量化交易员带着上一轮市场的记忆回到三年前，却发现这一轮所有她以为已经发生过的事，都以略微不同的顺序发生。",
+        "setting": "同一座城市、同一间出租屋，但上一轮她记得的那几个关键日期全部对不上。",
+        "protagonist": {
+          "name": "林复",
+          "description": "量化交易员，冷静到近乎冷漠，只信自己能算出来的东西。"
+        },
+        "conflict": "记忆告诉她该怎么做，现实却处处提示那些记忆不可靠。",
+        "stakes": "再一次选错，这一次她没有下一轮可以重来。",
+        "target_words": 3000,
+        "style": "电影感"
+      },
+      "beatPlanMode": "fixed",
+      "beatPlanRef": "cases/reborn-fixed-001/beat-plan.json",
+      "tags": ["重生", "短篇", "固定骨架"]
+    }
+  ],
+  "protocol": {
+    "repetitions": 2,
+    "plannerMode": "normal",
+    "acceptedMetrics": [
+      "overall_quality",
+      "coherence",
+      "narrative",
+      "character",
+      "causality",
+      "commercial_overall",
+      "hook",
+      "pacing",
+      "engagement",
+      "payoff",
+      "validation_pass_rate",
+      "beat_validation_pass_rate",
+      "acceptance_rate",
+      "retry_count",
+      "repair_count",
+      "failure_rate",
+      "duration_ms",
+      "llm_calls",
+      "input_tokens",
+      "output_tokens",
+      "total_tokens",
+      "cost_amount"
+    ],
+    "failureHandling": "include",
+    "passThreshold": 71
+  },
+  "source": {
+    "origin": "original",
+    "license": "CC0-1.0",
+    "note": "三道题全部为本项目原创，未从任何作品、模型输出或网络素材搬运。发布时连原文一起公开，任何人可原样再分发。"
+  },
+  "createdAt": "2026-09-28"
+}
