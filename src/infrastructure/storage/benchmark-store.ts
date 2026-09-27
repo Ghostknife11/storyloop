@@ -242,6 +242,8 @@ export class BenchmarkStore implements BenchmarkSuiteRepository, BenchmarkExecut
   // -------------------------------------------------------------------------
 
   private executionDir(benchmarkId: string): string {
+    // 与读路径同一条纪律：读不回来的一律 null，写不进去的直接拒（§67）
+    if (!isBenchmarkId(benchmarkId)) throw new BenchmarkWriteError(benchmarkId);
     const dir = resolve(this.executionsRoot, benchmarkId);
     if (dir === this.executionsRoot || !dir.startsWith(this.executionsRoot + sep)) {
       throw new BenchmarkWriteError(benchmarkId);
@@ -303,19 +305,21 @@ export class BenchmarkStore implements BenchmarkSuiteRepository, BenchmarkExecut
     ) {
       return null;
     }
-    const samples = this.readJson(dir, SAMPLES_FILE);
+    // samples.json 顶层是数组：readJson 只收对象，读它要走 readJsonArray——
+    // 少这一条，读回来的执行永远带着空样本表（头在、行没了）
+    const samples = this.readJsonArray(dir, SAMPLES_FILE);
     const aggregate = this.readJson(dir, AGGREGATE_FILE);
     return {
       ...(head as unknown as BenchmarkExecution),
-      samples: Array.isArray(samples) ? (samples as unknown as BenchmarkSampleResult[]) : [],
+      samples: (samples as unknown as BenchmarkSampleResult[]) ?? [],
       aggregate: (aggregate as unknown as BenchmarkAggregate) ?? null,
     };
   }
 
   readSamples(benchmarkId: string): BenchmarkSampleResult[] | null {
     if (!isBenchmarkId(benchmarkId)) return null;
-    const samples = this.readJson(this.executionDir(benchmarkId), SAMPLES_FILE);
-    return Array.isArray(samples) ? (samples as unknown as BenchmarkSampleResult[]) : null;
+    const samples = this.readJsonArray(this.executionDir(benchmarkId), SAMPLES_FILE);
+    return (samples as unknown as BenchmarkSampleResult[]) ?? null;
   }
 
   readAggregate(benchmarkId: string): BenchmarkAggregate | null {
@@ -374,6 +378,24 @@ export class BenchmarkStore implements BenchmarkSuiteRepository, BenchmarkExecut
       return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
         ? (parsed as Record<string, unknown>)
         : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** 顶层是数组的那几个文件（samples.json）：形状不对就是读不回来，与 readJson 同一条纪律。 */
+  private readJsonArray(dir: string, filename: string): unknown[] | null {
+    const path = resolve(dir, filename);
+    if (!existsSync(path)) return null;
+    let text: string;
+    try {
+      text = readFileSync(path, "utf8");
+    } catch {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      return Array.isArray(parsed) ? parsed : null;
     } catch {
       return null;
     }
