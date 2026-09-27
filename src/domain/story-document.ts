@@ -251,3 +251,32 @@ export function documentSourceOf(input: { sourceRunId?: string | null; content?:
   if (input.sourceRunId) return "generated";
   return input.content && input.content.trim() ? "imported" : "edited";
 }
+
+/**
+ * Run 的 story.md → 稿件的标题与正文。
+ *
+ * 生成路径落盘的 story.md 第一行是 `# <标题>`。搬进稿件时这一行要变成独立字段：
+ * 编辑器不会把标题当正文让你改（§11），导出时标题也要单独进 docProps / OPF（§27）。
+ * 于是这里只把**第一行**拆出来，其余一字不改地留下——包括它后面的空行，
+ * 正文里多一个空行只是排版，少一行可能就是两段并成一段。
+ *
+ * 第一行不是 H1 时（老版本 Run、或用户手改过的 story.md）标题给 null：
+ * 猜一个标题比没有标题更糟，调用方该拿请求里的 storyConfig.title 之类的实事兜底。
+ */
+export function splitStoryTitle(story: string): { title: string | null; body: string } {
+  const match = story.match(/^\s*#[ \t]+(.+?)[ \t]*$/m);
+  if (!match || match.index === undefined) {
+    return { title: null, body: story };
+  }
+  const heading = match[1].trim();
+  if (heading.length === 0) {
+    return { title: null, body: story };
+  }
+  // H1 必须真的是第一行（只允许前面有空白行）；正文中间的 H1 是章节标题，不动它
+  const leading = story.slice(0, match.index);
+  if (leading.trim().length > 0) {
+    return { title: null, body: story };
+  }
+  const body = story.slice(match.index + match[0].length).replace(/^\n+/, "");
+  return { title: textOf(heading, "title", WORKSPACE_NAME_MAX), body };
+}

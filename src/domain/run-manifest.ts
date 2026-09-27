@@ -20,10 +20,16 @@
  * 纯 additive：没有实验的 Run 这个键不出现，读法与 v1.6.0 逐字一致，schemaVersion 不递增
  * ——没有改动任何既有字段的语义。
  *
+ * v2.2.0 再追加一个可选字段 `workspace`（见文末 WorkspaceProvenance）：一次 Run 如果在某个
+ * 工作区项目里生成，清单里带上它归哪个项目。同样纯 additive，同样不改 schemaVersion。
+ *
  * 实现：`src/lib/tracking/manifest-builder.ts`（装配）、`src/core/pipeline.ts`（落盘时机）
  * 契约测试：`tests/test_run_manifest.test.ts`、
  *           `tests/test_contract_docs_sync.test.ts`（文档字段表 ↔ 真实产物双向比对）
  */
+
+// v2.2.0：workspace.projectId 的合法性判据与项目 / 稿件 / 导出用的是同一条（§42）
+import { isWorkspaceId } from "@/domain/workspace";
 
 /** 当前 Manifest 的 schema 版本；字段语义变化时递增，旧文件按同一版本号读取。 */
 export const RUN_MANIFEST_SCHEMA_VERSION = "1";
@@ -189,6 +195,8 @@ export interface RunManifest {
   completedAt: string;
   /** v1.7.0 additive：这次 Run 是某个实验的样本时才有；普通 Run 整个键不出现。 */
   experiment?: ExperimentProvenance;
+  /** v2.2.0 additive：这次 Run 归某个工作区项目时才有；普通 Run 整个键不出现。 */
+  workspace?: WorkspaceProvenance;
 }
 
 /**
@@ -205,6 +213,24 @@ export interface ExperimentProvenance {
   variantId: string;
   /** 从 1 开始的 repetition 序号（TASK §33）。 */
   repetition: number;
+}
+
+/**
+ * v2.2.0 工作区出身：这篇 Run 归哪个项目。
+ *
+ * 只记一个 projectId，而且记的是**生成那一刻请求里带的那个**——Run 是不可变的，
+ * 它被归类到哪个项目由它自己说了算。之后项目被归档、被改名、甚至被删掉，
+ * 这份 Manifest 都不改（改了就成了一份说谎的出身记录）。
+ *
+ * 为什么单一事实源放在这里，而不是在 project.json 里存一份 runId 列表：
+ * 那样就有两处要同步，而它们一定会 diverged。项目名下的 Run 靠扫 Manifest 归纳，
+ * 一次遍历就能分组（见 application/workspace-projects.ts）。
+ *
+ * 没有这个块的 Run 就是不属于任何项目的 Run：v2.2.0 之前生成的、以及直接走
+ * /api/generate 没带 projectId 的 Run 都不带它。
+ */
+export interface WorkspaceProvenance {
+  projectId: string;
 }
 
 /**
@@ -405,6 +431,16 @@ function experimentProvenanceOf(raw: unknown): ExperimentProvenance {
   };
 }
 
+function workspaceProvenanceOf(raw: unknown): WorkspaceProvenance {
+  if (typeof raw !== "object" || raw === null) throw new RunManifestError("workspace 必须是对象");
+  const r = raw as Record<string, unknown>;
+  const projectId = strOf(r.projectId, "workspace.projectId");
+  if (!isWorkspaceId(projectId)) {
+    throw new RunManifestError("workspace.projectId 不合法：只能是单个目录名");
+  }
+  return { projectId };
+}
+
 /** 结构校验：形状不对就抛 RunManifestError（写盘前自查用）。 */
 export function validateRunManifest(raw: unknown): RunManifest {
   if (typeof raw !== "object" || raw === null) throw new RunManifestError("manifest 必须是对象");
@@ -454,6 +490,9 @@ export function validateRunManifest(raw: unknown): RunManifest {
     completedAt: strOf(r.completedAt, "completedAt"),
     ...(r.experiment !== undefined && r.experiment !== null
       ? { experiment: experimentProvenanceOf(r.experiment) }
+      : {}),
+    ...(r.workspace !== undefined && r.workspace !== null
+      ? { workspace: workspaceProvenanceOf(r.workspace) }
       : {}),
   };
 }

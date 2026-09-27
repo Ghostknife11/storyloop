@@ -26,6 +26,15 @@ export interface DocumentRepository {
 
   putDocument(document: StoryDocument): void;
 
+  /**
+   * 删一份稿件：documents/<id>.json 连同它的 revisions/ 目录一起消失。
+   * 文件本来就不在时静默返回——「已经没有了」和「删成功了」对调用方同一个意思。
+   *
+   * 只删项目内的这一份。runs/ 下的任何东西都不在这个方法的射程内（§48）：
+   * Run 是不可变的，删稿子删不到它头上。
+   */
+  deleteDocument(projectId: string, documentId: string): void;
+
   /** 读不回来一律 null（与 storyDocumentOf 同一约定：不猜）。 */
   readDocument(projectId: string, documentId: string): StoryDocument | null;
 }

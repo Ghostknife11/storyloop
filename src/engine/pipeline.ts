@@ -46,7 +46,7 @@ import { isStageName } from "@/domain/telemetry";
 import { TelemetryCollector, type TelemetryErrorCode } from "@/infrastructure/telemetry/telemetry-collector";
 import type { RunTelemetry } from "@/domain/telemetry";
 import { projectVersion as readProjectVersion } from "@/infrastructure/config/version";
-import type { RunManifest, ExperimentProvenance } from "@/domain/run-manifest";
+import type { RunManifest, ExperimentProvenance, WorkspaceProvenance } from "@/domain/run-manifest";
 import { buildRunManifest, type ManifestAttemptInput } from "@/infrastructure/tracking/manifest-builder";
 import type { FailureAnalyzer } from "@/ports/failure-analyzer";
 import { NO_FAILURE_ANALYZER } from "@/ports/failure-analyzer";
@@ -460,8 +460,10 @@ export class GenerationPipeline {
     retryPolicy?: RetryPolicy,
     /** v1.7.0：这次 Run 是某个受控实验的样本时带上实验出身；普通 Run 不传。 */
     experiment?: ExperimentProvenance,
+    /** v2.2.0：这次 Run 在某个工作区项目里生成时带上项目归属；普通 Run 不传。 */
+    workspace?: WorkspaceProvenance,
   ): Promise<GenerationResult> {
-    return this.runStages(createRunContext(this.projectVersion, generateRunId()), config, undefined, runtime, retryPolicy, experiment);
+    return this.runStages(createRunContext(this.projectVersion, generateRunId()), config, undefined, runtime, retryPolicy, experiment, workspace);
   }
 
   /** §29 Manual：用户编辑后的 BeatPlan 直接进入生成，仍形成一个 Run。 */
@@ -472,8 +474,10 @@ export class GenerationPipeline {
     retryPolicy?: RetryPolicy,
     /** v1.7.0 同 run()：实验样本的出身由调用方（实验执行器）传入。 */
     experiment?: ExperimentProvenance,
+    /** v2.2.0 同 run()：项目归属由调用方（工作区用例）传入。 */
+    workspace?: WorkspaceProvenance,
   ): Promise<GenerationResult> {
-    return this.runStages(createRunContext(this.projectVersion, generateRunId()), config, beatPlan, runtime, retryPolicy, experiment);
+    return this.runStages(createRunContext(this.projectVersion, generateRunId()), config, beatPlan, runtime, retryPolicy, experiment, workspace);
   }
 
   /**
@@ -594,6 +598,8 @@ export class GenerationPipeline {
     retryPolicyArg?: RetryPolicy,
     /** v1.7.0 实验出身：一路带到 Manifest，不参与任何流程判断。 */
     experiment?: ExperimentProvenance,
+    /** v2.2.0 工作区出身：一路带到 Manifest，同样不参与任何流程判断。 */
+    workspace?: WorkspaceProvenance,
   ): Promise<GenerationResult> {
     const rid = ctx.run_id;
     // v1.8.0：run_id 生成之后才补得上（采集器在 Pipeline 构造时就建好了）
@@ -712,6 +718,7 @@ export class GenerationPipeline {
         records,
         selectedAttemptNumber,
         experiment,
+        workspace,
       );
       this.writeFailureAnalysis(rid);
 
@@ -781,7 +788,7 @@ export class GenerationPipeline {
       // v1.6.0：失败也要留下出身记录——「这个 Run 死在哪个版本、哪次 Attempt、用了什么参数」
       // 正是最需要查的一件事。此时没有 promote，运行根目录里只有 config / beats 与 attempt 级文件，
       // Manifest 如实只列这些（selectedAttemptId 不出现）。
-      this.writeManifest(ctx, rid, runtime, policy, records, null, experiment);
+      this.writeManifest(ctx, rid, runtime, policy, records, null, experiment, workspace);
       // v1.9.0：失败的 Run 也要有失败分析——它正是最需要分类的那一次（§27）。
       // 异常链上的真实错误码一并交给分析器（§40），遥测那边只记最内层一个。
       this.writeFailureAnalysis(rid, this.failureAnalyzer.codesOf(e));
@@ -804,6 +811,7 @@ export class GenerationPipeline {
    * 日志留告警，并返回 null 让调用方知道这份 Run 没有 Manifest。
    *
    * v1.7.0：experiment 原样进清单（不参与上面的判断，也不因它失败）。
+   * v2.2.0：workspace 同样原样进清单；项目归属是一次 Run 的出身，不是流程开关。
    */
   private writeManifest(
     ctx: RunContext,
@@ -813,6 +821,7 @@ export class GenerationPipeline {
     records: AttemptRecord[],
     selectedAttemptNumber: number | null,
     experiment?: ExperimentProvenance,
+    workspace?: WorkspaceProvenance,
   ): RunManifest | null {
     const attempts: ManifestAttemptInput[] = records.map((r) => ({
       attemptNumber: r.attempt.attempt_number,
@@ -826,7 +835,7 @@ export class GenerationPipeline {
     }));
     try {
       const manifest = buildRunManifest(
-        { runId, startedAt: ctx.started_at, runtime, policy, attempts, selectedAttemptNumber, experiment },
+        { runId, startedAt: ctx.started_at, runtime, policy, attempts, selectedAttemptNumber, experiment, workspace },
         this.artifactStore,
       );
       this.artifactStore.putManifest(runId, manifest);

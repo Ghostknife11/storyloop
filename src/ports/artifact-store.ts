@@ -95,6 +95,15 @@ export interface ArtifactStore {
   promoteAttempt(runId: string, attemptNumber: number): Record<string, string>;
 
   // —— 枚举 ——
+  /**
+   * v2.2.0 列出 runs/ 根下全部 Run id（字典序）。
+   *
+   * 只读、不改任何东西。工作区要靠它把 Run 按 Manifest 里的 workspace.projectId
+   * 归纳到各自的项目名下（§19：项目归属的单一事实源在 Manifest，不在 project.json）。
+   * 手放进来的目录名若不是合法 run id，就列不出来——调用方拿不到不该拿的名字，
+   * 更不该拿它去拼路径。
+   */
+  listRunIds(): string[];
   listAttemptNumbers(runId: string): number[];
   listRepairNumbers(runId: string, attemptNumber: number): number[];
 

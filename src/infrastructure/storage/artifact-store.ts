@@ -17,6 +17,7 @@ import {
   type RepairRequestRecord,
 } from "@/domain/repair";
 import type { RunManifest } from "@/domain/run-manifest";
+import { isWorkspaceId } from "@/domain/workspace";
 import { runManifestOf } from "@/domain/run-manifest";
 import type { RunTelemetry } from "@/domain/telemetry";
 import { runTelemetryOf, validateRunTelemetry } from "@/domain/telemetry";
@@ -106,6 +107,29 @@ export class FileArtifactStore implements ArtifactStorePort {
       throw new Error("Run 目录越界");
     }
     return dir;
+  }
+
+  /**
+   * v2.2.0 枚举 runs/ 根下的 Run 目录（字典序）。
+   *
+   * 两条过滤都不能少：
+   *   - runExists：目录名合法但里面其实是别的残留（空目录、半截中断的目录）时，
+   *     它不是一个 Run——列出来只会让调用方在后面读 Manifest 时空手而归；
+   *   - id 形状校验：手拷进来的目录名可能不是合法 run id，列出来就等于是把
+   *     一个不该被拼进路径的名字交给调用方（§42）。
+   * runs/ 根本身不存在（全新部署）时返回空数组，不抛——「一个 Run 都没有」
+   * 和「目录还没建」对调用方是同一件事。
+   */
+  listRunIds(): string[] {
+    let names: string[];
+    try {
+      names = readdirSync(this.runsRoot, { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name);
+    } catch {
+      return [];
+    }
+    return names.filter((name) => isWorkspaceId(name) && this.runExists(name)).sort();
   }
 
   /** 测试与调试用：Run 目录的绝对路径（API 响应不得返回它，§67）。 */

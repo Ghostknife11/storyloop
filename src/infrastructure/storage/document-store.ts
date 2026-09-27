@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import { storyDocumentOf, type StoryDocument } from "@/domain/story-document";
 import { isWorkspaceId } from "@/domain/workspace";
@@ -22,6 +22,7 @@ import type { DocumentRepository } from "@/ports/document-store";
  */
 
 const DOCUMENTS_DIR = "documents";
+const REVISIONS_DIR = "revisions";
 
 /** 磁盘满 / 权限不足 / 哈希对不上。消息只带相对文件名（§67）。 */
 export class DocumentWriteError extends Error {
@@ -83,6 +84,19 @@ export class FileDocumentRepository implements DocumentRepository {
     return dir;
   }
 
+  /**
+   * 修订目录：projects/<id>/revisions/<docId>。这个存储只负责「删掉它」，
+   * 读和写都归 FileRevisionRepository（revision-store.ts）——一处只干一件事，
+   * 删稿件时要连着删修订，但改修订内容不该经过稿件存储。
+   */
+  private revisionsDir(projectId: string, documentId: string): string {
+    const dir = resolve(this.projectsRoot, projectId, REVISIONS_DIR, documentId);
+    if (dir === this.projectsRoot || !dir.startsWith(this.projectsRoot + sep)) {
+      throw new DocumentWriteError(documentId, undefined);
+    }
+    return dir;
+  }
+
   resolveDocumentsDir(projectId: string): string {
     return this.documentsDir(projectId);
   }
@@ -139,6 +153,28 @@ export class FileDocumentRepository implements DocumentRepository {
       renameSync(tmpPath, finalPath);
     } catch (e) {
       throw new DocumentWriteError(document.id, e);
+    }
+  }
+
+  /**
+   * 删一份稿件：documents/<id>.json 与 revisions/<id>/ 一起消失。
+   *
+   * 只做 rmSync(force)——「已经没有了」不当错误。也不做递归删目录的兜底：
+   * 这里 rm 的两个路径都由 documentsDir / revisionsDir containment 过，
+   * 拼不出项目外的路径，也就不需要「万一删错地方」这类补偿逻辑。
+   */
+  deleteDocument(projectId: string, documentId: string): void {
+    const path = this.documentPath(projectId, documentId);
+    try {
+      rmSync(path, { force: true });
+    } catch (e) {
+      throw new DocumentWriteError(documentId, e);
+    }
+    const revisions = this.revisionsDir(projectId, documentId);
+    try {
+      rmSync(revisions, { recursive: true, force: true });
+    } catch {
+      // 修订目录删不掉不该让「稿件已删」变成假：主文件已经不在了
     }
   }
 

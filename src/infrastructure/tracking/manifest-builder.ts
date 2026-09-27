@@ -11,6 +11,7 @@
  * 明确不做：不比较两次 Run、不统计失败原因、不给任何结论打分。这里只回答「是什么」。
  * v1.7.0 的 `experiment` 块同样由调用方传进来（实验出身是调用方才知道的事实），
  * 装配器不从产物里推断「这次 Run 是不是实验样本」。
+ * v2.2.0 的 `workspace` 块同理：项目归属是请求里带的，不是从产物反推的。
  */
 
 import type { ArtifactStore } from "@/infrastructure/storage/artifact-store";
@@ -33,6 +34,7 @@ import {
   type ModelSnapshot,
   type ParameterSnapshot,
   type RepairManifestEntry,
+  type WorkspaceProvenance,
   type RunManifest,
 } from "@/domain/run-manifest";
 import { projectSnapshot } from "@/infrastructure/tracking/project-snapshot";
@@ -107,6 +109,11 @@ export interface RunManifestInput {
    * 普通 Run 不传，Manifest 里 `experiment` 键不出现——与 v1.6.0 逐字一致。
    */
   experiment?: ExperimentProvenance;
+  /**
+   * v2.2.0：这次 Run 在某个工作区项目里生成时带上它归哪个项目。
+   * 不在任何项目里生成的普通 Run 不传，`workspace` 键不出现——与 v2.1.0 逐字一致。
+   */
+  workspace?: WorkspaceProvenance;
 }
 
 function attemptRel(attemptNumber: number, file: string): string {
@@ -317,5 +324,6 @@ export function buildRunManifest(
     startedAt: input.startedAt,
     completedAt: now().toISOString(),
     ...(input.experiment !== undefined ? { experiment: input.experiment } : {}),
+    ...(input.workspace !== undefined ? { workspace: input.workspace } : {}),
   };
 }
