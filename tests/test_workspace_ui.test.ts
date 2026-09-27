@@ -8,7 +8,14 @@ import { ProjectOverview } from "@/components/project-overview";
 import { HealthPanel } from "@/components/health-panel";
 import { ExportHistory } from "@/components/export-history";
 import { StoryEditor } from "@/components/story-editor";
-import type { DocumentSummaryApi, ExportResultApi, ProjectDetailApi, ProjectHealthApi, RunDetailApi } from "@/interface/api";
+import type {
+  DocumentSummaryApi,
+  ExportResultApi,
+  ProjectDetailApi,
+  ProjectHealthApi,
+  RunDetailApi,
+} from "@/interface/api";
+import { HEALTH_SIGNAL_CODES } from "@/domain/project-health";
 
 /**
  * v2.2.0 §36-§39 工作区界面契约。
@@ -70,11 +77,21 @@ const EXPORT_ROW: ExportResultApi = {
   createdAt: "2026-09-27T11:30:00.000Z",
 };
 
+// 码必须是真的：这里出现任何未登记的码，下面「码全在册」那条断言就会红。
+// §17 的原则是「认码不认文案」，所以夹具更不能自己编一个码来摆看。
 const HEALTH: ProjectHealthApi = {
   status: "attention",
   signals: [
-    { code: "quality_stale", severity: "warning", message: "质量结论早于当前正文。" },
-    { code: "no_document", severity: "info", message: "还没有可导出的稿件。" },
+    {
+      code: "quality_stale",
+      severity: "warning",
+      message: "当前稿件在最近一次审阅之后改过：那次质量结论不再代表这一版。",
+    },
+    {
+      code: "no_current_document",
+      severity: "info",
+      message: "有运行记录但还没有在写的稿件：可以从任意一次运行建一篇。",
+    },
   ],
   updatedAt: "2026-09-27T11:35:00.000Z",
 };
@@ -186,9 +203,20 @@ describe("§39 Creator Health", () => {
     const html = render(createElement(HealthPanel, { health: HEALTH }));
     expect(html).toContain("有几件事要处理");
     expect(html).toContain("quality_stale");
-    expect(html).toContain("no_document");
+    expect(html).toContain("no_current_document");
     expect(html).toContain("注意");
     expect(html).toContain("提示");
+  });
+
+  // §17：码是契约，文案只是说明。夹具里搁一个域里根本不存在的码，等于
+  // 一边认码一边用假码测自己——所以这里连着HEALTH_SIGNAL_CODES一起断。
+  it("夹具里用到的码都在 HEALTH_SIGNAL_CODES 里登记过", () => {
+    const registered = new Set<string>(HEALTH_SIGNAL_CODES);
+    const used = HEALTH.signals.map((s) => s.code);
+    expect(used.length).toBeGreaterThan(0);
+    for (const code of used) {
+      expect(registered.has(code), `未登记的码：${code}`).toBe(true);
+    }
   });
 
   it("一个数字都没有：没有百分比、没有伪指标（§39 禁）", () => {
