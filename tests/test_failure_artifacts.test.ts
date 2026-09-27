@@ -335,6 +335,7 @@ describe("v1.9.0 §53 样例 Run 与分析器现算的结果一致", () => {
       "config.json",
       "failure-analysis.json",
       "metadata.json",
+      "quality-stack.json",
       "quality.json",
       "review.json",
       "run-manifest.json",

@@ -4,9 +4,9 @@ import type {
   BeatValidationResult,
   BeatValidationStatus,
 } from "@/domain/beat-validation";
-import { legacyBeatValidationOf } from "@/domain/beat-validation-v2";
+import { legacyBeatValidationOf, type BeatValidationV2Result } from "@/domain/beat-validation-v2";
 import { reviewOverallScore, type ReviewResult, type ReviewStatus } from "@/domain/review-result";
-import { legacyReviewOf } from "@/domain/quality-review-v2";
+import { legacyReviewOf, type QualityReviewV2Result } from "@/domain/quality-review-v2";
 import type { ValidationResult, ValidationStatus } from "@/domain/validation-result";
 import type { RunContext, RunStatus } from "@/domain/run-context";
 import { createRunContext, transitionStage, failRun } from "@/domain/run-context";
@@ -20,7 +20,7 @@ import {
   type CommercialReviewResult,
   type CommercialReviewStatus,
 } from "@/domain/commercial-review";
-import { legacyCommercialReviewOf } from "@/domain/commercial-review-v2";
+import { legacyCommercialReviewOf, type CommercialReviewV2Result } from "@/domain/commercial-review-v2";
 import { BeatValidator } from "@/engine/beat-validator";
 import { StoryRepairer } from "@/engine/story-repairer";
 import { ArtifactStore } from "@/ports/artifact-store";
@@ -53,6 +53,7 @@ import { NO_FAILURE_ANALYZER } from "@/ports/failure-analyzer";
 import type { FailureAnalysisResult } from "@/domain/failure-analysis";
 import { generateRunId } from "@/infrastructure/id/run-id";
 import { PipelineError } from "@/domain/errors";
+import { QualityStackCoordinator } from "@/engine/quality-stack-coordinator";
 
 // v2.0.0：PipelineError 移入 Domain 层错误契约（domain/errors.ts）。
 // 它不再由引擎模块持有——否则错误模型这个最稳定的公开契约会被绑在
@@ -272,6 +273,8 @@ interface StoryCheck {
   review: ReviewResult | null;
   review_status: ReviewStatus;
   review_error: string | null;
+  /** v2.1.0 TASK §25：Reviewer 的 v2 结论原文（四维 + 诊断），只喂给质量总览。 */
+  review_v2: QualityReviewV2Result | null;
 }
 
 /**
@@ -290,6 +293,14 @@ interface AttemptRecord {
   commercial_review: CommercialReviewResult | null;
   commercial_review_status: CommercialReviewStatus;
   commercial_review_error: string | null;
+  /**
+   * v2.1.0 TASK §24/§25：这一 Attempt 的两套 v2 结论原文。它们不进 metadata、不进
+   * GenerationResult、也不写进 attempts/NN/——那些地方的 DTO 仍然是 v1 形状（TASK §27）。
+   * 存在的唯一理由是 Finalize 要按入选 Attempt 组装运行级 quality-stack.json。
+   * Beat 校验那份是 Run 级的（一个 BeatPlan 只校验一次），由 Finalize 直接从 beatCheck 取。
+   */
+  review_v2: QualityReviewV2Result | null;
+  commercial_review_v2: CommercialReviewV2Result | null;
   /** 生成阶段原始异常：只用于错误码映射（§11），绝不写入任何产物或响应。 */
   failure?: unknown;
 }
@@ -302,6 +313,8 @@ interface BeatCheck {
   beat_validation: BeatValidationResult | null;
   beat_validation_status: BeatValidationStatus;
   beat_validation_error: string | null;
+  /** v2.1.0 TASK §25：同一份结论的 v2 原文（含结构化 diagnostics），只喂给质量总览。 */
+  beat_validation_v2: BeatValidationV2Result | null;
 }
 
 /** v1.4.0 §5：没注入 BeatValidator 时这一路等于不存在，metadata 里一个字段都不多。 */
@@ -309,6 +322,7 @@ const BEAT_CHECK_SKIPPED: BeatCheck = {
   beat_validation: null,
   beat_validation_status: "not_started",
   beat_validation_error: null,
+  beat_validation_v2: null,
 };
 
 function beatCheckPatch(check: BeatCheck): Partial<MetaPatch> {
@@ -329,6 +343,8 @@ interface CommercialCheck {
   commercial_review: CommercialReviewResult | null;
   commercial_review_status: CommercialReviewStatus;
   commercial_review_error: string | null;
+  /** v2.1.0 TASK §25：同一份结论的 v2 原文（含结构化 diagnostics），只喂给质量总览。 */
+  commercial_review_v2: CommercialReviewV2Result | null;
 }
 
 /** v1.5.0 TASK §5：没注入 CommercialReviewer 时这一路等于不存在，只留一个 not_started。 */
@@ -336,6 +352,7 @@ const COMMERCIAL_CHECK_SKIPPED: CommercialCheck = {
   commercial_review: null,
   commercial_review_status: "not_started",
   commercial_review_error: null,
+  commercial_review_v2: null,
 };
 
 /** v1.5.0 TASK §33：commercial_review_status 始终落盘（与 beat_validation_status 同约定），
@@ -416,6 +433,12 @@ export class GenerationPipeline {
      * LLM 调用数从哪儿来（§19 统一入口在共享客户端上）。
      */
     private telemetry: TelemetryCollector = new TelemetryCollector(),
+    /**
+     * v2.1.0 TASK §21 质量总览装配器：把三套结论收成一个 QualityStackResult。
+     * 纯函数——不调 LLM、不重新评分、不改正文、不决定重试或修订（§21 的「不能」清单）。
+     * 放在参数末尾：它在 v2.0.0 的 Pipeline 里还不存在，加在末尾才不会顶掉任何既有位置参数。
+     */
+    private qualityStackCoordinator: QualityStackCoordinator = new QualityStackCoordinator(),
   ) {}
 
   /**
@@ -488,6 +511,34 @@ export class GenerationPipeline {
     } catch (e) {
       logger.child({ run_id: rid }).warning(`telemetry write failed: ${safeText(errorDetail(e))}`);
       return null;
+    }
+  }
+
+  /**
+   * v2.1.0 TASK §24/§25 quality-stack.json：运行级统一质量视图。
+   *
+   * 输入是入选 Attempt 手里那三份 v2 结论；缺哪一份都如实缺——某个组件自身失败时
+   * 对应字段就是 null，于是 status 落在 partial / failed，而不是被补一个空结论（TASK §36/§37）。
+   *
+   * 与 failure-analysis 一样：写盘失败只留 warning。可观测性产物不能让一次
+   * 已经成功的生成变成失败，但也不能悄悄吞掉——日志里留着 run_id 与原因。
+   */
+  private writeQualityStack(
+    rid: string,
+    beatValidationV2: BeatValidationV2Result | null,
+    selected: AttemptRecord,
+  ): void {
+    try {
+      const stack = this.qualityStackCoordinator.coordinate({
+        beatValidation: beatValidationV2,
+        qualityReview: selected.review_v2,
+        commercialReview: selected.commercial_review_v2,
+      });
+      this.artifactStore.putQualityStack(rid, stack);
+    } catch (e) {
+      logger
+        .child({ run_id: rid })
+        .warning(`quality stack write failed: ${safeText(errorDetail(e))}`);
     }
   }
 
@@ -618,6 +669,15 @@ export class GenerationPipeline {
       this.telemetry.enter("artifact_promotion");
       ctx.current_stage = "artifact_promotion";
       this.artifactStore.promoteAttempt(rid, selected.attempt.attempt_number);
+
+      // v2.1.0 TASK §24/§25：运行级 quality-stack.json。三份 v2 结论都在内存里
+      // （落盘的只有 v1 DTO），所以在 promote 之后、按入选 Attempt 就地组装一次。
+      // 它是**统一视图**：写完它，beat-validation.json / review.json / quality.json /
+      // commercial-review.json 一个字节都不动，老客户端照旧读旧文件（TASK §24/§27）。
+      // §21 的「不能」清单在这里同样成立：装配器不调 LLM、不重新评分、不改正文、
+      // 不决定重试或修订；这一步自身失败只留 warning，不让一次成功的生成变失败。
+      this.telemetry.enter("quality_stack_assembly");
+      this.writeQualityStack(rid, beatCheck.beat_validation_v2, selected);
 
       this.enter(ctx, "completed");
       // v1.8.0：先收遥测再写 metadata——两个摘要数从这里取，不另算一套
@@ -819,6 +879,7 @@ export class GenerationPipeline {
       // 在边界处摊平，beat-validation.json、metadata、UI 的口径一个字都没变（TASK §14）。
       const checked = await this.beatValidator.validate(config, plan);
       beatValidation = legacyBeatValidationOf(checked);
+      out.beat_validation_v2 = checked;
     } catch (e) {
       // §12：校验器自身崩溃 ≠ BeatPlan 有问题。保留骨架，继续生成。
       // v1.9.1：这一步的非阻断失败也要在遥测里说实话——进入下一步之前先把开着的
@@ -910,6 +971,7 @@ export class GenerationPipeline {
       review: null,
       review_status: "not_started",
       review_error: null,
+      review_v2: null,
     };
     let decision: RetryDecision;
     let repairs: RepairRecord[] = [];
@@ -1015,6 +1077,8 @@ export class GenerationPipeline {
       commercial_review: commercial.commercial_review,
       commercial_review_status: commercial.commercial_review_status,
       commercial_review_error: commercial.commercial_review_error,
+      review_v2: check.review_v2,
+      commercial_review_v2: commercial.commercial_review_v2,
       failure: generationFailure,
     };
   }
@@ -1090,6 +1154,8 @@ export class GenerationPipeline {
     let review: ReviewResult | null = null;
     let reviewStatus: ReviewStatus = "not_started";
     let reviewError: string | null = null;
+    /** v2.1.0 TASK §25：与 review 同时拿到手的 v2 原文，失败时为 null（与 review 同进退）。 */
+    let reviewV2: QualityReviewV2Result | null = null;
 
     // §16/§34：Review 失败不丢弃已生成的正文，也不把 Run 判为失败。
     // §18：EMPTY_CONTENT 时没有可审阅内容，跳过 Review。
@@ -1112,6 +1178,7 @@ export class GenerationPipeline {
         // 于是 review.json、RetryPolicy、QualityAssembler 的口径一个字都没变（TASK §27/§28）。
         const reviewed = await this.reviewer.review(config, story);
         review = legacyReviewOf(reviewed);
+        reviewV2 = reviewed;
         this.putCheck(rid, attemptNumber, repairNumber, "review.json", review);
         reviewStatus = "completed";
       } catch (e) {
@@ -1132,6 +1199,7 @@ export class GenerationPipeline {
       review,
       review_status: reviewStatus,
       review_error: reviewError,
+      review_v2: reviewV2,
     };
   }
 
@@ -1174,12 +1242,16 @@ export class GenerationPipeline {
 
     let commercialReview: CommercialReviewResult | null = null;
     let commercialReviewError: string | null = null;
+    /** v2.1.0 TASK §25：v2 原文。与 DTO 同生同灭——这一路失败时两个都是 null。 */
+    let commercialReviewV2: CommercialReviewV2Result | null = null;
     try {
       // §11：与基础审阅同一份输入口径，但用独立 Prompt 与独立 schema。
       // 温度取 CommercialReviewer 自己的默认值，不跟着正文的创作温度走。
       // v2.1.0：组件内部说统一 diagnostics，边界处摊平回 v1.5.0 的 DTO——
       // commercial-review.json、metadata、UI 的口径一个字都没变（TASK §18/§27）。
-      commercialReview = legacyCommercialReviewOf(await this.commercialReviewer.review(config, story));
+      const reviewed = await this.commercialReviewer.review(config, story);
+      commercialReviewV2 = reviewed;
+      commercialReview = legacyCommercialReviewOf(reviewed);
     } catch (e) {
       // §24：这一路失败只让 commercial_review_status 变成 failed。
       // v1.9.1：reviewing_commercial 这一段同样按失败收尾
@@ -1197,6 +1269,7 @@ export class GenerationPipeline {
       commercial_review: commercialReview,
       commercial_review_status: commercialReview ? "completed" : "failed",
       commercial_review_error: commercialReviewError,
+      commercial_review_v2: commercialReviewV2,
     };
     this.artifactStore.putMetadata(
       rid,

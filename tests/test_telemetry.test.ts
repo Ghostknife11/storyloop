@@ -201,6 +201,8 @@ describe("§35/§36 阶段计时：每一条阶段都有真实的起止与时长
     expect(telemetry.durationMs).toBeGreaterThanOrEqual(0);
 
     // 一条阶段都不缺，顺序就是真实发生的顺序
+    // v2.1.0 追加 quality_stack_assembly：三套质量结论收成统一视图并落盘（TASK §30），
+    // 与 artifact_promotion 一样是真实发生的一步，同样不是 RunStatus。
     expect(telemetry.stages.map((s) => s.stage)).toEqual([
       "planning",
       "validating_beat_plan",
@@ -210,6 +212,7 @@ describe("§35/§36 阶段计时：每一条阶段都有真实的起止与时长
       "reviewing",
       "reviewing_commercial",
       "artifact_promotion",
+      "quality_stack_assembly",
     ]);
     for (const stage of telemetry.stages) {
       expect(stage.durationMs, stage.stage).toBeGreaterThanOrEqual(0);

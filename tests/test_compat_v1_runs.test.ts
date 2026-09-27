@@ -53,10 +53,12 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("§21 一次 Run 落盘后仍是 v1.x 的文件清单", () => {
-  it("运行级文件名一个不多一个不少，且都是 v1.x 就有的名字", async () => {
+  it("运行级文件名一个不多一个不少：v1.x 那十二个原样在，只多个 quality-stack.json", async () => {
     withTmpDir();
     const { runId } = await runOnce();
     const files = readdirSync(join("runs", runId)).sort();
+    // TASK §24：quality-stack.json 是 v2.1.0 **新增**的统一视图，
+    // beat-validation.json / review.json / quality.json / commercial-review.json 一个都没被替换掉。
     expect(files).toEqual(["attempts", ...RUN_FILES].sort());
   });
 

@@ -56,7 +56,7 @@ import {
  */
 
 /** 运行级固定文件名（v1.0.0 冻结，v1.6.0 追加 run-manifest.json，v1.8.0 追加 telemetry.json，
- *  v1.9.0 追加 failure-analysis.json）。 */
+ *  v1.9.0 追加 failure-analysis.json，v2.1.0 追加 quality-stack.json —— TASK §24 的统一视图）。 */
 const RUN_FILES = [
   "beat-validation.json",
   "beats.json",
@@ -64,6 +64,7 @@ const RUN_FILES = [
   "config.json",
   "failure-analysis.json",
   "metadata.json",
+  "quality-stack.json",
   "quality.json",
   "review.json",
   "run-manifest.json",
@@ -212,7 +213,7 @@ describe("v1.6.0 出身清单 — 真实 Pipeline 的落盘结果", () => {
     expect(existsSync(manifestPath)).toBe(true);
   });
 
-  it("运行级固定文件正好十二个，run-manifest.json 是其中之一", async () => {
+  it("运行级固定文件正好十三个，run-manifest.json 是其中之一", async () => {
     const { store, result } = await runWith([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW]);
     const runDir = store.resolveRunDir(result.run_id);
     expect(readdirSync(runDir).filter((name) => !name.startsWith(".")).sort()).toEqual(

@@ -43,6 +43,7 @@ const STAGE_CATEGORY: Record<StageName, FailureCategory> = {
   reviewing: "REVIEWER",
   rereviewing: "REVIEWER",
   reviewing_commercial: "REVIEWER",
+  quality_stack_assembly: "STORAGE",
 };
 
 /** §36/§37 薄弱维度对应的信号码：与 quality / commercial 的维度键一一对应。 */

@@ -18,6 +18,7 @@ import { validateStoryConfig } from "@/domain/story-config";
 import { validateBeatValidationResult } from "@/domain/beat-validation";
 import { validateCommercialReviewResult, commercialOverallScore } from "@/domain/commercial-review";
 import { validateRunTelemetry } from "@/domain/telemetry";
+import { validateQualityStackResult } from "@/domain/quality-stack";
 import {
   MISSING_ENDING,
   SAMPLE_BEAT_PLAN,
@@ -51,7 +52,9 @@ const LOW_REVIEW = JSON.stringify(qualityReviewV2Of(41, ["高潮缺失"]));
  *  v1.5.0 追加 commercial-review.json（商业可读性审阅结论）；
  *  v1.6.0 追加 run-manifest.json（这次 Run 的出身清单，与 metadata.json 并列）；
  *  v1.8.0 追加 telemetry.json（执行过程：阶段耗时 / LLM 调用 / usage）；
- *  v1.9.0 追加 failure-analysis.json（对上面这些事实做的确定性失败分类）。
+ *  v1.9.0 追加 failure-analysis.json（对上面这些事实做的确定性失败分类）；
+ *  v2.1.0 追加 quality-stack.json（三套质量结论的统一视图，TASK §24）——它是**新增**，
+ *  上面每一个文件都原样保留，一个字段都不少。
  *
  * 导出给 tests/test_compat_v1_runs.test.ts 用：v2.0.0 的兼容门禁要拿**同一份**
  * 冻结清单和现行的落盘结果对账，避免两份清单各说各话。 */
@@ -62,6 +65,7 @@ export const RUN_FILES = [
   "config.json",
   "failure-analysis.json",
   "metadata.json",
+  "quality-stack.json",
   "quality.json",
   "review.json",
   "run-manifest.json",
@@ -171,7 +175,7 @@ function expectHasAll(actual: string[], required: readonly string[], label: stri
 }
 
 describe("v1.0.0 产物布局冻结 — Happy Path", () => {
-  it("运行级目录只含 attempts/ 与冻结的十二个文件", async () => {
+  it("运行级目录只含 attempts/ 与冻结的十三个文件", async () => {
     const dir = withTmpDir();
     const llm = new FakeLLM([PLAN_REPLY, SAMPLE_STORY, GOOD_REVIEW]);
     const result = await pipelineWith(llm, new ArtifactStore()).run(SAMPLE_CONFIG);
@@ -328,6 +332,8 @@ describe("v1.0.0 官方示例 Run", () => {
     const validation = JSON.parse(readFileSync(join(exampleRoot, "validation.json"), "utf8")) as unknown;
     const review = JSON.parse(readFileSync(join(exampleRoot, "review.json"), "utf8")) as unknown;
     const commercialReview = JSON.parse(readFileSync(join(exampleRoot, "commercial-review.json"), "utf8")) as unknown;
+    // v2.1.0：统一质量视图同样必须过严格校验——它引用的三套结论一条都不能少
+    const qualityStack = JSON.parse(readFileSync(join(exampleRoot, "quality-stack.json"), "utf8")) as unknown;
 
     expect(() => validateStoryConfig(config)).not.toThrow();
     // 示例把每个可选字段都用上了：读者照抄一份就能覆盖全部字段
@@ -366,6 +372,15 @@ describe("v1.0.0 官方示例 Run", () => {
     }
     // §11：整体分永远是四维均分，模型自报的分数不参与落盘口径
     expect(cr.score).toBe(commercialOverallScore(cr));
+    // §22/§37：三套结论齐全 → complete；summary 的四个计数必须与 diagnostics 现算的一致
+    const stack = validateQualityStackResult(qualityStack);
+    expect(stack.status).toBe("complete");
+    expect(stack.summary.totalDiagnostics).toBe(stack.diagnostics.length);
+    expect(stack.summary.warnings + stack.summary.errors + stack.summary.info).toBe(stack.diagnostics.length);
+    // §24：它是统一视图——三套结论各自仍然有自己的文件，一个都没被替换掉
+    expect(stack.beatValidation?.passed).toBe(true);
+    expect(stack.qualityReview?.score).toBe(82);
+    expect(stack.commercialReview?.score).toBe(cr.score);
   });
 
   it("示例 metadata 带齐 TASK §9/§10/§11 必备字段", () => {

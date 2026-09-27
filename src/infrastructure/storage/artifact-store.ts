@@ -22,6 +22,8 @@ import type { RunTelemetry } from "@/domain/telemetry";
 import { runTelemetryOf, validateRunTelemetry } from "@/domain/telemetry";
 import type { FailureAnalysisResult } from "@/domain/failure-analysis";
 import { failureAnalysisOf, validateFailureAnalysis } from "@/domain/failure-analysis";
+import type { QualityStackResult } from "@/domain/quality-stack";
+import { qualityStackResultOf, validateQualityStackResult } from "@/domain/quality-stack";
 import type { ArtifactStore as ArtifactStorePort } from "@/ports/artifact-store";
 
 /**
@@ -35,6 +37,8 @@ import type { ArtifactStore as ArtifactStorePort } from "@/ports/artifact-store"
  * 只是多一个由 QualityAssembler 装配出来的统一质量快照。
  * v1.5.0 新增 commercial-review.json（TASK §16/§17）：商业可读性结论同样进 promote 清单，
  * 于是运行根那一份永远与入选正文一一对应。
+ * v2.1.0 新增 quality-stack.json（TASK §24/§25）：运行级统一视图，不进 promote 清单——
+ * 它在收尾时按入选 Attempt 的三套结论现算，attempt 目录里没有这份文件。
  */
 
 /** §23/§60 attempt 根目录名；§28 Windows 不可靠目录层级命名，这里固定 ASCII。 */
@@ -54,6 +58,9 @@ const TELEMETRY_FILE = "telemetry.json";
 
 /** v1.9.0 运行级失败分析：对上面这些事实做的确定性分类，自己不产生新事实。 */
 const FAILURE_ANALYSIS_FILE = "failure-analysis.json";
+
+/** v2.1.0 运行级质量总览：三套质量结论的统一视图（TASK §24），纯追加，不替换任何旧文件。 */
+const QUALITY_STACK_FILE = "quality-stack.json";
 
 /**
  * §19 产物写入失败：磁盘满 / 权限不足 / 目录被占用都归这一类。
@@ -171,6 +178,22 @@ export class FileArtifactStore implements ArtifactStorePort {
   putFailureAnalysis(runId: string, analysis: FailureAnalysisResult): string {
     const checked = validateFailureAnalysis(analysis);
     return this.putJson(runId, FAILURE_ANALYSIS_FILE, checked);
+  }
+
+  /**
+   * v2.1.0 运行级质量总览（TASK §24/§25）：与 metadata.json / run-manifest.json /
+   * telemetry.json / failure-analysis.json 并排放在 Run 根目录，同样不进 promote 清单——
+   * 它在 Finalize 里按入选 Attempt 重新组装，不属于任何一次 Attempt。
+   *
+   * 它是**统一视图**：落盘它不会删掉 beat-validation.json / review.json /
+   * quality.json / commercial-review.json 里的任何一个字段，老客户端照旧读旧文件。
+   *
+   * 落盘前过一遍 validateQualityStackResult：三套结论缺失、summary 与 diagnostics
+   * 对不上、schemaVersion 不对，都在写盘那一刻抛 ArtifactWriteError（TASK §37）。
+   */
+  putQualityStack(runId: string, stack: QualityStackResult): string {
+    const checked = validateQualityStackResult(stack);
+    return this.putJson(runId, QUALITY_STACK_FILE, checked);
   }
 
   /** v1.9.0 读回失败分析：文件缺失 / JSON 坏 / 形状不对都归一成 null（§35 旧 Run）。 */
@@ -434,6 +457,11 @@ export class FileArtifactStore implements ArtifactStorePort {
   /** v1.5.0 TASK §32：v1.5.0 之前的 Run 没有这个文件，读到 null 由界面整段隐藏。 */
   readFinalCommercialReview(runId: string): CommercialReviewResult | null {
     return commercialReviewResultOf(this.readJson(runId, "commercial-review.json"));
+  }
+
+  /** §43：v2.1.0 之前的 Run 没有这个文件，读到 null 由界面整段隐藏。 */
+  readQualityStack(runId: string): QualityStackResult | null {
+    return qualityStackResultOf(this.readJson(runId, QUALITY_STACK_FILE));
   }
 
   readAttemptQuality(runId: string, attemptNumber: number): QualityResult | null {

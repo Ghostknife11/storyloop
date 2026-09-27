@@ -1,0 +1,173 @@
+{
+  "schemaVersion": "1",
+  "status": "complete",
+  "beatValidation": {
+    "passed": true,
+    "diagnostics": [
+      {
+        "id": "beat-validator-1",
+        "source": "beat-validator",
+        "category": "ENDING_NOT_PREPARED",
+        "severity": "warning",
+        "target": "beat-plan",
+        "message": "结局要求主角说出自己那三分钟的去向，但前三拍没有任何一拍触及她离开现场的那段时间，结尾的转折会显得突然。",
+        "relatedBeatIds": [
+          1,
+          2,
+          3
+        ]
+      }
+    ],
+    "summary": "骨架四拍齐全：建置、升级、高潮、收束各有承担者，顺序也讲得通；结局所需的「三分钟去向」缺一笔铺垫，属 warning，不阻断生成。"
+  },
+  "qualityReview": {
+    "score": 82,
+    "dimensions": {
+      "coherence": {
+        "score": 85,
+        "summary": "时间线与人物关系前后一致，没有自相矛盾的细节。",
+        "strengths": [
+          "开场三分钟失踪写得干净"
+        ],
+        "problems": []
+      },
+      "narrative": {
+        "score": 78,
+        "summary": "悬念保持到尾，中段有一处线索复用。",
+        "strengths": [],
+        "problems": [
+          "中段线索复用偏多"
+        ]
+      },
+      "character": {
+        "score": 84,
+        "summary": "主角动机明确，决定都有来处。",
+        "strengths": [],
+        "problems": []
+      },
+      "causality": {
+        "score": 81,
+        "summary": "每次转折都由前一件事推动，结尾的坚持有代价。",
+        "strengths": [],
+        "problems": []
+      }
+    },
+    "diagnostics": [
+      {
+        "id": "quality-reviewer-1",
+        "source": "quality-reviewer",
+        "category": "repetition",
+        "severity": "warning",
+        "target": "story",
+        "message": "中段线索复用偏多",
+        "suggestion": "压缩重复线索，让中段事件承担新的推进功能。"
+      }
+    ],
+    "summary": "节奏紧凑，悬念保持到尾。"
+  },
+  "commercialReview": {
+    "score": 71.5,
+    "dimensions": {
+      "hook": {
+        "score": 82,
+        "summary": "开场即冲突，读完想往下看。",
+        "strengths": [
+          "第一段就抛出失踪悬念，读者立刻知道要跟什么",
+          "主角的动机在第三章之前已经立住，后面每个决定都有来处"
+        ],
+        "problems": []
+      },
+      "pacing": {
+        "score": 68,
+        "summary": "中段排查过程拖了两轮，节奏在这里慢下来。",
+        "strengths": [],
+        "problems": [
+          "中段两次排查信息重复，第二趟没有新增线索"
+        ]
+      },
+      "engagement": {
+        "score": 74,
+        "summary": "主角动机明确，全篇阅读动力持续住了。",
+        "strengths": [],
+        "problems": []
+      },
+      "payoff": {
+        "score": 62,
+        "summary": "结局收得干脆，但对前文承诺的回报略赶。",
+        "strengths": [],
+        "problems": [
+          "结尾回报略赶，三分钟去向揭晓时缺少一次情绪停顿"
+        ]
+      }
+    },
+    "diagnostics": [
+      {
+        "id": "commercial-reviewer-1",
+        "source": "commercial-reviewer",
+        "category": "repetitive_middle",
+        "severity": "warning",
+        "target": "middle",
+        "message": "中段两次排查问的是同一批证人，信息没有增加。",
+        "suggestion": "把中段两次排查合并成一次带新信息的排查，省下的篇幅给结尾一次对视"
+      },
+      {
+        "id": "commercial-reviewer-2",
+        "source": "commercial-reviewer",
+        "category": "weak_payoff",
+        "severity": "warning",
+        "target": "ending",
+        "message": "结尾回报略赶，三分钟去向揭晓时缺少一次情绪停顿。",
+        "suggestion": "高潮前加一句主角的自我怀疑，让最后的坚持更有代价"
+      }
+    ],
+    "summary": "开篇三句内进入冲突，中段排查节奏拖了一轮，结尾收得住。"
+  },
+  "diagnostics": [
+    {
+      "id": "beat-validator-1",
+      "source": "beat-validator",
+      "category": "ENDING_NOT_PREPARED",
+      "severity": "warning",
+      "target": "beat-plan",
+      "message": "结局要求主角说出自己那三分钟的去向，但前三拍没有任何一拍触及她离开现场的那段时间，结尾的转折会显得突然。",
+      "relatedBeatIds": [
+        1,
+        2,
+        3
+      ]
+    },
+    {
+      "id": "quality-reviewer-1",
+      "source": "quality-reviewer",
+      "category": "repetition",
+      "severity": "warning",
+      "target": "story",
+      "message": "中段线索复用偏多",
+      "suggestion": "压缩重复线索，让中段事件承担新的推进功能。"
+    },
+    {
+      "id": "commercial-reviewer-1",
+      "source": "commercial-reviewer",
+      "category": "repetitive_middle",
+      "severity": "warning",
+      "target": "middle",
+      "message": "中段两次排查问的是同一批证人，信息没有增加。",
+      "suggestion": "把中段两次排查合并成一次带新信息的排查，省下的篇幅给结尾一次对视"
+    },
+    {
+      "id": "commercial-reviewer-2",
+      "source": "commercial-reviewer",
+      "category": "weak_payoff",
+      "severity": "warning",
+      "target": "ending",
+      "message": "结尾回报略赶，三分钟去向揭晓时缺少一次情绪停顿。",
+      "suggestion": "高潮前加一句主角的自我怀疑，让最后的坚持更有代价"
+    }
+  ],
+  "summary": {
+    "totalDiagnostics": 4,
+    "errors": 0,
+    "warnings": 4,
+    "info": 0
+  }
+}

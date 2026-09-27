@@ -20,6 +20,7 @@ import type { QualityResult } from "@/domain/quality";
 import type { BeatValidationResult } from "@/domain/beat-validation";
 import type { CommercialReviewResult } from "@/domain/commercial-review";
 import type { FailureAnalysisResult } from "@/domain/failure-analysis";
+import type { QualityStackResult } from "@/domain/quality-stack";
 import type { RunManifest } from "@/domain/run-manifest";
 import type { RunTelemetry } from "@/domain/telemetry";
 import type { RepairMetadata, RepairRequestRecord } from "@/domain/repair";
@@ -37,6 +38,7 @@ export interface ArtifactStore {
   putCommercialReview(runId: string, commercialReview: CommercialReviewResult): string;
   putMetadata(runId: string, metadata: Record<string, unknown>): string;
   putFailureAnalysis(runId: string, analysis: FailureAnalysisResult): string;
+  putQualityStack(runId: string, stack: QualityStackResult): string;
   putTelemetry(runId: string, telemetry: RunTelemetry): string;
   putManifest(runId: string, manifest: RunManifest): string;
 
@@ -102,6 +104,7 @@ export interface ArtifactStore {
   readRunManifest(runId: string): RunManifest | null;
   readRunTelemetry(runId: string): RunTelemetry | null;
   readFailureAnalysis(runId: string): FailureAnalysisResult | null;
+  readQualityStack(runId: string): QualityStackResult | null;
   readAttemptMetadata(runId: string, attemptNumber: number): Record<string, unknown> | null;
   readAttemptStory(runId: string, attemptNumber: number): string | null;
   readAttemptInitialStory(runId: string, attemptNumber: number): string | null;

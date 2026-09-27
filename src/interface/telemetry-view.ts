@@ -93,6 +93,7 @@ const STAGE_LABELS: Record<StageName, string> = {
   rereviewing: "Re-review",
   reviewing_commercial: "Commercial review",
   artifact_promotion: "Artifact promotion",
+  quality_stack_assembly: "Quality stack assembly",
 };
 
 export function stageLabel(stage: string): string {

@@ -68,3 +68,18 @@ v1.9.0 起在 Run 根目录多一份 `failure-analysis.json`：对上面这些**
 additive 摘要字段是 `failure_analysis_status`（= `none`）与 `primary_failure_category`
 （没有主要失败类别就不写这个键）。字段含义见
 [docs/failure-analysis.md](../../docs/failure-analysis.md)。
+
+v2.1.0 起在 Run 根目录多一份 `quality-stack.json`：三套质量结论（骨架校验、故事质量审阅、
+商业可读性审阅）收成的**统一视图**。它不是替换层——`beat-validation.json`、`review.json`、
+`quality.json`、`commercial-review.json` 一个都没少，也一个字段都没改；这份文件只是把同样的
+事实换成同一种诊断语言放在一起看。样例里三套结论都在，所以 `status` 是 `complete`；
+哪一套组件自身失败了，对应的模块键就不出现，`status` 落成 `partial`（§36）。
+
+`diagnostics` 是三套诊断按「骨架 → 故事质量 → 商业可读性」合并的结果，每条都带稳定
+`id`、来源、类别、严重度与指向；`summary` 是四个 severity 计数，与 `diagnostics` 现算的一致。
+`qualityReview.score`（82）取的是**修订后**那份审阅，与 `metadata.json` 的 `review_score`、
+`quality.json` 的 `overall_score` 对齐；根目录 `review.json` 仍是首次那份（41 分）——这与
+`quality.json` 面对的是同一个既有不对称，不是新引入的矛盾。
+
+它只描述、不驱动：这里一条诊断都不参与重试、修订、换模型或换提示词的判定（§28）。
+字段含义见 [docs/quality-stack.md](../../docs/quality-stack.md)。

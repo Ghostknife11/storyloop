@@ -22,9 +22,12 @@ export const TELEMETRY_SCHEMA_VERSION = "1";
 
 /**
  * 稳定阶段名（§6）——**以真实 Pipeline 的阶段命名为准**，不是另起一套漂亮名字。
- * RunContext 里的 RunStatus 逐个对应，另加一个 artifact_promotion：
- * promote 是真实发生的一步（把入选 Attempt 的产物复制到运行根），值得单独计时，
- * 但它不是 RunStatus，所以它只出现在遥测里，不进 metadata 的 current_stage。
+ * RunContext 里的 RunStatus 逐个对应，另加两个只出现在遥测里的步骤：
+ *   artifact_promotion —— 把入选 Attempt 的产物复制到运行根，真实发生但不是 RunStatus；
+ *   quality_stack_assembly —— v2.1.0 把三套质量结论收成统一视图并落盘（TASK §30），
+ *     同样是真实发生的一步，同样不是 RunStatus。
+ * v2.1.0 起三个质量组件的阶段名一个都没改（validating_beat_plan / reviewing /
+ * reviewing_commercial）：组件升到 v2 不等于阶段改名，旧 Run 的遥测照读。
  */
 export const STAGE_NAMES = [
   "planning",
@@ -38,6 +41,7 @@ export const STAGE_NAMES = [
   "rereviewing",
   "reviewing_commercial",
   "artifact_promotion",
+  "quality_stack_assembly",
 ] as const;
 
 export type StageName = (typeof STAGE_NAMES)[number];
