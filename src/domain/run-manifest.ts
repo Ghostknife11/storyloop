@@ -23,6 +23,10 @@
  * v2.2.0 再追加一个可选字段 `workspace`（见文末 WorkspaceProvenance）：一次 Run 如果在某个
  * 工作区项目里生成，清单里带上它归哪个项目。同样纯 additive，同样不改 schemaVersion。
  *
+ * v2.3.0 再追加一个可选字段 `benchmark`（见文末 BenchmarkProvenance）：一次 Run 如果是某次
+ * Benchmark 执行的一条样本，清单里带上它属于哪次执行、哪份 Suite、哪道题、第几次重复。
+ * 同样纯 additive：Benchmark 样本仍然是完完整整的普通 Run，区别只在多这一块出身。
+ *
  * 实现：`src/lib/tracking/manifest-builder.ts`（装配）、`src/core/pipeline.ts`（落盘时机）
  * 契约测试：`tests/test_run_manifest.test.ts`、
  *           `tests/test_contract_docs_sync.test.ts`（文档字段表 ↔ 真实产物双向比对）
@@ -197,6 +201,8 @@ export interface RunManifest {
   experiment?: ExperimentProvenance;
   /** v2.2.0 additive：这次 Run 归某个工作区项目时才有；普通 Run 整个键不出现。 */
   workspace?: WorkspaceProvenance;
+  /** v2.3.0 additive：这次 Run 是某次 Benchmark 执行的一条样本时才有；普通 Run 整个键不出现。 */
+  benchmark?: BenchmarkProvenance;
 }
 
 /**
@@ -231,6 +237,26 @@ export interface ExperimentProvenance {
  */
 export interface WorkspaceProvenance {
   projectId: string;
+}
+
+/**
+ * v2.3.0 Benchmark 出身：这份 Run 是某次 Benchmark 执行的一条样本。
+ *
+ * 记五件事：哪一次执行（benchmarkId）、哪份 Suite 的哪个版本、哪道题、第几次重复。
+ * suiteVersion 与 suiteDigest 分两层：版本号是人写的，digest 是算出来的——
+ * 同一个版本号下题目被改过，版本号不变而 digest 变（TASK §70），所以两处都要记。
+ *
+ * 与 experiment / workspace 一样纯 additive：不是 Benchmark 样本的 Run 这个键不出现，
+ * 读法与 v2.2.0 逐字一致，schemaVersion 不递增。
+ */
+export interface BenchmarkProvenance {
+  benchmarkId: string;
+  suiteId: string;
+  suiteVersion: string;
+  suiteDigest: string;
+  caseId: string;
+  /** 从 1 开始的 repetition 序号（TASK §10）。 */
+  repetition: number;
 }
 
 /**
@@ -441,6 +467,23 @@ function workspaceProvenanceOf(raw: unknown): WorkspaceProvenance {
   return { projectId };
 }
 
+function benchmarkProvenanceOf(raw: unknown): BenchmarkProvenance {
+  if (typeof raw !== "object" || raw === null) throw new RunManifestError("benchmark 必须是对象");
+  const r = raw as Record<string, unknown>;
+  const repetition = numOf(r.repetition, "benchmark.repetition");
+  if (!Number.isInteger(repetition) || repetition < 1) {
+    throw new RunManifestError("benchmark.repetition 必须是从 1 开始的整数");
+  }
+  return {
+    benchmarkId: strOf(r.benchmarkId, "benchmark.benchmarkId"),
+    suiteId: strOf(r.suiteId, "benchmark.suiteId"),
+    suiteVersion: strOf(r.suiteVersion, "benchmark.suiteVersion"),
+    suiteDigest: strOf(r.suiteDigest, "benchmark.suiteDigest"),
+    caseId: strOf(r.caseId, "benchmark.caseId"),
+    repetition,
+  };
+}
+
 /** 结构校验：形状不对就抛 RunManifestError（写盘前自查用）。 */
 export function validateRunManifest(raw: unknown): RunManifest {
   if (typeof raw !== "object" || raw === null) throw new RunManifestError("manifest 必须是对象");
@@ -493,6 +536,9 @@ export function validateRunManifest(raw: unknown): RunManifest {
       : {}),
     ...(r.workspace !== undefined && r.workspace !== null
       ? { workspace: workspaceProvenanceOf(r.workspace) }
+      : {}),
+    ...(r.benchmark !== undefined && r.benchmark !== null
+      ? { benchmark: benchmarkProvenanceOf(r.benchmark) }
       : {}),
   };
 }

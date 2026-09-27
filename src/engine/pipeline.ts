@@ -46,7 +46,12 @@ import { isStageName } from "@/domain/telemetry";
 import { TelemetryCollector, type TelemetryErrorCode } from "@/infrastructure/telemetry/telemetry-collector";
 import type { RunTelemetry } from "@/domain/telemetry";
 import { projectVersion as readProjectVersion } from "@/infrastructure/config/version";
-import type { RunManifest, ExperimentProvenance, WorkspaceProvenance } from "@/domain/run-manifest";
+import type {
+  RunManifest,
+  BenchmarkProvenance,
+  ExperimentProvenance,
+  WorkspaceProvenance,
+} from "@/domain/run-manifest";
 import { buildRunManifest, type ManifestAttemptInput } from "@/infrastructure/tracking/manifest-builder";
 import type { FailureAnalyzer } from "@/ports/failure-analyzer";
 import { NO_FAILURE_ANALYZER } from "@/ports/failure-analyzer";
@@ -462,8 +467,10 @@ export class GenerationPipeline {
     experiment?: ExperimentProvenance,
     /** v2.2.0：这次 Run 在某个工作区项目里生成时带上项目归属；普通 Run 不传。 */
     workspace?: WorkspaceProvenance,
+    /** v2.3.0：这次 Run 是某次 Benchmark 执行的样本时带上 Benchmark 出身；普通 Run 不传。 */
+    benchmark?: BenchmarkProvenance,
   ): Promise<GenerationResult> {
-    return this.runStages(createRunContext(this.projectVersion, generateRunId()), config, undefined, runtime, retryPolicy, experiment, workspace);
+    return this.runStages(createRunContext(this.projectVersion, generateRunId()), config, undefined, runtime, retryPolicy, experiment, workspace, benchmark);
   }
 
   /** §29 Manual：用户编辑后的 BeatPlan 直接进入生成，仍形成一个 Run。 */
@@ -476,8 +483,10 @@ export class GenerationPipeline {
     experiment?: ExperimentProvenance,
     /** v2.2.0 同 run()：项目归属由调用方（工作区用例）传入。 */
     workspace?: WorkspaceProvenance,
+    /** v2.3.0 同 run()：Benchmark 样本身份由调用方（Benchmark Runner）传入。 */
+    benchmark?: BenchmarkProvenance,
   ): Promise<GenerationResult> {
-    return this.runStages(createRunContext(this.projectVersion, generateRunId()), config, beatPlan, runtime, retryPolicy, experiment, workspace);
+    return this.runStages(createRunContext(this.projectVersion, generateRunId()), config, beatPlan, runtime, retryPolicy, experiment, workspace, benchmark);
   }
 
   /**
@@ -600,6 +609,8 @@ export class GenerationPipeline {
     experiment?: ExperimentProvenance,
     /** v2.2.0 工作区出身：一路带到 Manifest，同样不参与任何流程判断。 */
     workspace?: WorkspaceProvenance,
+    /** v2.3.0 Benchmark 出身：一路带到 Manifest，同样不参与任何流程判断。 */
+    benchmark?: BenchmarkProvenance,
   ): Promise<GenerationResult> {
     const rid = ctx.run_id;
     // v1.8.0：run_id 生成之后才补得上（采集器在 Pipeline 构造时就建好了）
@@ -719,6 +730,7 @@ export class GenerationPipeline {
         selectedAttemptNumber,
         experiment,
         workspace,
+        benchmark,
       );
       this.writeFailureAnalysis(rid);
 
@@ -788,7 +800,7 @@ export class GenerationPipeline {
       // v1.6.0：失败也要留下出身记录——「这个 Run 死在哪个版本、哪次 Attempt、用了什么参数」
       // 正是最需要查的一件事。此时没有 promote，运行根目录里只有 config / beats 与 attempt 级文件，
       // Manifest 如实只列这些（selectedAttemptId 不出现）。
-      this.writeManifest(ctx, rid, runtime, policy, records, null, experiment, workspace);
+      this.writeManifest(ctx, rid, runtime, policy, records, null, experiment, workspace, benchmark);
       // v1.9.0：失败的 Run 也要有失败分析——它正是最需要分类的那一次（§27）。
       // 异常链上的真实错误码一并交给分析器（§40），遥测那边只记最内层一个。
       this.writeFailureAnalysis(rid, this.failureAnalyzer.codesOf(e));
@@ -822,6 +834,7 @@ export class GenerationPipeline {
     selectedAttemptNumber: number | null,
     experiment?: ExperimentProvenance,
     workspace?: WorkspaceProvenance,
+    benchmark?: BenchmarkProvenance,
   ): RunManifest | null {
     const attempts: ManifestAttemptInput[] = records.map((r) => ({
       attemptNumber: r.attempt.attempt_number,
@@ -835,7 +848,7 @@ export class GenerationPipeline {
     }));
     try {
       const manifest = buildRunManifest(
-        { runId, startedAt: ctx.started_at, runtime, policy, attempts, selectedAttemptNumber, experiment, workspace },
+        { runId, startedAt: ctx.started_at, runtime, policy, attempts, selectedAttemptNumber, experiment, workspace, benchmark },
         this.artifactStore,
       );
       this.artifactStore.putManifest(runId, manifest);

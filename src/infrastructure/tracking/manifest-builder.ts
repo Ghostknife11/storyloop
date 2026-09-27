@@ -12,6 +12,7 @@
  * v1.7.0 的 `experiment` 块同样由调用方传进来（实验出身是调用方才知道的事实），
  * 装配器不从产物里推断「这次 Run 是不是实验样本」。
  * v2.2.0 的 `workspace` 块同理：项目归属是请求里带的，不是从产物反推的。
+ * v2.3.0 的 `benchmark` 块同理：一次 Benchmark 执行的样本身份由 Runner 传入。
  */
 
 import type { ArtifactStore } from "@/infrastructure/storage/artifact-store";
@@ -30,6 +31,7 @@ import {
   RUN_MANIFEST_SCHEMA_VERSION,
   type ArtifactManifestEntry,
   type AttemptManifestEntry,
+  type BenchmarkProvenance,
   type ExperimentProvenance,
   type ModelSnapshot,
   type ParameterSnapshot,
@@ -114,6 +116,11 @@ export interface RunManifestInput {
    * 不在任何项目里生成的普通 Run 不传，`workspace` 键不出现——与 v2.1.0 逐字一致。
    */
   workspace?: WorkspaceProvenance;
+  /**
+   * v2.3.0：这次 Run 是某次 Benchmark 执行的一条样本时带上它的出身。
+   * 不是 Benchmark 样本的普通 Run 不传，`benchmark` 键不出现——与 v2.2.0 逐字一致。
+   */
+  benchmark?: BenchmarkProvenance;
 }
 
 function attemptRel(attemptNumber: number, file: string): string {
@@ -325,5 +332,6 @@ export function buildRunManifest(
     completedAt: now().toISOString(),
     ...(input.experiment !== undefined ? { experiment: input.experiment } : {}),
     ...(input.workspace !== undefined ? { workspace: input.workspace } : {}),
+    ...(input.benchmark !== undefined ? { benchmark: input.benchmark } : {}),
   };
 }
