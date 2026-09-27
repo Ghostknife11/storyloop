@@ -2,21 +2,21 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { GenerationPipeline, PipelineError } from "@/core/pipeline";
-import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "@/core/retry-policy";
-import { ArtifactStore, ArtifactWriteError } from "@/storage/artifact-store";
-import { analyzeStoredRun, failureAnalysisInputOf } from "@/lib/failure-analysis-service";
-import { getRunFailureAnalysis } from "@/lib/generate-service";
-import { FailureAnalyzer } from "@/core/failure-analyzer";
-import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
-import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
-import type { BeatValidationResult } from "@/types/beat-validation";
-import type { ReviewResult } from "@/types/review-result";
-import type { ValidationResult } from "@/types/validation-result";
-import type { CommercialReviewResult } from "@/types/commercial-review";
-import type { RepairRequest, RepairResult } from "@/types/repair";
-import type { FailureAnalysisInput } from "@/types/failure-analysis";
-import type { RunTelemetry } from "@/types/telemetry";
+import { GenerationPipeline, PipelineError } from "@/engine/pipeline";
+import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "@/engine/retry-policy";
+import { ArtifactStore, ArtifactWriteError } from "@/infrastructure/storage/artifact-store";
+import { analyzeStoredRun, failureAnalysisInputOf, failureAnalyzerFor } from "@/analysis/failure-analysis-service";
+import { getRunFailureAnalysis } from "@/application/generate-service";
+import { FailureAnalyzer } from "@/analysis/failure-analyzer";
+import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
+import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
+import type { BeatValidationResult } from "@/domain/beat-validation";
+import type { ReviewResult } from "@/domain/review-result";
+import type { ValidationResult } from "@/domain/validation-result";
+import type { CommercialReviewResult } from "@/domain/commercial-review";
+import type { RepairRequest, RepairResult } from "@/domain/repair";
+import type { FailureAnalysisInput } from "@/domain/failure-analysis";
+import type { RunTelemetry } from "@/domain/telemetry";
 
 /**
  * 1.9.1 补丁的回归：1.8.0 / 1.9.0 发布后逐个读代码查出来的真问题。
@@ -116,12 +116,13 @@ interface Components {
 }
 
 function pipelineOf(c: Components): GenerationPipeline {
+  const store = c.store ?? new ArtifactStore();
   return new GenerationPipeline(
     { plan: async () => plan } as never,
     c.generator as never,
     c.validator as never,
     c.reviewer as never,
-    c.store ?? new ArtifactStore(),
+    store,
     { ...DEFAULT_RETRY_POLICY, ...c.policy },
     c.repairer as never,
     undefined,
@@ -129,7 +130,7 @@ function pipelineOf(c: Components): GenerationPipeline {
     undefined,
     c.beatValidator as never,
     c.commercialReviewer as never,
-  );
+  ).withFailureAnalyzer(failureAnalyzerFor(store));
 }
 
 function runDirOf(dir: string, runId: string): string {
