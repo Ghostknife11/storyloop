@@ -65,8 +65,11 @@ const EXPERIMENT_BOUNDARIES = [
  * v1.3.0 已经交付基础质量四维度（MultiDimensionalReviewer），v1.4.0 已经交付
  * BeatPlan 结构校验（BeatValidator），v1.5.0 已经交付独立的商业可读性审阅
  * （CommercialReviewer），v1.7.0 已经交付受控实验的执行链路（ExperimentRunner），
- * 所以它们从这里移出——但自动改写拍子、高级规划器、伏笔规划、模型跑分平台、
- * 以及「商业分驱动重试 / 自动修订」一类仍然是本版本不做的事。
+ * v2.3.0 已经交付 Benchmark Runner（固定 Suite + 固定协议 + 复用生产 Pipeline），
+ * 所以它们逐个从这里移出。
+ *
+ * 仍然不做的是：自动改写拍子、高级规划器、伏笔规划、商业分驱动重试 / 自动修订、
+ * 高级可观测性、失败归因、因果图、自适应生成、自优化。这些一个都不许出现。
  */
 const RESERVED_CAPABILITIES = [
   "AutomaticBeatRepair",
@@ -75,7 +78,6 @@ const RESERVED_CAPABILITIES = [
   "ForeshadowPlanner",
   "CommercialRetryPolicy",
   "AutomaticCommercialRepair",
-  "BenchmarkRunner",
   "AdvancedObservability",
   "FailureAttribution",
   "CausalGraph",
@@ -257,13 +259,19 @@ const TELEMETRY_BOUNDARIES = [
   "不会自动改变生成策略",
 ] as const;
 
-/** §51 不许宣传的能力：README 一个都不许出现（英文原词，与 §50 的清单对应）。 */
+/**
+ * §51 不许宣传的能力：README 一个都不许出现（英文原词，与 §50 的清单对应）。
+ *
+ * v2.3.0 把「Benchmark」从这里移出：这一版交付的就是 Benchmark Platform，
+ * 而它只测量、不控制——README 必须写明这句话（TASK §118），
+ * 所以这个词以「Benchmark measures the system」的形式出现恰恰是合规的。
+ * 这里不再拦它，改由 docs/benchmark.md 与 README 的边界句承担「不许说它会优化自己」。
+ */
 const TELEMETRY_FORBIDDEN = [
   "Root Cause Analysis",
   "Automatic Optimization",
   "Alerting",
   "Distributed Tracing",
-  "Benchmark",
   "Failure Attribution",
   "Adaptive Generation",
 ] as const;
@@ -339,14 +347,13 @@ const FAILURE_CAPABILITIES = [
   "Experiment Failure Distribution",
 ] as const;
 
-/** §60 禁止宣传的能力：README 一个都不许出现。 */
+/** §60 禁止宣传的能力：README 一个都不许出现（「Benchmark」同 §51 的理由，v2.3.0 起移出）。 */
 const FAILURE_FORBIDDEN = [
   "Root Cause Analysis",
   "Causal Failure Attribution",
   "Automatic Remediation",
   "Adaptive Retry",
   "Causal Graph",
-  "Benchmark",
   "Self Optimization",
 ] as const;
 

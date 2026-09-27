@@ -72,6 +72,14 @@ describe("§11 稳定错误码", () => {
       "WORKSPACE_NOT_FOUND",
       "WORKSPACE_CONFLICT",
       "WORKSPACE_WRITE_FAILED",
+      // v2.3.0：Benchmark 的四个码。与实验/工作区同构——请求体与 Suite 不合法 400、
+      // 执行不存在 404、同一版本正在跑 409、Benchmark 数据写不进去 500。
+      // 写盘刻意不复用 WORKSPACE_WRITE_FAILED：那描述的是项目/稿件/导出，
+      // 这里写的是 Suite 与执行结果，出错了得知道是哪一类数据坏了。
+      "BENCHMARK_INVALID",
+      "BENCHMARK_NOT_FOUND",
+      "BENCHMARK_CONFLICT",
+      "BENCHMARK_WRITE_FAILED",
       "INTERNAL_ERROR",
     ]);
     expect(new Set(API_ERROR_CODES).size).toBe(API_ERROR_CODES.length);

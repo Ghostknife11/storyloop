@@ -135,6 +135,15 @@ const ROUTES: ReadonlyArray<readonly [string, string]> = [
   ["api/projects/[id]/exports", "GET,POST"],
   ["api/projects/[id]/exports/[exportId]", "GET"],
   ["api/projects/[id]/health", "GET"],
+  // v2.3.0 TASK §83：Benchmark Platform 的六条入口（Suite 列表 / 详情，
+  // 执行列表与开跑 / 详情 / 导出）+ §93 基线标签的写入口 + §91 历史图取数
+  ["api/benchmarks/suites", "GET"],
+  ["api/benchmarks/suites/[id]", "GET"],
+  ["api/benchmarks/executions", "GET,POST"],
+  ["api/benchmarks/executions/[id]", "GET"],
+  ["api/benchmarks/executions/[id]/export", "GET"],
+  ["api/benchmarks/executions/[id]/baseline", "POST"],
+  ["api/benchmarks/history", "GET"],
 ];
 
 function post(path: string, payload: unknown) {
@@ -180,12 +189,20 @@ function runDeps(llm: FakeLLM, beatValidation?: BeatValidationV2Result) {
 }
 
 describe("v1.0.0 API 冻结 — 错误契约", () => {
-  it("错误码白名单恰好是二十种", () => {
+  // v2.3.0 起二十四条：Benchmark 的四个码进来了（见 src/application/error-model.ts）。
+  // 这条断言的意义不在「恰好几个」，而在「清单是枚举出来的、不是随手拼的」：
+  // 新增一个码必须同时改这里与 test_api_error，两个地方都认才算登记过。
+  it("错误码白名单是枚举出来的那一份", () => {
     expect([...API_ERROR_CODES].sort()).toEqual(
       [
         "ARTIFACT_WRITE_FAILED",
         // v1.4.0：BeatPlan 结构校验自身失败
         "BEAT_VALIDATION_FAILED",
+        // v2.3.0：Benchmark 的四个码，见 src/application/error-model.ts
+        "BENCHMARK_CONFLICT",
+        "BENCHMARK_INVALID",
+        "BENCHMARK_NOT_FOUND",
+        "BENCHMARK_WRITE_FAILED",
         "COMMERCIAL_REVIEW_FAILED",
         "CONFIG_INVALID",
         "EXPERIMENT_CONFLICT",

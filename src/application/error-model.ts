@@ -28,6 +28,11 @@ import {
   WorkspaceStateError,
   WorkspaceValidationError,
 } from "@/domain/workspace";
+import {
+  BenchmarkNotFoundError,
+  BenchmarkStateError,
+  BenchmarkValidationError,
+} from "@/domain/benchmark-suite";
 
 /** §11 稳定错误码。新增错误必须复用这里的码，不允许每个路由自造字符串。 */
 export const API_ERROR_CODES = [
@@ -58,6 +63,14 @@ export const API_ERROR_CODES = [
   "WORKSPACE_NOT_FOUND",
   "WORKSPACE_CONFLICT",
   "WORKSPACE_WRITE_FAILED",
+  // v2.3.0 Benchmark 的四个码，与实验/工作区同构：请求体与 Suite 不合法 400，
+  // 执行不存在 404，同一版本正在跑 409，Benchmark 数据写不进去 500。
+  // 写盘刻意不复用 WORKSPACE_WRITE_FAILED：那描述的是项目/稿件/导出，
+  // 这里写的是 Suite 与执行结果——出错了得知道是哪一类数据坏了。
+  "BENCHMARK_INVALID",
+  "BENCHMARK_NOT_FOUND",
+  "BENCHMARK_CONFLICT",
+  "BENCHMARK_WRITE_FAILED",
   "INTERNAL_ERROR",
 ] as const;
 
@@ -215,6 +228,21 @@ export function toApiError(e: unknown): ApiError {
   // 落盘失败。这三个类的 message 本来就只有文件名与错误码（§67），过 safeText 只是再兜一层
   if (WORKSPACE_WRITE_ERRORS.has(e instanceof Error ? e.name : "")) {
     return new ApiError("WORKSPACE_WRITE_FAILED", safeText((e as Error).message), 500);
+  }
+  // v2.3.0 Benchmark 的三个判定错：预检全部发生在 LLM 请求之前（§40），
+  // 所以这三个分支里 runIdOf(e) 一定是 undefined，只带 code 与 message。
+  if (e instanceof BenchmarkValidationError) {
+    return new ApiError("BENCHMARK_INVALID", safeText(e.message), 400);
+  }
+  if (e instanceof BenchmarkNotFoundError) {
+    return new ApiError("BENCHMARK_NOT_FOUND", safeText(e.message), 404);
+  }
+  if (e instanceof BenchmarkStateError) {
+    return new ApiError("BENCHMARK_CONFLICT", safeText(e.message), 409);
+  }
+  // Benchmark 数据落盘失败：Terminal 执行再写、目录不可写、磁盘满都属于这一类
+  if (e instanceof Error && e.name === "BenchmarkWriteError") {
+    return new ApiError("BENCHMARK_WRITE_FAILED", safeText(e.message), 500);
   }
   // 具体类型都没命中，才退回 PipelineError 的阶段壳：阶段能定位，但不值得单独一个码。
   if (e instanceof PipelineError) {
