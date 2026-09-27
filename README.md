@@ -25,6 +25,14 @@
 > 既有的 `review.score` / `commercial_review.score` / `beat_validation.issues` 一个字段都没动，
 > 2.0.0 及更早写的 Run 原样可读。见下面
 > [Advanced Quality Stack](#advanced-quality-stackv210)。
+>
+> **v2.3.0 为 StoryLoop 增加正式 Benchmark Platform。** 固定且版本化的 Benchmark Suite 可以通过
+> 同一套 Production Pipeline 批量执行，并统一汇总质量、商业可读性、可靠性、失败分布与效率指标，
+> 从而让 StoryLoop 能够持续、可复现地测量自身变化。它只测量，不控制：
+> **Benchmark measures the system. Benchmark does not control the system.**
+> 同样配置跑两次，数字不会逐字节一致——**同样配置并不保证模型输出逐字节一致。**
+> 契约见 [docs/benchmark.md](docs/benchmark.md)，题库来源与许可见
+> [docs/benchmark-data.md](docs/benchmark-data.md)。
 
 ## 快速开始
 
@@ -124,9 +132,22 @@ StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts
   **复制**：之后怎么改都不回写 Run 的 `story.md`。Creator Health 只摆九个登记在册的信号码，
   同一份磁盘事实两次请求逐字相同——**不给建议、不打分、不排序、不驱动任何行为**。
   契约见 [docs/workspace.md](docs/workspace.md)
+- **Benchmark Platform（基准测量平台，v2.3.0）**：把「这条流水线现在表现如何」变成可重复的
+  测量。一份 **Suite** = 若干 Case + 一份 **Protocol**（重复次数、固定骨架还是自己规划、
+  采纳哪些指标、失败样本算不算分母、PASS 切线）；**Benchmark Runner** 在发出任何一次 LLM 请求
+  之前先跑五步预检（服务端模型与密钥、Suite 本身、固定骨架的文件、提示词角色、样本数安全线），
+  之后按「Suite 声明顺序 × 重复次数升序」把每道题跑成一次次完完整整的普通 Run——产物仍落在
+  `runs/<run_id>/`，Benchmark 只留 `runId` 这一根指针。汇总的是 22 个指标（质量 / 商业可读性 /
+  可靠性 / 失败 / 效率）、失败类别分布与执行耗时；执行三件套（`execution.json` /
+  `samples.json` / `aggregate.json`）落在与 `runs/` 同级的 `benchmarks/` 树里，题库原文
+  （`suite.json` + 各题的 `cases/<case_id>/beat-plan.json`）与执行产物分开放，落到终态后
+  任何再写入都被拒绝。HTTP 出口是八条 additive 路由 `/api/benchmarks/**`，界面是 `/benchmarks`、
+  `/benchmarks/<id>` 与 `/benchmarks/history`。契约见
+  [docs/benchmark.md](docs/benchmark.md)
 - **现代 Web UI**：六阶段进度、Attempt 计数、修订明细、Validation / Review / Commercial
   Review / Quality Center / Run Provenance / 可观测性 / 失败分析面板、实验列表与实验详情、
-  Workspace（项目 / 稿件 / 导出 / 健康）、Run ID 与产物清单
+  Workspace（项目 / 稿件 / 导出 / 健康）、Benchmark（套件 / 执行详情 / 历史）、
+  Run ID 与产物清单
 - **Modular Platform Architecture（平台化架构，v2.0.0）**：上面每一种能力都落在明确的层里——
   Stable Domain Contracts（领域契约与纯规则）、Application Use Cases（用例编排与公共门面）、
   Engine（生成 / 校验 / 审阅 / 修订 / 管道）、Analysis（实验汇总与失败分类）、
@@ -195,6 +216,20 @@ StoryConfig → Planning →〔Validate BeatPlan〕→〔Attempt 1..max_attempts
 > **不碰 Run**（建稿是复制，不回写 Story，不给 Run 追加字段）。
 > Creator Health 那份结论也没有「换个模型试试」这种话——那需要一次新的判断，
 > 而这个版本不打算在背后替用户做任何主张。
+>
+> **Benchmark measures the system. Benchmark does not control the system.（v2.3.0）**
+> Benchmark 回答「这条流水线现在表现如何」：**Benchmark measures the system.** 它
+> **不推荐** Variant 或模型、**不适应**输入、**不优化** Prompt 或参数、**不学策略**、
+> **不改生成行为**：**Benchmark does not control the system.** 要改行为，请去改配置再跑一次测量。
+> 更多边界：PASS 阈值只来自 Suite 自己（没有代码默认值，71 只是发布那份的选择）；一次执行
+> 落到终态后不可改写，Suite 要改就开新版本号；比较只摆两侧各自的事实与差值，不解释差异为什么
+> 发生；历史图只画盘上真实读出来的执行，**不编时间序列**；Baseline 只是会话期标签，不参与
+> 排序与计算；图表只有柱状、折线与分布三类，没有饼图、没有雷达图、没有加权总分。
+>
+> **v2.3.0 可宣传的能力**（英文原词）：Versioned Benchmark Suites · Benchmark Runner ·
+> Fixed Protocols · Benchmark History · Quality Metrics · Commercial Metrics ·
+> Reliability Metrics · Failure Distribution · Efficiency Metrics · CSV / JSON Export ·
+> Benchmark Dashboard。
 >
 > 后端没有任何为未实现能力预留的隐藏接口——没有的功能就没有入口。
 
@@ -978,6 +1013,14 @@ v1.4.0 起 Storyloop 只回答「哪一步失败了」，v1.9.0 把这件事往�
 | POST | `/api/projects/<id>/exports` | v2.2.0 新增：导出一篇稿件为 DOCX / EPUB |
 | GET | `/api/projects/<id>/exports/<exportId>` | v2.2.0 新增：下载已导出的文件（二进制） |
 | GET | `/api/projects/<id>/health` | v2.2.0 新增：项目健康结论（确定性，不调模型） |
+| GET | `/api/benchmarks/suites` | v2.3.0 新增：全部已存 Benchmark Suite 的摘要（含来源与许可） |
+| GET | `/api/benchmarks/suites/<id>` | v2.3.0 新增：某一版 Suite 全文；`?version=` 指定版本，缺省读最新版 |
+| GET | `/api/benchmarks/executions` | v2.3.0 新增：执行列表；`?suiteId=` 只看一份 Suite 的历史 |
+| POST | `/api/benchmarks/executions` | v2.3.0 新增：跑完一次执行（请求体只有 `suiteId` / `suiteVersion` / `label` / `allowLargeBenchmark`） |
+| GET | `/api/benchmarks/executions/<id>` | v2.3.0 新增：执行详情（头 + 样本 + 汇总）；`?compare=<另一个执行 id>` 带逐指标比较 |
+| GET | `/api/benchmarks/executions/<id>/export` | v2.3.0 新增：导出（`?format=json\|csv`）；同一份执行导出两次字节一致 |
+| POST | `/api/benchmarks/executions/<id>/baseline` | v2.3.0 新增：标记 / 取消标记基线（会话期标签，不参与排序与计算） |
+| GET | `/api/benchmarks/history` | v2.3.0 新增：历史图取数；`?suiteId=` 只看一份 Suite |
 
 Run 类路由的字段与错误码与 v2.1.0 逐字一致；工作区十二条路由是纯新增，
 字段级契约见 [docs/workspace.md](docs/workspace.md)。
@@ -1022,6 +1065,10 @@ HTTP 状态码仍然是 200（这是一次成功的业务结果，不是错误�
 | `EXPERIMENT_NOT_FOUND` | 404 | v1.7.0 新增：`experiment_id` 不存在 |
 | `EXPERIMENT_CONFLICT` | 409 | v1.7.0 新增：同名实验已存在、这份实验已经跑过（定义与结果都不可变），或它正在运行中 |
 | `ARTIFACT_WRITE_FAILED` | 500 | 产物写入失败（磁盘 / 权限 / 目录被占用） |
+| `BENCHMARK_INVALID` | 400 | v2.3.0 新增：Benchmark 请求体不合法、Suite 不合法、固定骨架缺文件、服务端没配模型或密钥、导出格式不认 |
+| `BENCHMARK_NOT_FOUND` | 404 | v2.3.0 新增：没有这个 Suite / 这次执行 |
+| `BENCHMARK_CONFLICT` | 409 | v2.3.0 新增：同一版本 Suite 正在跑；样本数超过安全线且没显式 `allowLargeBenchmark` |
+| `BENCHMARK_WRITE_FAILED` | 500 | v2.3.0 新增：Benchmark 数据写不进去（终态再写、目录不可写、磁盘满） |
 | `INTERNAL_ERROR` | 500 | 未预期异常；message 固定为「服务器内部错误」 |
 
 用户错误一律 4xx，运行时错误 5xx。响应里永远不出现堆栈与服务器绝对路径：异常文本会先过
@@ -1100,6 +1147,19 @@ mapped / NAT64 地址按内嵌的那个地址判
   但它不排名、不评选赢家、不做显著性检验、没有跨实验统计口径、没有评分回归集；
   一个定义里的样本总数上限 12（`variants` 1~4 × `repetitions` 1~5），变量只有
   `model` / `temperature` / `retry.maxAttempts` / `retry.minReviewScore` 四个
+- **Benchmark 不是排行榜**（v2.3.0）：它给的是「这份 Suite 在这次执行里量到了什么」。
+  没有 leaderboard、没有加权总分、没有「哪次跑得最好」的结论；执行列表与历史图里的顺序是
+  时间与 id，不是成绩，点也不按分数重排
+- **Benchmark 不做显著性检验**（v2.3.0）：比较只给两侧各自算出的事实与差值，没有 p 值 /
+  置信区间 / 效应量，也不解释差异为什么发生——协议固定的是输入条件，不是因果设计。
+  要因果结论请走受控实验（[docs/experiments.md](docs/experiments.md)）
+- **Benchmark 不改任何行为**（v2.3.0）：没有任何代码读一次执行的结果来决定重试、修订、
+  采纳、换模型或换 Prompt；Runner 与 Pipeline 之间只隔着「按顺序跑完这些样本」
+- **Benchmark 的样本数有安全线**（v2.3.0）：默认 30 条，超过要显式 `allowLargeBenchmark: true`，
+  硬上限 200 条（每一条样本都是一次完完整整的 Run，花的都是真实调用）。跑到一半被杀留下的
+  是如实记的 `partial`，不谎报 `completed`；再次开跑是从第一题重新开始
+- **Benchmark 不迁移、不搬动既有产物**（v2.3.0）：它只认自己的 Suite 与执行三件套，
+  已有的 Run 与实验原样可读，Benchmark 样例的正文、提示词与遥测仍然只在 `runs/<run_id>/` 里
 - **没有自动调参与自动搜索**：实验只执行你写下来的条件，不尝试新组合、不根据结果反推更好的
   参数、不优化 Prompt；同一份定义重跑会被 409 挡住（定义与结果都不可变）
 - **实验没有断点续跑**：跑到一半被杀，磁盘上留着前几格的进度（`GET` 看得见），但再次开跑是
@@ -1126,6 +1186,17 @@ mapped / NAT64 地址按内嵌的那个地址判
   这一版没有多模态、没有外部知识库、没有检索增强，也没有把任何未实现能力预埋成接口
 
 ## 升级说明
+
+v2.3.0 加上 **Benchmark Platform（基准测量平台）**，**不需要改任何代码、也不需要迁移任何产物**：
+Run 类路由、请求响应字段、CLI、错误码、`runs/` 下原有产物的布局与字段、界面全部与 2.2.0
+逐字一致，2.2.0 及更早写的 Run 原样可读。要紧的有四条：多一棵与 `runs/` 同级的产物树
+`benchmarks/`（Suite 原文入库，执行三件套不入库，与 `runs/` / `experiments/` 一样有 `.gitignore`
+规则）；多八条 `/api/benchmarks/**` 路由与四个 `BENCHMARK_*` 错误码；Benchmark 样例的
+`run-manifest.json` 上多一个可选的 `benchmark` 块（`benchmarkId` / `suiteId` / `suiteVersion` /
+`suiteDigest` / `caseId` / `repetition`），普通 Run 里这个键不出现；`GET /api/runs/<run_id>` 与
+Run 详情页的既有字段一个都没动。回滚到 2.2.0 的代价为零：多出来的树、字段与路由被旧版本整个忽略。
+契约见 [docs/benchmark.md](docs/benchmark.md)，题库来源与许可见
+[docs/benchmark-data.md](docs/benchmark-data.md)，逐版说明见 [docs/upgrade.md](docs/upgrade.md)。
 
 v2.2.0 加上 Creator Workspace，**不需要改任何代码、也不需要迁移任何产物**：Run 类路由、
 请求响应字段、CLI、错误码、`runs/` 下原有产物的布局与字段、界面全部与 2.1.0 逐字一致。
@@ -1416,7 +1487,19 @@ v2.2.0 的 Creator Workspace 另有十一个测试文件（同样只用假组件
 七条 route 的闭包里**都不许出现任何 HTTP 客户端**，另有真实跑全流程并用假 `fetch`
 计数确认一次外联都没发的行为测试）。
 
-全部测试合计 **110 个文件 / 1782 条**，全部只调用真实 LLM 之外的桩：
+v2.3.0 的 Benchmark Platform 另有八个测试文件（同样只用假组件与临时目录，不调真实接口）：
+`test_benchmark_suite`（Suite / Case / Protocol 的字段守卫、来源与许可必填、beatPlanRef 必须
+真的躺在 Suite 目录里、digest 由内容现算）、`test_benchmark_runner`（五步预检逐条挡住、
+样本顺序恒定、`partial` 如实落盘、超过安全线要显式确认）、
+`test_benchmark_store`（原子写、终态不可写、越界引用一律当不存在、版本比大小、
+盘上那份被手改坏时读不回来）、`test_benchmark_export`（CSV 转义与 BOM、JSON 四块、
+两种格式里都没有 baseUrl / 凭据 / 提示词原文 / 正文）、
+`test_benchmark_comparator`（只给两侧事实与差值、缺指标整行不出现、协议不同也允许比）、
+`test_benchmark_view`（界面文本口径：`82.5 · 3/4`、阈值 71 来自 Suite、没有趋势与排名字样）、
+`test_benchmark_api`（八条路由的字段、错误码与状态码）、
+`test_benchmark_dataset`（随仓库发布那份题库的来源与许可、什么内容永远不会进 Benchmark）。
+
+全部测试合计 **118 个文件 / 1911 条**，全部只调用真实 LLM 之外的桩：
 LLM 由注入的桩对象或 `FakeLLM` 替代（`tests/helpers/fixtures.ts`），
 `fetch` 也被桩掉。重试相关断言同样只用桩，从不触发真实模型调用。
 URL 校验的用例用注入的假解析器跑，不真的查 DNS，也不碰任何真实主机。
@@ -1440,6 +1523,8 @@ URL 校验的用例用注入的假解析器跑，不真的查 DNS，也不碰任
 | [docs/failure-analysis.md](docs/failure-analysis.md) | 失败分析契约（v1.9.0）：类别、优先级、证据指向、状态记法与边界 |
 | [docs/quality-stack.md](docs/quality-stack.md) | 统一质量视图契约（v2.1.0）：QualityDiagnostic 字段、三套 category 白名单、quality-stack.json 与 Quality Center |
 | [docs/workspace.md](docs/workspace.md) | Creator Workspace 契约（v2.2.0）：projects/ 产物布局、StoryDocument 字段、十二条工作区路由与健康信号 |
+| [docs/benchmark.md](docs/benchmark.md) | Benchmark Platform 契约（v2.3.0）：Suite / Case / Protocol、五步预检、22 个指标口径、不可变性、比较与历史、导出格式与内容边界、八条路由与四个错误码 |
+| [docs/benchmark-data.md](docs/benchmark-data.md) | Benchmark 题库的来源与许可（v2.3.0）：随仓库发布的 `storyloop-core` 1.0.0 三例、什么内容永远不会进 Benchmark、怎么加自己的 Suite |
 | [docs/cli.md](docs/cli.md) | CLI 命令、参数、退出码 |
 | [docs/upgrade.md](docs/upgrade.md) | 从 0.9.x / 1.0.0 升级到当前版本 |
 | [docs/compatibility.md](docs/compatibility.md) | 兼容性策略与扩展方式 |

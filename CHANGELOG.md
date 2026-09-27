@@ -91,6 +91,113 @@ All notable changes to Storyloop.
 
 ---
 
+## [2.3.0] —— 2026-09-28
+
+2.3.0 为 StoryLoop 增加正式 **Benchmark Platform（基准测量平台）**。固定且版本化的
+Benchmark Suite 可以按写死的协议、经同一条 Production Pipeline 批量执行，并统一汇总质量、
+商业可读性、可靠性、失败分布与效率指标，从而让 StoryLoop 能够持续、可复现地测量自身变化。
+
+**没有任何破坏性变更**：Run 类路由、请求响应字段、CLI、错误码、`runs/` 下原有产物的布局与
+字段、界面全部与 2.2.0 逐字一致，2.2.0 及更早写的 Run 原样可读。变的都是新增：一棵与
+`runs/` 同级的产物树 `benchmarks/`、八条 `/api/benchmarks/**` 路由、四个 `BENCHMARK_*`
+错误码、一个 Benchmark 界面入口（三页），以及 `run-manifest.json` 上一个可选的 `benchmark`
+块（普通 Run 里这个键不出现，那些 Run 不属于任何测量——不是错误，只是没有归属）。
+
+**它只测量，不控制**：Benchmark measures the system. Benchmark does not control the system.
+没有代码读一次执行的结果来决定重试、修订、采纳、换模型或换 Prompt。同样配置跑两次，数字
+不会逐字节一致——同样配置并不保证模型输出逐字节一致。
+
+### Added
+
+- **Versioned Benchmark Suites**：一份 Suite = 若干 Case + 一份 Protocol
+  （`repetitions` / `plannerMode` / `acceptedMetrics` / `failureHandling` / `passThreshold`），
+  入库落在 `benchmarks/suites/<suite_id>/<version>/suite.json`
+- **Benchmark Case and Protocol models**：Case 的 `beatPlanMode` 二选一——`regenerate`
+  （每个样本自己规划）或 `fixed`（共用一份骨架，`beatPlanRef` 必须指向 Suite 目录里真实
+  存在的文件）；`suiteDigest` / `protocolDigest` 由内容现算
+- **Benchmark preflight validation**：五步预检全部发生在任何一次 LLM 请求之前——服务端模型
+  与密钥、Suite 本身合法、固定骨架的文件都在、提示词角色齐全、样本数在安全线内
+  （默认 30 条，超过要显式 `allowLargeBenchmark: true`，硬上限 200 条）
+- **Benchmark execution through the production StoryLoop pipeline**：每个样本都是一次完完整整的
+  普通 Run（`pipeline.run()` / `runWithPlan()`），产物仍落在 `runs/<run_id>/`，Benchmark 只留
+  `runId` 这一根指针；顺序恒定——Suite 声明顺序 × 重复次数升序，不按任何成绩重排
+- **Benchmark provenance in Run Manifests**：`run-manifest.json` 上可选的 `benchmark` 块
+  （`benchmarkId` / `suiteId` / `suiteVersion` / `suiteDigest` / `caseId` / `repetition`）
+- **Quality, commercial, reliability, failure, and efficiency metrics**：22 个指标按注册表顺序
+  分五组（质量 / 商业可读性 / 可靠性 / 失败 / 效率）；均值只对「真的有值」的样本求，
+  `count` 是有值样本数而不是样本总数；没有的数就是没有——界面上是 `—`，导出里是空串，不补 0
+- **Deterministic benchmark aggregation**：`aggregate.json` 由已落盘的样本现算，不调用模型、
+  不重新评分；`failure_rate` 来自「这条样本跑成没有」这个事实本身
+- **Benchmark execution history**：`/benchmarks/history` 把每次执行摊成四个点（整体质量 /
+  商业可读性 / 失败率 / 平均耗时），点从盘上真实读出来的执行来，一个都没有就是空图——
+  不编时间序列
+- **Benchmark comparison view**：`?compare=<另一个执行 id>` 只给两侧各自算出的事实与差值，
+  不解释差异为什么发生；一侧没有某个指标（协议不同）时整行不出现，`base` 为 0 时相对差值是
+  null
+- **Benchmark Dashboard**：`/benchmarks`（套件与执行列表）、`/benchmarks/<id>`（执行详情与
+  比较）、`/benchmarks/history`（历史图）三页；图表只有柱状、折线与分布三类，
+  没有饼图、没有雷达图、没有加权总分
+- **CSV and JSON benchmark exports**：`GET /api/benchmarks/executions/<id>/export?format=json|csv`；
+  CSV 是一行一个 Case × Repetition（8 个身份列 + 22 个指标列，CRLF + UTF-8 BOM），
+  JSON 是快照 / 汇总 / 样本指标 / Run 引用四块加引用的那一版 Suite；同一份执行导出两次字节一致
+- **Suite and protocol digests**：历史执行记的是 `suiteId@suiteVersion` 与 `suiteDigest`，
+  Suite 要改就开新版本号
+- **Baseline 会话期标签**：`POST /api/benchmarks/executions/<id>/baseline` 只在本会话里标记
+  哪次执行是参照，不参与任何排序与计算
+- **Dataset provenance / licensing documentation**：随仓库发布的种子题库 `storyloop-core`
+  1.0.0 在 [docs/benchmark-data.md](docs/benchmark-data.md) 里写明来源（原创）、许可
+  （CC0-1.0）与再分发状态
+- **八条 additive 路由**：`GET /api/benchmarks/suites`、`GET /api/benchmarks/suites/<id>`、
+  `GET /api/benchmarks/executions`、`POST /api/benchmarks/executions`（跑完一次执行）、
+  `GET /api/benchmarks/executions/<id>`、`GET /api/benchmarks/executions/<id>/export`、
+  `POST /api/benchmarks/executions/<id>/baseline`、`GET /api/benchmarks/history`
+- **四个错误码**：`BENCHMARK_INVALID`（400）、`BENCHMARK_NOT_FOUND`（404）、
+  `BENCHMARK_CONFLICT`（409）、`BENCHMARK_WRITE_FAILED`（500）
+- **契约文档**：[docs/benchmark.md](docs/benchmark.md)（Suite / 协议 / 预检 / 指标 / 不可变性 /
+  比较 / 导出 / 接口 / 错误码）、README 的 Benchmark 一节与 API 表
+- **八个新测试文件**：`test_benchmark_suite`、`test_benchmark_runner`、`test_benchmark_store`、
+  `test_benchmark_export`、`test_benchmark_comparator`、`test_benchmark_view`、
+  `test_benchmark_api`、`test_benchmark_dataset`，全部只用替身与临时目录，不打任何真实付费 API
+
+### Changed
+
+- **Existing Experiment, Run Manifest, Telemetry, Failure Analysis, and Quality Stack
+  infrastructure are reused as Benchmark foundations**：执行三件套的落盘纪律（临时文件 +
+  重命名、终态不可写）与 `ExperimentStore` 同构；失败类别分布复用 v1.9.0 的 12 类清单；
+  比较与历史沿用 v1.7.0「只摆数字、不排名」的口径
+- **Benchmark samples remain normal StoryLoop Runs and retain full provenance**：正文、提示词、
+  遥测一个字都不搬到 Benchmark 这边；一条 Run 是被哪次测量、哪道题、第几次跑出来的，查得到
+- **Creator Workspace remains separate from automated benchmark execution**：Benchmark 的组装
+  走 `@/composition/benchmark`，与工作区那条路物理分开；Benchmark 不建项目、不建稿件，
+  工作区路由的依赖图里也不出现生成管线
+- **组合根按能力拆成三个模块**：`@/composition`（生成管线）、`@/composition/workspace`
+  （项目 / 稿件 / 导出 / 健康）与新增的 `@/composition/benchmark`（Suite / 执行 / 导出 /
+  比较 / 历史）。三边的路由都直接 import 自己那一个模块，`index.ts` 仍 re-export 全部符号
+  给 CLI 与嵌入方；Benchmark 这一边**没有**照工作区的样子再拆一层——它必须真的发起生成，
+  模型客户端本来就该在它的依赖图里
+
+### Security
+
+- **Benchmark definitions, executions, exports, and dashboards preserve existing secret-safe
+  serialization**：请求体里带 `apiKey` / `baseUrl` / 原始提示词形状的键一律 400；Suite 里混进
+  凭据键读回来就是 `null`；执行快照只留模型名与地址类别（`server-configured` /
+  `request-public-override`），提示词只留版本号与 SHA-256 摘要；两种导出格式里都没有 baseUrl、
+  凭据、提示词原文与生成正文
+- **Benchmark does not accept model, baseUrl, or key overrides from the request**：一次测量跑在
+  服务端配置上，跑之前由预检确认；也没有任何入口让一次执行去改另一条流水线的行为
+- **路径不许跑出 Suite 或执行目录**：`beatPlanRef` 越界（绝对路径、`..`、别的 Suite 目录）
+  一律当不存在；执行 id 与 Suite id 同一条形状规则，读不回来的是 `null`，写不进去的直接拒
+- **Benchmark dataset publication requires explicit provenance and licensing metadata**：
+  题库原文入库必须带来源与许可，随仓库发布的那份写明原创 + CC0-1.0；爬取来的作品、生成正文
+  与提示词原文永远不会进 Benchmark
+- **执行落到终态后任何再写入都拒绝**（`BENCHMARK_WRITE_FAILED`）：历史结果不许被后续一次运行
+  覆盖，中途被杀留下的 `partial` 如实落盘，不谎报 `completed`
+- 全仓其余边界（URL 关卡唯一实现、凭据隔离、文本净化、`process.env` 只在 Infrastructure
+  读取、响应不含绝对路径）逐字保留；Benchmark 复用同一条已存在的模型客户端与 URL 关卡，
+  没有第二个 HTTP 客户端
+
+---
+
 ## [2.1.0] —— 2026-09-27
 
 2.1.0 在 StoryLoop 2.0 平台架构上升级质量系统：Beat Validator、故事质量 Reviewer 与

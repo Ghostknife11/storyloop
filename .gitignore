@@ -22,6 +22,10 @@
 # creator workspace (v2.2.0: projects/<project_id>/ 含稿件正文与导出文件，由存储层生成，不入库)
 /projects/
 
+# benchmark measurements (v2.3.0: benchmarks/executions/<benchmark_id>/ 是每次测量的产物，不入库；
+# benchmarks/suites/ 是入库的题库原文——来源与许可见 docs/benchmark-data.md)
+/benchmarks/executions/
+
 # build
 /dist/
 /build/

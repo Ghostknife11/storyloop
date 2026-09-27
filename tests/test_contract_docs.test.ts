@@ -46,6 +46,14 @@ const DOCS = [
   "failure-analysis.md",
   // v2.0.0：平台架构的契约（六层职责、依赖方向、组合根、端口与适配器、安全边界）
   "architecture.md",
+  // v2.1.0：统一质量视图的契约（QualityDiagnostic 字段、三份 category 白名单、质量栈边界）
+  "quality-stack.md",
+  // v2.2.0：创作者工作区的契约（projects/ 布局、StoryDocument 字段、十二条路由、健康信号）
+  "workspace.md",
+  // v2.3.0：Benchmark Platform 的契约（Suite / 协议 / 预检 / 指标 / 不可变性 / 导出 / 路由）
+  "benchmark.md",
+  // v2.3.0：Benchmark 题库的来源与许可（发布那份 storyloop-core、什么内容永不进 Benchmark）
+  "benchmark-data.md",
 ] as const;
 
 /**
@@ -419,6 +427,168 @@ describe("v1.9.0 发布门禁 — 失败分析边界", () => {
     const text = read("docs/failure-analysis.md");
     for (const category of FAILURE_CATEGORIES) {
       expect(text, `docs/failure-analysis.md 应列出类别 ${category}`).toContain(category);
+    }
+  });
+});
+
+/**
+ * v2.3.0 发布门禁——Benchmark 边界（TASK §117/§118/§119/§120）。
+ *
+ * 这一版交付的是「能反复测量自己的平台」，README 必须把两件事都写清：
+ * 它能干什么（§119 十一项能力，英文原词），以及它绝不干什么（§120 九项禁止宣传 +
+ * 既有的保留能力清单）。少写任一边都会把边界说糊。
+ */
+/** §119 可宣传的十一项能力（英文原词，README 里要真的出现）。 */
+const BENCHMARK_CAPABILITIES = [
+  "Versioned Benchmark Suites",
+  "Benchmark Runner",
+  "Fixed Protocols",
+  "Benchmark History",
+  "Quality Metrics",
+  "Commercial Metrics",
+  "Reliability Metrics",
+  "Failure Distribution",
+  "Efficiency Metrics",
+  "CSV / JSON Export",
+  "Benchmark Dashboard",
+] as const;
+
+/** §120 禁止宣传的能力：README 一个都不许出现。 */
+const BENCHMARK_FORBIDDEN = [
+  "Adaptive Generation",
+  "Automatic Model Selection",
+  "Automatic Prompt Selection",
+  "Recommendation Engine",
+  "Policy Learning",
+  "Causal Graph",
+  "Failure Attribution Engine",
+  "Self Optimization",
+] as const;
+
+describe("v2.3.0 发布门禁 — Benchmark 边界", () => {
+  it("README 写清 Benchmark 定位：只测量，不控制", () => {
+    const readme = read("README.md");
+    // §117 定位句（中文那一版的关键片段）
+    expect(readme).toContain("Benchmark Platform");
+    expect(readme).toContain("同一套 Production Pipeline");
+    expect(readme).toContain("失败分布与效率指标");
+    // §118 两句必须逐字出现
+    expect(readme).toContain("Benchmark measures the system.");
+    expect(readme).toContain("Benchmark does not control the system.");
+    expect(readme).toContain("同样配置并不保证模型输出逐字节一致。");
+    // 五条「不」也要在 README 里，写松了就等于宣称它会自己改自己
+    for (const boundary of ["不推荐", "不适应", "不优化", "不学策略", "不改生成行为"]) {
+      expect(readme, `README 应写明「${boundary}」`).toContain(boundary);
+    }
+    // §119 十一项能力要真的在 README 里
+    for (const capability of BENCHMARK_CAPABILITIES) {
+      expect(readme, `README 应宣传「${capability}」`).toContain(capability);
+    }
+    // §120 与保留能力清单一个都不许出现
+    for (const forbidden of [...BENCHMARK_FORBIDDEN, ...RESERVED_CAPABILITIES]) {
+      expect(readme, `README 不应宣称「${forbidden}」`).not.toContain(forbidden);
+    }
+  });
+
+  it("README 点到 Benchmark 的产物、路由与错误码", () => {
+    const readme = read("README.md");
+    for (const token of [
+      "benchmarks/suites",
+      "benchmarks/executions",
+      "execution.json",
+      "samples.json",
+      "aggregate.json",
+      "suite.json",
+      "/api/benchmarks/suites",
+      "/api/benchmarks/executions",
+      "/api/benchmarks/history",
+      "BENCHMARK_INVALID",
+      "BENCHMARK_NOT_FOUND",
+      "BENCHMARK_CONFLICT",
+      "BENCHMARK_WRITE_FAILED",
+      "docs/benchmark.md",
+      "docs/benchmark-data.md",
+    ]) {
+      expect(readme, `README 应提到 ${token}`).toContain(token);
+    }
+  });
+
+  it("README 写清 Benchmark 的边界：阈值只来自 Suite、不编时间序列、不排名", () => {
+    const readme = read("README.md");
+    expect(readme).toContain("Benchmark 不是排行榜");
+    expect(readme).toContain("Benchmark 不做显著性检验");
+    expect(readme).toContain("Benchmark 不改任何行为");
+    expect(readme).toContain("不编时间序列");
+    expect(readme).toContain("71");
+  });
+
+  it("docs/benchmark.md 写死协议、指标口径、不可变性与输出边界", () => {
+    const text = read("docs/benchmark.md");
+    for (const token of [
+      "suite.json",
+      "execution.json",
+      "samples.json",
+      "aggregate.json",
+      "repetitions",
+      "plannerMode",
+      "acceptedMetrics",
+      "failureHandling",
+      "passThreshold",
+      "beatPlanRef",
+      "suiteDigest",
+      "protocolDigest",
+      "BENCHMARK_WRITE_FAILED",
+      "不补 0",
+      "不编时间序列",
+      "同样配置并不保证模型输出逐字节一致。",
+      "Benchmark measures the system.",
+      "Benchmark does not control the system.",
+    ]) {
+      expect(text, `docs/benchmark.md 应包含 ${token}`).toContain(token);
+    }
+    // 22 个指标的口径要写出来：界面上那个「3/4」的分母怎么来的
+    expect(text).toContain("22");
+    expect(text).toContain("count");
+  });
+
+  it("docs/benchmark-data.md 写死来源、许可与「什么内容永不进 Benchmark」", () => {
+    const text = read("docs/benchmark-data.md");
+    for (const token of [
+      "storyloop-core",
+      "1.0.0",
+      "CC0-1.0",
+      "original",
+      "license",
+      "再分发",
+      "crawler.py",
+      "novel_dataset",
+    ]) {
+      expect(text, `docs/benchmark-data.md 应包含 ${token}`).toContain(token);
+    }
+    // 四条硬约束要在文档里逐条出现
+    for (const boundary of ["不夹带正文", "不夹带提示词原文", "不夹带凭据与地址", "不夹带爬来的作品"]) {
+      expect(text, `docs/benchmark-data.md 应写明「${boundary}」`).toContain(boundary);
+    }
+  });
+
+  it("发布的那一份 Suite 真的在仓库里，且自带来源与许可", () => {
+    const suite = JSON.parse(
+      read("benchmarks/suites/storyloop-core/1.0.0/suite.json"),
+    ) as Record<string, unknown>;
+    expect(suite.id).toBe("storyloop-core");
+    expect(suite.version).toBe("1.0.0");
+    expect(Array.isArray(suite.cases)).toBe(true);
+    expect((suite.cases as unknown[]).length).toBeGreaterThan(0);
+    const source = suite.source as Record<string, unknown>;
+    expect(source.origin).toBe("original");
+    expect(String(source.license ?? suite.license ?? "")).toContain("CC0");
+    const protocol = suite.protocol as Record<string, unknown>;
+    expect(typeof protocol.passThreshold).toBe("number");
+    // 固定骨架那道题的骨架文件必须真的躺在 Suite 目录里
+    for (const raw of suite.cases as Record<string, unknown>[]) {
+      if (raw.beatPlanMode === "fixed") {
+        expect(existsSync(join(repoRoot(), "benchmarks", "suites", "storyloop-core", "1.0.0", String(raw.beatPlanRef)))).toBe(true);
+      }
     }
   });
 });
