@@ -23,6 +23,22 @@ import type { ModelSnapshot, ParameterSnapshot, PromptSnapshot } from "@/domain/
 export const BENCHMARK_EXECUTION_SCHEMA_VERSION = "1";
 
 /**
+ * 执行 id：单个目录名（存储布局就是 `executions/<id>/`）。
+ * 与 run_id 同一套形态约束——不合法的一律当「不存在」，不进路径解析。
+ */
+export const BENCHMARK_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+export function isBenchmarkId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value !== "." &&
+    value !== ".." &&
+    value.length <= 128 &&
+    BENCHMARK_ID_PATTERN.test(value)
+  );
+}
+
+/**
  * §44 一次执行的整体状态：
  *   completed —— 全部样本跑成；
  *   partial   —— 有跑成的也有失败的（130 条里 4 条失败仍然是 partial，不是失败）；

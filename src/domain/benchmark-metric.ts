@@ -199,7 +199,7 @@ export const BENCHMARK_METRIC_DEFINITIONS = [
     unit: "percent",
     aggregation: "rate",
     missingValue: "null",
-    source: "failure-analysis",
+    source: "run-metadata",
     definition: "整条样本失败的比例（样本失败 = 这条 Run 没跑成）",
   },
   // ---- 效率：只读 Telemetry（§77）----
