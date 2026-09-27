@@ -65,6 +65,13 @@ describe("§11 稳定错误码", () => {
       "EXPERIMENT_INVALID",
       "EXPERIMENT_NOT_FOUND",
       "EXPERIMENT_CONFLICT",
+      // v2.2.0：工作区的四个码。请求不合法是 INVALID，东西不在是 NOT_FOUND，
+      // **状态冲突是 CONFLICT（409）**：项目已被别处改过、Revision 基线对不上。
+      // 写盘失败不是 WORKSPACE_*：那是 ARTIFACT_WRITE_FAILED（500），磁盘坏了。
+      "WORKSPACE_INVALID",
+      "WORKSPACE_NOT_FOUND",
+      "WORKSPACE_CONFLICT",
+      "WORKSPACE_WRITE_FAILED",
       "INTERNAL_ERROR",
     ]);
     expect(new Set(API_ERROR_CODES).size).toBe(API_ERROR_CODES.length);

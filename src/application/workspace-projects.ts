@@ -110,10 +110,16 @@ export async function listProjects(deps: ProjectCaseDeps = {}): Promise<ProjectS
     const project = projects.readProject(id);
     if (project) summaries.push({ project: projectListItemOf(project), runCount: runCounts.get(id) ?? 0 });
   }
-  // 未归档的在前，再按更新时间倒序——回来先看到最近在写的那一个
+  // 未归档的在前，再按更新时间倒序——回来先看到最近在写的那一个。
+  // 时间戳打平时按 id 倒序收尾：比较器必须自洽（相等时两个方向都返回 1 会让
+  // 最终顺序取决于排序实现），而且 id 自带时间戳，倒序与"新的在前"同向。
   summaries.sort((a, b) => {
-    if (a.project.status !== b.project.status) return a.project.status === "archived" ? 1 : -1;
-    return a.project.updatedAt < b.project.updatedAt ? 1 : -1;
+    const left = a.project;
+    const right = b.project;
+    if (left.status !== right.status) return left.status === "archived" ? 1 : -1;
+    if (left.updatedAt !== right.updatedAt) return left.updatedAt < right.updatedAt ? 1 : -1;
+    if (left.id === right.id) return 0;
+    return left.id < right.id ? 1 : -1;
   });
   return summaries;
 }

@@ -99,6 +99,17 @@ export interface ExportOutcome {
 }
 
 /**
+ * 下载用的那一份：比 ExportOutcome 多一样——文件字节本身。
+ *
+ * 刻意单独一个类型：导出记录（列表、详情）从头到尾都不该带字节，
+ * 而下载路径非要不可。合成一个类型的话，迟早有一次"顺手把 outcome 序列化进 JSON"
+ * 会把整个 docx 塞进响应体。
+ */
+export interface ExportDownload extends ExportOutcome {
+  bytes: Uint8Array;
+}
+
+/**
  * 导出一次稿件。
  *
  * contentHash 记的是**稿件正文**的摘要，所以「这次导出对得上哪一版」有了答案：
@@ -160,7 +171,7 @@ export async function readExportArtifact(
   projectId: string,
   resultId: string,
   deps: ExportCaseDeps = {},
-): Promise<ExportOutcome | null> {
+): Promise<ExportDownload | null> {
   const { exports: exports_ } = resolve(deps);
   if (!isWorkspaceId(projectId) || !isWorkspaceId(resultId)) {
     throw new WorkspaceValidationError("项目 id 与导出 id 不合法：只能是单个目录名");
@@ -174,5 +185,6 @@ export async function readExportArtifact(
     download: contentDisposition(found.filename),
     mimeType: EXPORT_MIME[found.format],
     byteSize: bytes.length,
+    bytes,
   };
 }

@@ -27,6 +27,8 @@ import { WorkspaceNotFoundError, WorkspaceValidationError } from "@/domain/works
 import { DEFAULT_RETRY_POLICY } from "@/domain/retry-policy";
 import { FileDocumentRepository, DocumentHashError } from "@/infrastructure/storage/document-store";
 import { FileProjectRepository } from "@/infrastructure/storage/project-store";
+import type { DocumentRepository } from "@/ports/document-store";
+import type { ProjectRepository } from "@/ports/project-store";
 import { FileRevisionRepository, RevisionWriteError } from "@/infrastructure/storage/revision-store";
 import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
 import { generateRevisionId } from "@/infrastructure/id/workspace-id";
@@ -55,6 +57,36 @@ afterEach(() => {
 function roots(): { runs: string; projects: string } {
   tmp = mkdtempSync(join(tmpdir(), "storyloop-draft-"));
   return { runs: join(tmp, "runs"), projects: join(tmp, "projects") };
+}
+
+/**
+ * 只改列举顺序的稿件仓储：其余全部转交真实现。
+ *
+ * 列表顺序必须是**规则**决定的，不能是"磁盘恰好按什么顺序 readdir 回来"决定的。
+ * 现在的 FileDocumentRepository 自己按字典序返回，所以这条 seam 上换个顺序，
+ * 才能证明用例层真的排过序，而不是白捡了一个排好序的输入。
+ */
+class ReverseOrderDocuments implements DocumentRepository {
+  constructor(private readonly inner: FileDocumentRepository) {}
+  get root(): string { return this.inner.root; }
+  listDocumentIds(projectId: string): string[] { return [...this.inner.listDocumentIds(projectId)].reverse(); }
+  exists(projectId: string, documentId: string): boolean { return this.inner.exists(projectId, documentId); }
+  resolveDocumentsDir(projectId: string): string { return this.inner.resolveDocumentsDir(projectId); }
+  putDocument(document: Parameters<DocumentRepository["putDocument"]>[0]): void { this.inner.putDocument(document); }
+  deleteDocument(projectId: string, documentId: string): void { this.inner.deleteDocument(projectId, documentId); }
+  readDocument(projectId: string, documentId: string) { return this.inner.readDocument(projectId, documentId); }
+}
+
+/** 同上，项目版。 */
+class ReverseOrderProjects implements ProjectRepository {
+  constructor(private readonly inner: FileProjectRepository) {}
+  get root(): string { return this.inner.root; }
+  exists(projectId: string): boolean { return this.inner.exists(projectId); }
+  resolveProjectDir(projectId: string): string { return this.inner.resolveProjectDir(projectId); }
+  createProjectDirectory(projectId: string): string { return this.inner.createProjectDirectory(projectId); }
+  putProject(project: Parameters<ProjectRepository["putProject"]>[0]): void { this.inner.putProject(project); }
+  readProject(projectId: string) { return this.inner.readProject(projectId); }
+  listProjectIds(): string[] { return [...this.inner.listProjectIds()].reverse(); }
 }
 
 /** 一棵目录树的快照：相对路径 → 内容 + mtime。用来证明「一个字都没动」。 */
@@ -334,6 +366,28 @@ describe("项目名下的 Run 怎么来（§19 单一事实源）", () => {
     expect(snapshotTree(runs)).toEqual(before);
   });
 
+  it("时间戳打平时列表顺序仍然稳定：比较器是自洽的", async () => {
+    const { projects } = roots();
+    const projects_ = new FileProjectRepository(projects);
+    const deps = { projects: projects_, documents: new FileDocumentRepository(projects) };
+    // 固定时钟：一批项目的 updatedAt 一字不差。真实场景里同一毫秒连续建几个项目、
+    // 或者旧数据缺 updatedAt，都会走到这条路上。
+    const frozen = { now: () => new Date("2026-09-27T10:00:00.000Z") };
+    const made: string[] = [];
+    for (const name of ["甲", "乙", "丙", "丁", "戊", "己"]) {
+      made.push((await createProject({ name }, { ...deps, ...frozen })).id);
+    }
+
+    // id 倒序收尾（id 自带时间戳，倒序与「新的在前」同向）。不按建成顺序推期望值——
+    // 后缀是随机的，只按规则算。
+    const expected = [...made].sort((a, b) => (a < b ? 1 : -1));
+    expect((await listProjects({ ...deps, ...frozen })).map((item) => item.project.id)).toEqual(expected);
+
+    // 列举顺序反过来，结论不能变：顺序是用例排出来的，不是磁盘白送的
+    const reversed = new ReverseOrderProjects(projects_);
+    expect((await listProjects({ ...deps, projects: reversed, ...frozen })).map((item) => item.project.id)).toEqual(expected);
+  });
+
   it("归档一个项目只改 projects/：Run 的 Manifest 不改口，归档后仍归纳得到", async () => {
     const { runs, projects } = roots();
     const artifactStore = new ArtifactStore(runs);
@@ -473,6 +527,28 @@ describe("稿件保存与删除（§20/§48）", () => {
     expect(list.map((item) => item.id)).toEqual([newer.id, old.id]);
     expect(list.every((item) => !("content" in item))).toBe(true);
     expect(list[1].wordCount).toBe(wordCountOf("一二三"));
+  });
+
+  it("时间戳打平时稿件顺序仍然稳定：比较器是自洽的", async () => {
+    const { projects } = roots();
+    const projects_ = new FileProjectRepository(projects);
+    const documents = new FileDocumentRepository(projects);
+    const frozen = { now: () => new Date("2026-09-27T10:00:00.000Z") };
+    const deps = { projects: projects_, documents, ...frozen };
+    const project = await createProject({ name: "p" }, { projects: projects_, ...frozen });
+    // 同一毫秒建的几篇：updatedAt 一字不差
+    const made: string[] = [];
+    for (const title of ["一", "二", "三", "四", "五", "六"]) {
+      made.push((await createDocument(project.id, { title, content: "正文" }, deps)).id);
+    }
+
+    // id 倒序收尾；后缀随机，所以按规则算期望值，不按建成顺序推
+    const expected = [...made].sort((a, b) => (a < b ? 1 : -1));
+    expect((await listDocuments(project.id, deps)).map((item) => item.id)).toEqual(expected);
+
+    // 列举顺序反过来，结论不能变
+    const reversed = new ReverseOrderDocuments(documents);
+    expect((await listDocuments(project.id, { ...deps, documents: reversed })).map((item) => item.id)).toEqual(expected);
   });
 
   it("getDocument / listDocuments 对不存在的项目是 404，对不合法 id 是 400——都不是 500", async () => {

@@ -280,7 +280,13 @@ export async function listDocuments(projectId: string, deps: DocumentCaseDeps = 
     const document = documents.readDocument(projectId, id);
     if (document) summaries.push(summaryOf(document));
   }
-  summaries.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+  // 新的在前；时间戳打平时按 id 倒序收尾。比较器得自洽：相等时两个方向都
+  // 返回 1 会让最终顺序取决于排序实现，同一个项目刷新两次列表顺序会变。
+  summaries.sort((a, b) => {
+    if (a.updatedAt !== b.updatedAt) return a.updatedAt < b.updatedAt ? 1 : -1;
+    if (a.id === b.id) return 0;
+    return a.id < b.id ? 1 : -1;
+  });
   return summaries;
 }
 

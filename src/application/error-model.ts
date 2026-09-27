@@ -22,6 +22,12 @@ import {
   ExperimentStateError,
   ExperimentValidationError,
 } from "@/domain/experiment";
+import {
+  WorkspaceConflictError,
+  WorkspaceNotFoundError,
+  WorkspaceStateError,
+  WorkspaceValidationError,
+} from "@/domain/workspace";
 
 /** §11 稳定错误码。新增错误必须复用这里的码，不允许每个路由自造字符串。 */
 export const API_ERROR_CODES = [
@@ -44,6 +50,14 @@ export const API_ERROR_CODES = [
   "EXPERIMENT_INVALID",
   "EXPERIMENT_NOT_FOUND",
   "EXPERIMENT_CONFLICT",
+  // v2.2.0：Creator Workspace 的四个码。与实验那三个同构，就是换了一组类——
+  // 请求体不合法 400、项目或稿件不存在 404、状态不许这么改 409、落盘失败 500。
+  // 落盘刻意不复用 ARTIFACT_WRITE_FAILED：那个码描述的是 Run 产物，
+  // 而这里写的是项目/稿件/导出，用户该知道自己改的是哪一类东西坏了。
+  "WORKSPACE_INVALID",
+  "WORKSPACE_NOT_FOUND",
+  "WORKSPACE_CONFLICT",
+  "WORKSPACE_WRITE_FAILED",
   "INTERNAL_ERROR",
 ] as const;
 
@@ -121,6 +135,13 @@ const USER_ERROR_NAMES = new Set([
   "BeatValidationValidationError",
 ]);
 
+/**
+ * v2.2.0 Workspace 的写盘失败。按名字而不是按类型：这三个类分居 Domain 之外，
+ * 而 error-model 是 Application 层，向下 import Infrastructure 的具体类会把
+ * 依赖方向倒过来（§37：这里只认识错误形状，不认识存储）。
+ */
+const WORKSPACE_WRITE_ERRORS = new Set(["DocumentWriteError", "DocumentHashError", "RevisionWriteError", "ExportWriteError"]);
+
 /** §12 把已抛出的异常映射成统一错误；未知异常按内部错误处理，消息不带堆栈。 */
 export function toApiError(e: unknown): ApiError {
   if (e instanceof ApiError) return e;
@@ -179,6 +200,21 @@ export function toApiError(e: unknown): ApiError {
   }
   if (e instanceof ExperimentStateError) {
     return new ApiError("EXPERIMENT_CONFLICT", safeText(e.message), 409);
+  }
+  // v2.2.0 Workspace 的四个码。按 instanceof 而不是按 name：这四个类分别在
+  // Domain（三个判定错）与 Infrastructure（三个写盘错），分布太散，认名字容易漏。
+  if (e instanceof WorkspaceValidationError) {
+    return new ApiError("WORKSPACE_INVALID", safeText(e.message), 400);
+  }
+  if (e instanceof WorkspaceNotFoundError) {
+    return new ApiError("WORKSPACE_NOT_FOUND", safeText(e.message), 404);
+  }
+  if (e instanceof WorkspaceConflictError || e instanceof WorkspaceStateError) {
+    return new ApiError("WORKSPACE_CONFLICT", safeText(e.message), 409);
+  }
+  // 落盘失败。这三个类的 message 本来就只有文件名与错误码（§67），过 safeText 只是再兜一层
+  if (WORKSPACE_WRITE_ERRORS.has(e instanceof Error ? e.name : "")) {
+    return new ApiError("WORKSPACE_WRITE_FAILED", safeText((e as Error).message), 500);
   }
   // 具体类型都没命中，才退回 PipelineError 的阶段壳：阶段能定位，但不值得单独一个码。
   if (e instanceof PipelineError) {

@@ -127,6 +127,14 @@ const ROUTES: ReadonlyArray<readonly [string, string]> = [
   ["api/experiments", "POST,GET"],
   ["api/experiments/[experiment_id]", "GET"],
   ["api/experiments/[experiment_id]/run", "POST"],
+  // v2.2.0 TASK §30/§31/§32：创作者工作区的七条入口（项目、稿件、导出、健康）
+  ["api/projects", "GET,POST"],
+  ["api/projects/[id]", "GET,PATCH"],
+  ["api/projects/[id]/documents", "GET,POST"],
+  ["api/projects/[id]/documents/[docId]", "GET,PATCH"],
+  ["api/projects/[id]/exports", "GET,POST"],
+  ["api/projects/[id]/exports/[exportId]", "GET"],
+  ["api/projects/[id]/health", "GET"],
 ];
 
 function post(path: string, payload: unknown) {
@@ -172,7 +180,7 @@ function runDeps(llm: FakeLLM, beatValidation?: BeatValidationV2Result) {
 }
 
 describe("v1.0.0 API 冻结 — 错误契约", () => {
-  it("错误码白名单恰好是十六种", () => {
+  it("错误码白名单恰好是二十种", () => {
     expect([...API_ERROR_CODES].sort()).toEqual(
       [
         "ARTIFACT_WRITE_FAILED",
@@ -192,6 +200,11 @@ describe("v1.0.0 API 冻结 — 错误契约", () => {
         "REVIEW_FAILED",
         "RUN_NOT_FOUND",
         "VALIDATION_FAILED_INTERNAL",
+        // v2.2.0：工作区的四个码，见 src/application/error-model.ts
+        "WORKSPACE_CONFLICT",
+        "WORKSPACE_INVALID",
+        "WORKSPACE_NOT_FOUND",
+        "WORKSPACE_WRITE_FAILED",
       ],
     );
   });
