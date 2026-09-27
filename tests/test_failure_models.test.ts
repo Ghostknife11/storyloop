@@ -5,8 +5,8 @@ import {
   failureAnalysisOf,
   isFailureCategory,
   validateFailureAnalysis,
-} from "@/types/failure-analysis";
-import type { FailureAnalysisResult } from "@/types/failure-analysis";
+} from "@/domain/failure-analysis";
+import type { FailureAnalysisResult } from "@/domain/failure-analysis";
 
 function sample(): FailureAnalysisResult {
   return {

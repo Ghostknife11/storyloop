@@ -1,16 +1,17 @@
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ExperimentRunner } from "@/core/experiment-runner";
-import { ArtifactStore } from "@/storage/artifact-store";
-import { ExperimentStore } from "@/storage/experiment-store";
-import type { ExperimentDefinition } from "@/types/experiment";
-import { LLMError, LLMRequestError } from "@/lib/llm";
-import { summarizeExperiment } from "@/lib/experiment-summary";
-import { failureDistributionText, resultRowsOf } from "@/lib/experiment-view";
-import type { ExperimentDetailApi } from "@/lib/api";
-import { SAMPLE_BEAT_PLAN, withTmpDir } from "./helpers/fixtures";
-import type { StoryConfig } from "@/types/story-config";
+import { ExperimentRunner } from "@/analysis/experiment-runner";
+import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
+import { ExperimentStore } from "@/infrastructure/storage/experiment-store";
+import type { ExperimentDefinition } from "@/domain/experiment";
+import { buildPipeline } from "@/application/generate-service";
+import { LLMError, LLMRequestError } from "@/infrastructure/llm/openai-compatible-llm-client";
+import { summarizeExperiment } from "@/analysis/experiment-summary";
+import { failureDistributionText, resultRowsOf } from "@/interface/experiment-view";
+import type { ExperimentDetailApi } from "@/interface/api";
+import { SAMPLE_BEAT_PLAN, experimentDeps, withTmpDir } from "./helpers/fixtures";
+import type { StoryConfig } from "@/domain/story-config";
 
 /**
  * v1.9.0 §52 实验级失败类别分布。
@@ -132,7 +133,7 @@ describe("v1.9.0 实验级失败类别分布", () => {
       BEAT_VALIDATION,
       new LLMRequestError("上游 502", 502),
     ]);
-    const result = await new ExperimentRunner({ llm: llm as never }).run(seed(dir, "exp-dist"));
+    const result = await new ExperimentRunner({ llm: llm as never, generate: buildPipeline, ...experimentDeps() }).run(seed(dir, "exp-dist"));
 
     const [a, b] = result.summary.variants;
     expect(result.status).toBe("partial");
@@ -165,7 +166,7 @@ describe("v1.9.0 实验级失败类别分布", () => {
       BEAT_VALIDATION,
       new LLMError("上游 502"), // 未知错误名：码留下来，按已知阶段降级
     ]);
-    const result = await new ExperimentRunner({ llm: llm as never }).run(seed(dir, "exp-unknown"));
+    const result = await new ExperimentRunner({ llm: llm as never, generate: buildPipeline, ...experimentDeps() }).run(seed(dir, "exp-unknown"));
 
     const [, b] = result.summary.variants;
     const analysis = new ArtifactStore("runs").readFailureAnalysis(
@@ -182,7 +183,7 @@ describe("v1.9.0 实验级失败类别分布", () => {
   it("results.json 落盘的就是这份分布（界面与磁盘同源）", async () => {
     const dir = withTmpDir();
     const llm = scriptedLLM([...variantScript(STORY, 90), ...variantScript(STORY, 82)]);
-    const result = await new ExperimentRunner({ llm: llm as never }).run(seed(dir, "exp-persist"));
+    const result = await new ExperimentRunner({ llm: llm as never, generate: buildPipeline, ...experimentDeps() }).run(seed(dir, "exp-persist"));
 
     const stored = JSON.parse(
       readFileSync(join(dir, "experiments", "exp-persist", "results.json"), "utf8"),
@@ -202,7 +203,7 @@ describe("v1.9.0 实验级失败类别分布", () => {
       new LLMRequestError("上游 502", 502),
     ]);
     const definition = seed(dir, "exp-legacy");
-    const result = await new ExperimentRunner({ llm: llm as never }).run(definition);
+    const result = await new ExperimentRunner({ llm: llm as never, generate: buildPipeline, ...experimentDeps() }).run(definition);
 
     // 把 A 组那条样本的分析文件删掉：模拟 1.9.0 之前跑出来的 Run
     const store = new ArtifactStore("runs");
@@ -247,7 +248,7 @@ describe("resultRowsOf 的失败分布兜底", () => {
     const dir = withTmpDir();
     const llm = scriptedLLM([...variantScript(STORY, 90), ...variantScript(STORY, 82)]);
     const definition = seed(dir, "exp-old");
-    const result = await new ExperimentRunner({ llm: llm as never }).run(definition);
+    const result = await new ExperimentRunner({ llm: llm as never, generate: buildPipeline, ...experimentDeps() }).run(definition);
 
     // 手工抹掉 results.json 里的 failures 块：复现 1.9.0 之前落盘的结果
     const path = join(dir, "experiments", "exp-old", "results.json");
@@ -276,7 +277,7 @@ describe("resultRowsOf 的失败分布兜底", () => {
       new LLMRequestError("上游 502", 502),
     ]);
     const definition = seed(dir, "exp-new");
-    await new ExperimentRunner({ llm: llm as never }).run(definition);
+    await new ExperimentRunner({ llm: llm as never, generate: buildPipeline, ...experimentDeps() }).run(definition);
 
     const detail = {
       definition,

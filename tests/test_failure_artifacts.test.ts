@@ -2,16 +2,16 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GenerationPipeline } from "@/core/pipeline";
-import { DEFAULT_RETRY_POLICY } from "@/core/retry-policy";
-import { ArtifactStore } from "@/storage/artifact-store";
-import { analyzeStoredRun } from "@/lib/failure-analysis-service";
-import { validateStoryConfig, type StoryConfig } from "@/types/story-config";
-import { validateBeatPlan, type BeatPlan } from "@/types/beat-plan";
-import type { ReviewResult } from "@/types/review-result";
-import type { ValidationResult } from "@/types/validation-result";
-import type { RepairRequest, RepairResult } from "@/types/repair";
-import type { FailureAnalysisResult, FailureEvidence } from "@/types/failure-analysis";
+import { GenerationPipeline } from "@/engine/pipeline";
+import { DEFAULT_RETRY_POLICY } from "@/engine/retry-policy";
+import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
+import { analyzeStoredRun, failureAnalyzerFor } from "@/analysis/failure-analysis-service";
+import { validateStoryConfig, type StoryConfig } from "@/domain/story-config";
+import { validateBeatPlan, type BeatPlan } from "@/domain/beat-plan";
+import type { ReviewResult } from "@/domain/review-result";
+import type { ValidationResult } from "@/domain/validation-result";
+import type { RepairRequest, RepairResult } from "@/domain/repair";
+import type { FailureAnalysisResult, FailureEvidence } from "@/domain/failure-analysis";
 import { repoRoot } from "./helpers/fixtures";
 
 /**
@@ -82,15 +82,16 @@ function pipelineOf(
   policy = DEFAULT_RETRY_POLICY,
   rep?: { repair: (r: RepairRequest) => Promise<RepairResult> },
 ) {
+  const store = new ArtifactStore();
   return new GenerationPipeline(
     { plan: async () => plan } as never,
     gen as never,
     val as never,
     rev as never,
-    new ArtifactStore(),
+    store,
     policy,
     rep as never,
-  );
+  ).withFailureAnalyzer(failureAnalyzerFor(store));
 }
 
 function analysisOf(dir: string, runId: string): FailureAnalysisResult {

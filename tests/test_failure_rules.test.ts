@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CATEGORY_LABELS } from "@/types/failure-analysis";
+import { CATEGORY_LABELS } from "@/domain/failure-analysis";
 import {
   CATEGORY_PRIORITY,
   FAILURE_RULES,
@@ -8,14 +8,14 @@ import {
   codesOfCategory,
   errorCodesOf,
   sourceOfIssueCode,
-} from "@/lib/failure-rules";
-import { PipelineError } from "@/core/pipeline";
-import { ArtifactWriteError } from "@/storage/artifact-store";
-import { UnsafeRequestUrlError } from "@/lib/url-guard";
-import { LLMTimeoutError } from "@/lib/llm";
-import { VALIDATION_ISSUE_CODES } from "@/types/validation-result";
-import { BEAT_VALIDATION_ISSUE_CODES } from "@/types/beat-validation";
-import { FAILURE_CATEGORIES } from "@/types/failure-analysis";
+} from "@/analysis/failure-rules";
+import { PipelineError } from "@/engine/pipeline";
+import { ArtifactWriteError } from "@/infrastructure/storage/artifact-store";
+import { UnsafeRequestUrlError } from "@/infrastructure/security/url-guard";
+import { LLMTimeoutError } from "@/infrastructure/llm/openai-compatible-llm-client";
+import { VALIDATION_ISSUE_CODES } from "@/domain/validation-result";
+import { BEAT_VALIDATION_ISSUE_CODES } from "@/domain/beat-validation";
+import { FAILURE_CATEGORIES } from "@/domain/failure-analysis";
 
 describe("v1.9.0 §43 类别映射（集中规则表）", () => {
   it("TASK §43 点名的七条映射逐条对上", () => {

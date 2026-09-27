@@ -3,9 +3,9 @@ import {
   expandExperiment,
   mergeOverrides,
   type EffectiveRunConfig,
-} from "@/core/experiment-config";
-import { validateExperimentDefinition } from "@/types/experiment";
-import { DEFAULT_RETRY_POLICY } from "@/core/retry-policy";
+} from "@/engine/experiment-config";
+import { validateExperimentDefinition } from "@/domain/experiment";
+import { DEFAULT_RETRY_POLICY } from "@/engine/retry-policy";
 import { SAMPLE_BEAT_PLAN, SAMPLE_CONFIG } from "./helpers/fixtures";
 
 /**

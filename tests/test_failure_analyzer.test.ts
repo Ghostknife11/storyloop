@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { FailureAnalyzer } from "@/core/failure-analyzer";
-import { FAILURE_ANALYSIS_SCHEMA_VERSION } from "@/types/failure-analysis";
-import type { FailureAnalysisInput } from "@/types/failure-analysis";
-import type { BeatValidationResult } from "@/types/beat-validation";
-import type { ValidationResult } from "@/types/validation-result";
-import type { QualityDimensions } from "@/types/quality-dimensions";
-import type { CommercialReviewResult } from "@/types/commercial-review";
-import type { RunTelemetry } from "@/types/telemetry";
+import { FailureAnalyzer } from "@/analysis/failure-analyzer";
+import { FAILURE_ANALYSIS_SCHEMA_VERSION } from "@/domain/failure-analysis";
+import type { FailureAnalysisInput } from "@/domain/failure-analysis";
+import type { BeatValidationResult } from "@/domain/beat-validation";
+import type { ValidationResult } from "@/domain/validation-result";
+import type { QualityDimensions } from "@/domain/quality-dimensions";
+import type { CommercialReviewResult } from "@/domain/commercial-review";
+import type { RunTelemetry } from "@/domain/telemetry";
 
 /** 一次「跑成了、也被采纳」的干净 Run：每个用例在这之上改一项。 */
 function clean(): FailureAnalysisInput {
@@ -361,10 +361,10 @@ describe("v1.9.0 §50 分析器不产生任何 LLM 调用", () => {
   it("模块源码里没有任何 llm / fetch / http 依赖", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
-      new URL("../src/core/failure-analyzer.ts", import.meta.url),
+      new URL("../src/analysis/failure-analyzer.ts", import.meta.url),
       "utf8",
     );
-    expect(source).not.toMatch(/from "@\/lib\/llm"|fetch\(|https?:\/\//);
+    expect(source).not.toMatch(/from "@\/infrastructure\/llm"|fetch\(|https?:\/\//);
   });
 
   it("analyze 是同步方法：同样的输入不需要 await 也能拿到结论", () => {

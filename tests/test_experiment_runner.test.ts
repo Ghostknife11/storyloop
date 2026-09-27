@@ -1,16 +1,18 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ExperimentRunner } from "@/core/experiment-runner";
-import { ArtifactStore } from "@/storage/artifact-store";
-import { ExperimentStore } from "@/storage/experiment-store";
-import { ExperimentValidationError, type ExperimentDefinition } from "@/types/experiment";
-import { LLMError } from "@/lib/llm";
+import { ExperimentRunner } from "@/analysis/experiment-runner";
+import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
+import { ExperimentStore } from "@/infrastructure/storage/experiment-store";
+import { ExperimentValidationError, type ExperimentDefinition } from "@/domain/experiment";
+import { buildPipeline } from "@/application/generate-service";
+import { LLMError } from "@/infrastructure/llm/openai-compatible-llm-client";
 import {
+  experimentDeps,
   withTmpDir,
   SAMPLE_BEAT_PLAN,
 } from "./helpers/fixtures";
-import type { StoryConfig } from "@/types/story-config";
+import type { StoryConfig } from "@/domain/story-config";
 
 /**
  * v1.7.0 ExperimentRunner：把一份定义跑成一组 Run，再落成实验结果。
@@ -143,7 +145,7 @@ describe("ExperimentRunner — 完整跑完", () => {
     const dir = withTmpDir();
     const llm = scriptedLLM([...variantScript(STORY, 90), ...variantScript(STORY, 82)]);
     const definition = seed(dir, "exp-full", 1);
-    const runner = new ExperimentRunner({ llm: llm as never });
+    const runner = new ExperimentRunner({ llm: llm as never, generate: buildPipeline, ...experimentDeps() });
 
     const result = await runner.run(definition);
     expect(result.status).toBe("completed");
@@ -163,7 +165,7 @@ describe("ExperimentRunner — 完整跑完", () => {
     const dir = withTmpDir();
     const llm = scriptedLLM([...variantScript(STORY, 90), ...variantScript(STORY, 82)]);
     const definition = seed(dir, "exp-manifest", 1);
-    const result = await new ExperimentRunner({ llm: llm as never }).run(definition);
+    const result = await new ExperimentRunner({ llm: llm as never, generate: buildPipeline, ...experimentDeps() }).run(definition);
 
     const artifacts = new ArtifactStore("runs");
     const provenances = result.runs.map((ref) => {
@@ -184,7 +186,7 @@ describe("ExperimentRunner — 完整跑完", () => {
     const dir = withTmpDir();
     // 结构审阅四维 90 / 90 / 90 / 90 → 整体 90；商业四维 82 → 82
     const llm = scriptedLLM([...variantScript(STORY, 90), ...variantScript(STORY, 82)]);
-    const result = await new ExperimentRunner({ llm: llm as never }).run(seed(dir, "exp-scores", 1));
+    const result = await new ExperimentRunner({ llm: llm as never, generate: buildPipeline, ...experimentDeps() }).run(seed(dir, "exp-scores", 1));
 
     expect(result.runs.map((r) => r.overallScore)).toEqual([90, 82]);
     expect(result.runs.map((r) => r.commercialScore)).toEqual([90, 82]);
@@ -206,7 +208,7 @@ describe("ExperimentRunner — 部分失败", () => {
       BEAT_VALIDATION,
       new LLMError("上游 502"),
     ]);
-    const result = await new ExperimentRunner({ llm: llm as never }).run(seed(dir, "exp-partial", 1));
+    const result = await new ExperimentRunner({ llm: llm as never, generate: buildPipeline, ...experimentDeps() }).run(seed(dir, "exp-partial", 1));
 
     expect(result.status).toBe("partial");
     // 两条样本都建出了 Run：一条完成，一条死在生成阶段
@@ -239,7 +241,7 @@ describe("ExperimentRunner — 部分失败", () => {
       BEAT_VALIDATION,
       new LLMError("上游 502"),
     ]);
-    const result = await new ExperimentRunner({ llm: llm as never }).run(seed(dir, "exp-mean", 1));
+    const result = await new ExperimentRunner({ llm: llm as never, generate: buildPipeline, ...experimentDeps() }).run(seed(dir, "exp-mean", 1));
 
     const [a, b] = result.summary.variants;
     expect(a.meanOverallScore).toBe(90);
@@ -278,7 +280,7 @@ describe("ExperimentRunner — 定义校验", () => {
     const definition = seed(dir, "exp-broken", 1);
     (definition as { repetitions: number }).repetitions = 9;
     const llm = scriptedLLM([]);
-    await expect(new ExperimentRunner({ llm: llm as never }).run(definition)).rejects.toThrow(
+    await expect(new ExperimentRunner({ llm: llm as never, generate: buildPipeline, ...experimentDeps() }).run(definition)).rejects.toThrow(
       ExperimentValidationError,
     );
     // 一个请求都没发出去

@@ -1,32 +1,34 @@
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GenerationPipeline, PipelineError } from "@/core/pipeline";
-import { ExperimentRunner } from "@/core/experiment-runner";
-import { ExperimentStore } from "@/storage/experiment-store";
-import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "@/core/retry-policy";
-import { ArtifactStore } from "@/storage/artifact-store";
-import { BeatPlanner } from "@/lib/beat-planner";
-import { StoryGenerator } from "@/lib/story-generator";
-import { StoryRepairer } from "@/lib/story-repairer";
-import { StoryValidator } from "@/lib/story-validator";
-import { BasicReviewer } from "@/lib/basic-reviewer";
-import { BeatValidator } from "@/lib/beat-validator";
-import { CommercialReviewer } from "@/lib/commercial-reviewer";
-import { TelemetryCollector } from "@/core/telemetry-collector";
-import { LLMClient } from "@/lib/llm";
-import { summarizeExperiment } from "@/lib/experiment-summary";
-import { stageLabel, telemetryPanelState } from "@/lib/telemetry-view";
-import type { ExperimentDefinition } from "@/types/experiment";
+import { GenerationPipeline, PipelineError } from "@/engine/pipeline";
+import { ExperimentRunner } from "@/analysis/experiment-runner";
+import { ExperimentStore } from "@/infrastructure/storage/experiment-store";
+import { DEFAULT_RETRY_POLICY, type RetryPolicy } from "@/engine/retry-policy";
+import { ArtifactStore } from "@/infrastructure/storage/artifact-store";
+import { BeatPlanner } from "@/engine/beat-planner";
+import { StoryGenerator } from "@/engine/story-generator";
+import { StoryRepairer } from "@/engine/story-repairer";
+import { StoryValidator } from "@/engine/story-validator";
+import { BasicReviewer } from "@/engine/basic-reviewer";
+import { BeatValidator } from "@/engine/beat-validator";
+import { CommercialReviewer } from "@/engine/commercial-reviewer";
+import { TelemetryCollector } from "@/infrastructure/telemetry/telemetry-collector";
+import { LLMClient } from "@/infrastructure/llm/openai-compatible-llm-client";
+import { summarizeExperiment } from "@/analysis/experiment-summary";
+import { stageLabel, telemetryPanelState } from "@/interface/telemetry-view";
+import { buildPipeline } from "@/application/generate-service";
+import type { ExperimentDefinition } from "@/domain/experiment";
 import {
   SAMPLE_BEAT_PLAN,
   SAMPLE_COMMERCIAL_REVIEW,
   SAMPLE_CONFIG,
   SAMPLE_REVIEW,
   SAMPLE_STORY,
+  experimentDeps,
   withTmpDir,
 } from "./helpers/fixtures";
-import type { RunTelemetry } from "@/types/telemetry";
+import type { RunTelemetry } from "@/domain/telemetry";
 
 /**
  * v1.8.0 Observability 的行为测试（TASK §35-§44）。
@@ -707,7 +709,7 @@ describe("§44 实验样本：每个子 Run 都有自己的 telemetry.json", () 
     store.createExperimentDirectory("exp-telemetry");
     store.putDefinition("exp-telemetry", definition as unknown as ExperimentDefinition);
 
-    const result = await new ExperimentRunner({ artifactStore: new ArtifactStore("runs") }).run(
+    const result = await new ExperimentRunner({ generate: buildPipeline, ...experimentDeps() }).run(
       store.readDefinition("exp-telemetry") as ExperimentDefinition,
     );
 
@@ -756,7 +758,7 @@ describe("§44 实验样本：每个子 Run 都有自己的 telemetry.json", () 
     store.createExperimentDirectory("exp-telemetry-fail");
     store.putDefinition("exp-telemetry-fail", definition as unknown as ExperimentDefinition);
 
-    const result = await new ExperimentRunner({ artifactStore: new ArtifactStore("runs") }).run(
+    const result = await new ExperimentRunner({ generate: buildPipeline, ...experimentDeps() }).run(
       store.readDefinition("exp-telemetry-fail") as ExperimentDefinition,
     );
 
